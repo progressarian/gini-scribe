@@ -1,6 +1,6 @@
 import pool from "../../config/db.js";
 import { advanceStatus, budgetColour, returnToQueue } from "./statusEngine.js";
-import { getSlaConfig, budgetLookup } from "./board.js";
+import { getSlaConfig, budgetLookup, getTestsPlacements } from "./board.js";
 import { buildCard } from "./medicineCard.js";
 import { buildCounsellingNote } from "./counsellingNote.js";
 import { stoppedToday } from "./pharmacyStation.js";
@@ -121,13 +121,21 @@ const toRow = (row, budgetFor, now) => {
 };
 
 export async function getRxQueue(visitDate, q = null, now = new Date(), db = pool) {
-  const budgetFor = budgetLookup(await getSlaConfig(db));
   const search = q && String(q).trim().length >= 2 ? String(q).trim() : null;
 
-  const [{ rows: open }, { rows: done }] = await Promise.all([
+  const [sla, { rows: queued }, { rows: done }, echoHandovers] = await Promise.all([
+    getSlaConfig(db),
     db.query(QUEUE_SQL, [visitDate, QUEUE_STATUSES, LAB_ONLY_DOCTOR, search]),
     db.query(QUEUE_SQL, [visitDate, DONE_STATUSES, LAB_ONLY_DOCTOR, search]),
+    getEchoHandovers(visitDate, search, db),
   ]);
+  const budgetFor = budgetLookup(sla);
+  const testsFirst = await getTestsPlacements(
+    queued.filter((r) => r.current_status !== "with_rx").map((r) => r.visit_id),
+    now,
+    db,
+  );
+  const open = queued.filter((r) => !testsFirst.get(r.visit_id));
 
   const holds = await holdsForVisits(
     db,
@@ -139,7 +147,7 @@ export async function getRxQueue(visitDate, q = null, now = new Date(), db = poo
     coordinator: holds.get(r.visit_id) ?? null,
   }));
   return {
-    echoHandovers: await getEchoHandovers(visitDate, search, db),
+    echoHandovers,
     atDesk: rows.filter((r) => r.status === "with_rx"),
     waiting: rows
       .filter((r) => r.status !== "with_rx")
@@ -188,9 +196,6 @@ export async function getRxPatient(visitId, db = pool) {
   if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
   const v = rows[0];
 
-  // A samples-only registration never reaches a consultant, so there is no
-  // prescription to explain. The queue already excludes them; this closes the
-  // hand-typed URL.
   if (v.lab_only) {
     throw Object.assign(new Error("This patient came for samples only — no prescription"), {
       status: 409,

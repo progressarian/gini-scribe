@@ -4,31 +4,10 @@ import { searchMedicines } from "./prescription.js";
 import { stripFormPrefix } from "../../../src/lib/medName.js";
 import { WHEN_TO_TAKE_SLOT, MED_SLOT_KEYS } from "../../../shared/giniflowMedTiming.js";
 
-// Reads a pasted prescription and offers it back as draft rows.
-//
-// docs/gini-flow/27-RX-PASTE-PLAN.md. Six medicines typed by hand is six trips
-// through the search box, the dose field, the frequency picker and the timing
-// chips — for a list the consultant often already has as text.
-//
-// THIS EXTRACTS, IT DOES NOT AUTHOR, the same property planExtract.js states and
-// for the same reason. Nothing here writes: the endpoint returns a proposal, the
-// review table fills, and the consultant presses Add. A dose the text does not
-// state comes back empty for them to fill — never guessed, and never normalised
-// (`60+500 mg` is a real strength in this hospital's data; "correcting" it would
-// change a prescription).
-//
-// Two passes, cheapest first. Pass 1 is a tokeniser over the line shapes this
-// hospital already writes and costs nothing; only what it cannot read reaches
-// the model.
-
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const MAX_PASTE_CHARS = 6000;
 const MAX_LINES = 40;
 
-// §3.2 of the plan: the short forms the pickers and DOSES_PER_DAY are keyed on,
-// with the prose the hospital actually writes folded onto them. 58,066 rows say
-// "OD" and 5,050 say "Once daily"; they mean the same thing and the form offers
-// only the first.
 const FREQUENCY_SYNONYMS = new Map([
   ["od", "OD"],
   ["once daily", "OD"],
@@ -56,9 +35,6 @@ const FREQUENCY_SYNONYMS = new Map([
   ["once in 15 days", "Fortnightly"],
   ["once in a fortnight", "Fortnightly"],
 ]);
-
-// The 1-0-1 idiom, which nothing in the repo parses today — the only occurrences
-// are literals in demo.js. Each slot is a dose count across the day.
 const PATTERN_RE =
   /(?:^|\s)([01½.\d]+)\s*-\s*([01½.\d]+)\s*-\s*([01½.\d]+)(?:\s*-\s*([01½.\d]+))?(?=\s|$)/;
 const PATTERN_FREQUENCY = { 1: "OD", 2: "BD", 3: "TDS", 4: "QID" };
@@ -93,9 +69,6 @@ const TIMING_PHRASES = [...WHEN_TO_TAKE_SLOT.entries()]
 
 const FREQ_PHRASES = [...FREQUENCY_SYNONYMS.entries()].sort((a, b) => b[0].length - a[0].length);
 
-// A line that is prose rather than a prescription must not become a medicine.
-// "review after 2 weeks" left the tokens "review after" behind, and both are
-// words about the visit, not a drug — so a name made only of these is rejected.
 const NOT_A_NAME = new Set([
   "review",
   "follow",
@@ -160,13 +133,6 @@ const toClock = (m) => {
   return `${String(h).padStart(2, "0")}:${min}`;
 };
 
-// One line -> one proposed row, or null when the line is not a medicine.
-//
-// Everything recognisable is stripped out in a fixed order and whatever survives
-// is the name. Order matters twice: frequency runs BEFORE duration, or "once in
-// 15 days" loses its "15 days" to the duration rule and leaves "once in" glued
-// to the drug; and the clock is taken before the name, or "8 PM after dinner"
-// makes the medicine "Urimax D 8 PM".
 export function parseLine(rawLine) {
   const line = clean(rawLine).replace(/^[-•*\d]+[.)]?\s*/, "");
   if (!line || line.length < 3) return null;
@@ -177,16 +143,8 @@ export function parseLine(rawLine) {
     if (m) rest = clean(rest.replace(m[0], " "));
     return m;
   };
-
-  // The clock is still lifted out of the line — leaving it in made the medicine
-  // "Urimax D 8 PM" — but it is no longer written to time_of_day. That column is
-  // set on 3 of 124,921 active medications and cannot describe a BD dose. The
-  // hospital writes "8 PM after dinner" in the timing text, so it goes there.
   const clockMatch = cut(CLOCK_RE);
   const clockText = clockMatch ? clean(clockMatch[0]) : null;
-
-  // Every frequency mention, not just the first: "SOS as needed" says it twice
-  // and leaving one behind put "SOS" in the medicine's name.
   let frequency = null;
   for (const [phrase, short] of FREQ_PHRASES) {
     const re = new RegExp(`(?:^|\\s)${phrase}(?=\\s|$)`, "ig");
@@ -230,19 +188,10 @@ export function parseLine(rawLine) {
   const { name } = stripFormPrefix(clean(rest).replace(/[,;:.]+$/, ""));
   const medicineName = clean(name);
   if (!medicineName || !/[a-z]/i.test(medicineName)) return null;
-  // A bare instruction ("stop montair", "continue all") is not an addition. Out
-  // of scope for this pass — plan §9.2 — and must not become a new medicine.
   if (/^(stop|continue|pause|hold|omit|discontinue|review|follow)\b/i.test(medicineName))
     return null;
-  // Prose leaves only words about the visit behind. A real name has at least one
-  // token that is none of them.
   const tokens = medicineName.toLowerCase().split(/\s+/);
   if (!tokens.some((t) => t.length >= 3 && !NOT_A_NAME.has(t.replace(/[^a-z]/g, "")))) return null;
-  // A brand is a few words. Anything longer is a sentence that happens to
-  // contain a drug — "Patient should take Atchol forty mg at night and Glycomet
-  // five hundred twice a day" was being collapsed into ONE row named after the
-  // whole phrase. Handing it to the model instead is the only honest answer:
-  // pass 1 cannot tell where one medicine ends and the next begins.
   if (tokens.length > 5) return null;
 
   return {
@@ -296,8 +245,6 @@ async function askModel(lines, activeMeds) {
       system: SYSTEM,
       messages: [{ role: "user", content: userText }],
     }),
-    // A model that never answers must not hold the consultant's screen. The
-    // lines come back as unreadable and they type those few by hand.
     signal: AbortSignal.timeout(20_000),
   }).catch(() => null);
 
@@ -320,9 +267,6 @@ async function askModel(lines, activeMeds) {
       source: "model",
     }));
 
-  // Belt and braces on the rule above: drop any "unreadable" line that plainly
-  // produced one of the items. Telling the consultant to add by hand a line the
-  // model just read for them is worse than saying nothing.
   const named = items.map((i) => i.medicineName.toLowerCase());
   const unreadable = (data.unreadable || [])
     .map(clean)
@@ -332,14 +276,6 @@ async function askModel(lines, activeMeds) {
   return { items, unreadable };
 }
 
-// The catalogue is the authority, not the parser. An exact hit fills the row; a
-// near-miss never does — the same rule planExtract applies to test names, and
-// here the cost of guessing is the wrong drug.
-// "Glycomet 1000" and the catalogue's "GLYCOMET 1000mg" are the same medicine —
-// the strength is written with its unit on one side and without it on the other.
-// Comparing with the trailing unit removed closes that gap WITHOUT loosening the
-// rule that matters: the digits must still be identical, so "Glycomet 1000"
-// never reaches "Glycomet 500".
 const matchKey = (name) =>
   String(name || "")
     .toLowerCase()
@@ -352,14 +288,8 @@ async function resolve(item, db) {
   const sameKey = hits.filter((h) => matchKey(h.name) === wanted);
   const exact =
     hits.find((h) => h.name.toLowerCase() === item.medicineName.toLowerCase()) ||
-    // Only when it is unambiguous. Two catalogue rows collapsing to one key is
-    // a choice for the consultant, not for this.
     (sameKey.length === 1 ? sameKey[0] : null);
   if (!exact) {
-    // The catalogue search is a substring match, so "Fenofibrate 145" misses
-    // "Fenofibrate 145mg" and the consultant is offered nothing at all. Fall
-    // back to the brand root purely to populate the choices — this still never
-    // picks one, it only stops the row being a dead end.
     if (!hits.length) {
       const root = item.medicineName.split(/\s+/)[0];
       if (root && root.length >= 3) hits = await searchMedicines(root, db).catch(() => []);
@@ -380,8 +310,6 @@ async function resolve(item, db) {
     composition: exact.composition,
     drugClass: exact.drugClass,
     timesPrescribed: exact.timesPrescribed,
-    // Plan §4.3: prescribed here before is a safe fill; a formulary row nobody
-    // has ever used is a suggestion worth a second look, not an error.
     firstTimeHere: exact.timesPrescribed === 0,
     candidates: [],
   };
@@ -423,8 +351,6 @@ export async function parsePaste(visitId, text, db = pool) {
   const fromModel = await askModel(leftover, activeMeds);
   const all = [...parsed, ...fromModel.items];
 
-  // Resolved in parallel: a six-line paste is six catalogue lookups and the
-  // consultant is watching the panel.
   const items = await Promise.all(all.map((i) => resolve(i, db)));
 
   return {

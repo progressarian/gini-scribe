@@ -4,7 +4,6 @@ import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { ONLINE_VISIT_SQL } from "./rxFollowups.js";
 import { closeCoordinatorStep, insertCoordinatorStep } from "./journey.js";
 import { CHAIN, STATUS_LABEL, TERMINAL_STATUSES } from "../../../shared/giniflowStatus.js";
-import { rxWaitsForCoordinator } from "../../../shared/manualFloor.js";
 import { specialtyLabel } from "../../../shared/giniflowReferrals.js";
 import {
   AWAITING_COORDINATOR,
@@ -208,7 +207,7 @@ export async function syncReferralHold(patientId, appointmentId = null, db = poo
 }
 
 export async function assertCoordinatorDone(client, visitId, toStatus) {
-  if (!GATED.includes(toStatus) || !rxWaitsForCoordinator()) return;
+  if (!GATED.includes(toStatus)) return;
   if (!(await holdsReady(client))) return;
   await syncHoldIn(client, visitId);
   const { rows } = await client.query(
@@ -235,7 +234,7 @@ export async function holdsForVisits(db, visitIds, now = new Date()) {
   for (const row of rows) {
     holds.set(row.visit_id, {
       waiting: true,
-      blocking: rxWaitsForCoordinator(),
+      blocking: true,
       minutes: Math.max(0, Math.round((now - new Date(row.opened_at)) / 60000)),
     });
   }
@@ -324,7 +323,7 @@ export async function listOnFloor(day, now = new Date(), db = pool) {
   return {
     day,
     ready: true,
-    blocking: rxWaitsForCoordinator(),
+    blocking: true,
     waiting: waiting.map((r) => onFloorRow(r, now)),
     done: done.map((r) => onFloorRow(r, now)).reverse(),
   };

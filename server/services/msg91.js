@@ -1,39 +1,12 @@
-// MSG91 WhatsApp OTP delivery.
-//
-// In dev (NODE_ENV !== 'production' OR MSG91_AUTH_KEY blank OR template name
-// blank) we skip the network call and print the OTP to the server console
-// so testers can grab it without sending a real WhatsApp message.
-//
-// Required env (production):
-//   MSG91_AUTH_KEY              — account auth key (MSG91 → Auth Keys)
-//   MSG91_WA_TEMPLATE_NAME      — name of the APPROVED Authentication-category
-//                                  WhatsApp template (e.g. "gini_otp_auth")
-//   MSG91_WA_TEMPLATE_LANG      — language code matching the approved template
-//                                  ("en", "en_US", "hi"). Default "en".
-//   MSG91_WA_INTEGRATED_NUMBER  — WABA-registered phone, country code + number,
-//                                  no `+` (e.g. "919876543210" or "15559743794").
-//
-// Endpoint: POST https://control.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/
-// Docs: https://docs.msg91.com/whatsapp/
-
 const MSG91_AUTH_KEY = process.env.MSG91_AUTH_KEY || "";
 const MSG91_WA_TEMPLATE_NAME = process.env.MSG91_WA_TEMPLATE_NAME || "";
 const MSG91_WA_TEMPLATE_LANG = process.env.MSG91_WA_TEMPLATE_LANG || "en";
 const MSG91_WA_INTEGRATED_NUMBER = process.env.MSG91_WA_INTEGRATED_NUMBER || "";
-// Patient-flow check-in template (separate approved template from the OTP one).
-//   MSG91_WA_FLOW_TEMPLATE_NAME — approved Utility-category template with 6 body
-//   variables in this order: {{1}} patient_name, {{2}} file_number,
-//   {{3}} doctor_name, {{4}} estimate_min, {{5}} est_completion_time,
-//   {{6}} visit_link. Language falls back to MSG91_WA_TEMPLATE_LANG.
 const MSG91_WA_FLOW_TEMPLATE_NAME = process.env.MSG91_WA_FLOW_TEMPLATE_NAME || "";
 
 const IS_DEV = process.env.NODE_ENV !== "production";
 
 export async function sendOtpSms(phone, otp) {
-  // Falls back to console in dev OR if any required value is missing.
-  // Lets you ship the code before the WABA + template are fully approved —
-  // the moment all env values are filled, real WhatsApp delivery kicks in
-  // with no code change.
   if (IS_DEV || !MSG91_AUTH_KEY || !MSG91_WA_TEMPLATE_NAME || !MSG91_WA_INTEGRATED_NUMBER) {
     console.log(`[DEV] OTP for ${phone}: ${otp}`);
     return { ok: true, dev: true };
@@ -50,9 +23,6 @@ export async function sendOtpSms(phone, otp) {
       template: {
         name: MSG91_WA_TEMPLATE_NAME,
         language: { code: MSG91_WA_TEMPLATE_LANG, policy: "deterministic" },
-        // `to_and_components` is MSG91's wrapper around Meta's Cloud API
-        // template components. body_1 binds to the first {{1}} in the body;
-        // button_1 binds to the copy-code button so tapping it copies the OTP.
         to_and_components: [
           {
             to: [to],
@@ -82,10 +52,6 @@ export async function sendOtpSms(phone, otp) {
   return { ok: true };
 }
 
-// Patient-flow check-in confirmation + tracking link. Same dev-fallback as
-// sendOtpSms: until the flow template + WABA env are set, it logs to console and
-// returns { dev: true } so check-in still works. `vars` keys map positionally to
-// the template body variables (see MSG91_WA_FLOW_TEMPLATE_NAME above).
 export async function sendFlowCheckin(phone, vars = {}) {
   if (
     IS_DEV ||
@@ -141,20 +107,6 @@ export async function sendFlowCheckin(phone, vars = {}) {
   return { ok: true };
 }
 
-// The medicine card at the pharmacy counter (docs/gini-flow/16-PHARMACY-STATION-PLAN.md §6).
-//
-// MSG91, not WATI. The brief names WATI; this repo has one WhatsApp vendor, one
-// WABA and one template approval queue, and adding a second for one hospital
-// would mean two of each. What survives from the brief is the warning: this
-// template needs Meta approval and that takes days.
-//
-//   MSG91_WA_CARD_TEMPLATE_NAME — approved Utility-category template with 4 body
-//   variables in this order: {{1}} patient_name, {{2}} medicine_count,
-//   {{3}} changes, {{4}} doctor_name. Language falls back to
-//   MSG91_WA_TEMPLATE_LANG.
-//
-// Until it is approved this logs exactly as sendOtpSms does, so the station is
-// usable and the counter still records that the card was sent.
 export async function sendMedicineCard(phone, vars = {}) {
   const template = process.env.MSG91_WA_CARD_TEMPLATE_NAME || "";
   if (IS_DEV || !MSG91_AUTH_KEY || !template || !MSG91_WA_INTEGRATED_NUMBER || !phone) {
@@ -187,9 +139,6 @@ export async function sendMedicineCard(phone, vars = {}) {
           },
         },
       }),
-      // The pharmacy fires this after the counter's request has already been
-      // answered, so nothing is waiting on it — but a vendor that never replies
-      // would hold the socket for the life of the process.
       signal: AbortSignal.timeout(10_000),
     },
   );
@@ -201,26 +150,6 @@ export async function sendMedicineCard(phone, vars = {}) {
   }
   return { ok: true };
 }
-
-// The referral letter on WhatsApp (docs/gini-flow/19-REFERRALS-STATION-PLAN.md §8).
-//
-// MSG91, not WATI, for the reason 16 §3.1 gave: two vendors would mean two WABA
-// numbers, two template approval queues and two sets of credentials for one
-// hospital.
-//
-// The letter travels as a LINK, not an attachment. Every sender in this file is
-// `content_type: "template"` with positional text body variables; there is no
-// `type: "document"` component anywhere in this repo, so `letter_link` follows
-// sendFlowCheckin's own `visit_link` precedent (19 §3.1).
-//
-//   MSG91_WA_REFERRAL_TEMPLATE_NAME — approved Utility-category template with 5
-//   body variables in this order: {{1}} patient_name, {{2}} specialty,
-//   {{3}} doctor_name, {{4}} hospital, {{5}} letter_link. Language falls back to
-//   MSG91_WA_TEMPLATE_LANG.
-//
-// Meta approval takes days. Until it lands this logs and returns { dev: true },
-// exactly as its three siblings do — and `sendLetter` refuses to stamp
-// `letter_sent_at` on that result, so the real send still happens later.
 export async function sendReferralLetter(phone, vars = {}) {
   const template = process.env.MSG91_WA_REFERRAL_TEMPLATE_NAME || "";
   if (IS_DEV || !MSG91_AUTH_KEY || !template || !MSG91_WA_INTEGRATED_NUMBER || !phone) {
@@ -253,8 +182,6 @@ export async function sendReferralLetter(phone, vars = {}) {
           },
         },
       }),
-      // The desk waits for this one — it is a button press, not a background
-      // fan-out — so a vendor that never replies must not hold the request open.
       signal: AbortSignal.timeout(10_000),
     },
   );

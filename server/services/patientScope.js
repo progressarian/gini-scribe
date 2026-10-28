@@ -1,16 +1,6 @@
 import pool from "../config/db.js";
 import { hasOwnPatientList, normalizeRole, ROLES } from "../../shared/permissions.js";
 
-// Who "owns" a patient: the doctor on their most recent appointment. There is no
-// treating-doctor column anywhere — patients has none, refill requests have none,
-// and dose_change_requests.doctor_id is the DECIDING doctor, written on approval,
-// so it is null on exactly the pending rows a dashboard shows. The latest
-// appointment is the only ownership the data actually carries.
-//
-// Resolved through appointments.patient_id (set on 99.9% of rows) rather than the
-// file_no join: COALESCE(p.id, a.patient_id) cannot use an index and turned this
-// into a 3s sequential scan per patient.
-
 export function doctorScope(req) {
   const assisted = req.assistedDoctor;
   const doctorId = assisted?.id ?? req.doctor?.doctor_id ?? null;
@@ -22,10 +12,6 @@ export function doctorScope(req) {
     shortName: (assisted ? assisted.short_name : req.doctor?.short_name) || "",
   };
 }
-
-// SQL predicate: "this patient's current doctor is me". `patientCol` is the
-// caller's patient-id column; `i` is the 1-based index of the first of the three
-// params this appends (doctor id, full name, short name).
 export function latestDoctorIs(patientCol, i) {
   return `EXISTS (
     SELECT 1 FROM (
@@ -65,8 +51,6 @@ export function scopeParams(scope) {
   return [scope.doctorId, scope.fullName, scope.shortName];
 }
 
-// For lists that come from Genie (alerts, messages) and so cannot be filtered in
-// SQL: resolve which of these patients belong to the caller, then filter in JS.
 export async function myPatientIds(scope, patientIds) {
   const ids = [...new Set(patientIds.map(Number).filter(Number.isInteger))];
   if (!scope.mine || !ids.length) return null;

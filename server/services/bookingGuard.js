@@ -1,12 +1,3 @@
-// ============================================================================
-// Booking availability guard — shared by every appointment-insert path so the
-// rule lives in one place. Controlled by SCHEDULE_ENFORCEMENT:
-//   off    → never checked (default)
-//   warn   → compute, attach a warning, but still book
-//   strict → reject (409) unless an admin passes force=true
-//
-// Design: docs/doctor-management/08-booking-integration.md
-// ============================================================================
 import pool from "../config/db.js";
 import { DONE_OR_INPROGRESS, isSlotAvailable } from "./availability.js";
 import { hasCapability, CAPABILITIES } from "../../shared/permissions.js";
@@ -19,12 +10,6 @@ export async function resolveDoctorIdByName(name, client = pool) {
   const r = await client.query("SELECT resolve_doctor_id($1) AS id", [name]);
   return r.rows[0]?.id || null;
 }
-
-// Returns null when the booking is allowed (enforcement off, unknown doctor,
-// unknown/free slot, available, or admin-overridden). Otherwise an object:
-//   { warn:true, reason, detail }    (warn mode — caller still inserts)
-//   { blocked:true, reason, detail } (strict mode — caller should 409)
-// Takes a pre-resolved doctorId.
 export async function checkBookingAvailability({ doctorId, date, slot, force, role }) {
   if (SCHEDULE_ENFORCEMENT === "off" || !doctorId || !date || !slot) return null;
   const a = await isSlotAvailable(doctorId, date, slot);

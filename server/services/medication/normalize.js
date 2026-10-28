@@ -1,21 +1,3 @@
-// ── Canonical medication-name normaliser (server) ───────────────────────────
-// Single source of truth for how a prescribed medication string is split into
-//   { name, form, route, canonicalKey }
-//
-// A prescription like "INJ. WEGOVY 0.5 mg" arrives from multiple sources:
-//   • AI extraction (Claude vision / Claude text) — may or may not strip prefix
-//   • HealthRay sync — prefix is always present
-//   • Manual entry from the UI — user may type "TAB Concor"
-// Without normalisation, the same drug ends up in the DB as "TAB Concor",
-// "Concor", "CONCOR AM" etc. and the stop-medicine / dedupe logic can't tell
-// they're the same row. This module guarantees a clean `name` + canonical key.
-//
-// The client mirror lives at src/lib/medName.js — keep them in sync.
-
-// Ordered: longest-first so "TABLET " matches before "TAB " etc.
-// Each entry: [pattern, canonical form label, default route hint]
-// The pattern is anchored to the START of the trimmed string, case-insensitive,
-// and accepts an optional trailing dot (e.g. "INJ." / "Tab.").
 const FORM_RULES = [
   [/^tablets?\.?\s+/i, "Tablet", "Oral"],
   [/^tab\.?\s+/i, "Tablet", "Oral"],
@@ -44,8 +26,6 @@ const FORM_RULES = [
   [/^pessar(?:y|ies)\.?\s+/i, "Pessary", "Vaginal"],
 ];
 
-// Valid route whitelist — keeps data consistent with the existing schema
-// comment (Oral/IV/IM/SC/Topical/Inhaled plus Rectal/Vaginal for completeness).
 const VALID_ROUTES = new Set([
   "Oral",
   "SC",
@@ -59,12 +39,6 @@ const VALID_ROUTES = new Set([
   "Nasal",
 ]);
 
-/**
- * Strip a dosage-form prefix from a medication name.
- * Returns { name, form } where `form` is the canonical label (e.g. "Tablet")
- * or null if no prefix was detected. `name` is the original string with the
- * prefix removed and trimmed — casing preserved so display stays readable.
- */
 export function stripFormPrefix(rawName) {
   if (!rawName) return { name: "", form: null };
   let s = String(rawName).trim();
@@ -76,24 +50,12 @@ export function stripFormPrefix(rawName) {
   return { name: s, form: null };
 }
 
-/**
- * Infer a route from a detected dosage form when no explicit route was given.
- * Prefers an already-set route over inferring. Returns null if nothing sensible
- * can be inferred.
- */
 export function routeForForm(form) {
   if (!form) return null;
   const rule = FORM_RULES.find(([, label]) => label === form);
   return rule ? rule[2] : null;
 }
 
-/**
- * Reconcile a medication's {name, form, route} fields. Run on every write.
- *   - strips any surviving TAB/INJ/etc. prefix from `name`
- *   - fills `form` from the prefix if it wasn't already set
- *   - fills `route` from the form when route is empty, otherwise keeps caller's
- * Returns a shallow-copied object — never mutates the input.
- */
 export function normalizeMedication(input) {
   const out = { ...(input || {}) };
   const { name, form: detectedForm } = stripFormPrefix(out.name || "");
@@ -105,12 +67,6 @@ export function normalizeMedication(input) {
   return out;
 }
 
-/**
- * Canonical lookup key for de-duplication and stop-medicine matching.
- * Strips prefix, trailing parenthesised dose (e.g. "(60K units)"), collapses
- * whitespace, and uppercases. This is the exact string that goes into
- * `pharmacy_match` and that the ON CONFLICT indexes compare against.
- */
 export function canonicalMedKey(rawName) {
   const { name } = stripFormPrefix(rawName || "");
   return name
@@ -120,7 +76,4 @@ export function canonicalMedKey(rawName) {
     .toUpperCase();
 }
 
-// Back-compat alias: matches the old normalizeMedName() signature in
-// server/services/healthray/db.js so callers can swap in the shared helper
-// without changing their call sites.
 export const normalizeMedName = canonicalMedKey;

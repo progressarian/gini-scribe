@@ -1,11 +1,3 @@
-// Is this number outside its reference range?
-//
-// One rule, because two would drift: the HealthRay feed arrives with the range
-// already split into min/max, while a value typed at the lab station carries the
-// range the way a report prints it ("20-40", "> 40", "< 200"). Both end up here,
-// so a typed HbA1c and a synced one are flagged the same way.
-
-// "20-40" · "11.6 - 14.0" · "> 40" · "< 200" · "0.4–4.0" (en dash) → { min, max }
 export function parseRefRange(text) {
   const raw = String(text ?? "").trim();
   if (!raw) return { min: null, max: null };
@@ -24,9 +16,6 @@ export function parseRefRange(text) {
   const below = raw.match(/^(?:<|<=|≤|below|upto|up to|max\.?)\s*([+-]?[\d.]+)/i);
   if (below) return { min: null, max: num(below[1]) };
 
-  // Anything else — "Negative", "Non-reactive", a range with units inside — is a
-  // range a human reads, not one arithmetic can check. No flag is better than a
-  // wrong one on a clinical value.
   return { min: null, max: null };
 }
 

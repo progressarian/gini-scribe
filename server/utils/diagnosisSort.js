@@ -1,10 +1,5 @@
-// ── Diagnosis Sorting Utility ──────────────────────────────────────────────
-// Implements clinical ordering rules from diagnosis-rx-brief
 import { clinicalRankForDiagnosis } from "../../shared/clinicalOrder.js";
-
 import { extractDiagnosisGrade } from "./diagnosisGrade.js";
-
-// Category rank: Primary → Complication → Comorbidity → External → Monitoring
 const CATEGORY_RANK = {
   primary: 1,
   complication: 2,
@@ -12,8 +7,6 @@ const CATEGORY_RANK = {
   external: 4,
   monitoring: 5,
 };
-
-// Complication severity: Nephropathy > Neuropathy > Retinopathy > Foot > Other
 const COMPLICATION_SEVERITY = {
   nephropathy: 1,
   neuropathy: 2,
@@ -21,8 +14,6 @@ const COMPLICATION_SEVERITY = {
   foot: 4,
   other: 5,
 };
-
-// Comorbidity order: HTN → Dyslipidemia → Obesity → NAFLD → Others
 const COMORBIDITY_ORDER = {
   htn: 1,
   hypertension: 1,
@@ -41,8 +32,6 @@ const COMORBIDITY_ORDER = {
   gout: 9,
   hyperuricemia: 9,
 };
-
-// Auto-detect category from diagnosis_id or label (or HealthRay `name`)
 export function detectDiagnosisCategory(dx) {
   // Respect explicit category if already set
   if (dx.category) return dx.category;
@@ -50,9 +39,6 @@ export function detectDiagnosisCategory(dx) {
   const id = (dx.diagnosis_id || "").toLowerCase();
   const label = (dx.label || dx.name || "").toLowerCase();
   const text = `${id} ${label}`;
-
-  // Complications (check BEFORE primary so "diabetic nephropathy" doesn't get
-  // classified as primary just because it contains "diabetic")
   if (
     text.includes("nephropathy") ||
     text.includes("neuropathy") ||
@@ -65,7 +51,6 @@ export function detectDiagnosisCategory(dx) {
     return "complication";
   }
 
-  // Primary: any form of diabetes mellitus — T1DM, T2DM, T3C, MODY, LADA, etc.
   if (
     text.includes("diabetes mellitus") ||
     text.includes("type 2 dm") ||
@@ -202,9 +187,6 @@ export function formatDiagnosis(dx, index) {
 
   // Diagnosis name
   parts.push(dx.label || dx.diagnosis_id);
-
-  // Key value / grade (e.g. "HbA1c 10.6%", "G3bA3"). Falls back to parsing
-  // the Healthray-synced notes payload when key_value is not set.
   const grade = extractDiagnosisGrade(dx);
   if (grade) {
     parts.push(`— ${grade}`);

@@ -7,7 +7,7 @@ import { getPaymentQueue, getArrivals } from "./receptionStation.js";
 import { getLabQueue } from "./labStation.js";
 import { getPharmacyQueue } from "./pharmacyStation.js";
 import { getVitalsQueue } from "./vitalsStation.js";
-import { getMachineQueue } from "./machineStation.js";
+import { getMachineCountsByStation } from "./machineStation.js";
 
 const PIECES_BY_STATION = {
   triage: ["triage"],
@@ -30,16 +30,16 @@ async function loadMachineCounts(visitDate, db) {
   const sideStationIds = [
     ...new Set(catalogue.map((m) => m.station).filter((st) => st && st !== "machine_room")),
   ];
+  const byStation = await getMachineCountsByStation(
+    visitDate,
+    ["machine_room", ...sideStationIds],
+    db,
+  );
   const counts = Object.fromEntries(
-    await Promise.all(
-      ["machine_room", ...sideStationIds].map(async (station) => {
-        const { counts } = await getMachineQueue(visitDate, null, db, { station });
-        return [
-          station,
-          { waiting: counts.ordered, running: counts.in_progress, unreported: counts.done },
-        ];
-      }),
-    ),
+    Object.entries(byStation).map(([station, c]) => [
+      station,
+      { waiting: c.ordered, running: c.in_progress, unreported: c.done },
+    ]),
   );
   return { catalogue, sideStationIds, counts };
 }
@@ -74,7 +74,23 @@ const PIECE_LOADERS = {
   machines: (date, db) => loadMachineCounts(date, db),
 };
 
+const SUMMARY_CACHE_MS = 10 * 1000;
+const summaryCache = new Map();
+
 export async function getStationSummary(visitDate, db = pool, { stations } = {}) {
+  if (db !== pool) return buildStationSummary(visitDate, db, stations);
+  const key = `${visitDate}|${[...(stations || [])].sort().join(",")}`;
+  const hit = summaryCache.get(key);
+  if (hit && Date.now() - hit.at < SUMMARY_CACHE_MS) return { ...(await hit.summary) };
+  const summary = buildStationSummary(visitDate, db, stations);
+  summaryCache.set(key, { at: Date.now(), summary });
+  summary.catch(() => summaryCache.get(key)?.summary === summary && summaryCache.delete(key));
+  for (const [k, v] of summaryCache)
+    if (Date.now() - v.at >= SUMMARY_CACHE_MS) summaryCache.delete(k);
+  return { ...(await summary) };
+}
+
+async function buildStationSummary(visitDate, db, stations) {
   const wanted = stations || Object.keys(PIECES_BY_STATION);
   const needed = new Set(["board", ...wanted.flatMap((k) => PIECES_BY_STATION[k] || [])]);
   const loaded = Object.fromEntries(
@@ -142,8 +158,6 @@ export async function getStationSummary(visitDate, db = pool, { stations } = {})
     machineTile(id, `no ${(machinesForStation(catalogue, id)[0]?.name || id).toLowerCase()} today`);
 
   return {
-    // Today first — the tile sits beside eight stations all counting today — with
-    // tomorrow's unsorted backlog appended, since that is what the screen opens on.
     triage: {
       count: triage.today_uncategorised,
       label: triage.today_total

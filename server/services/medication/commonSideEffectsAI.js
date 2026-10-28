@@ -1,40 +1,15 @@
-// ── Generate common_side_effects for a single medication using Claude ──────
-//
-// Used when a doctor adds a medicine manually (outside the AI prescription
-// extractor in services/healthray/parser.js, which already populates this
-// field). The shape and rules MUST match the parser's COMMON SIDE EFFECTS
-// contract so the patient app renders both sources identically:
-//   - JSONB array, at most 3 entries
-//   - { name, desc, severity: "common" | "uncommon" | "warn" }
-//   - At most one "warn" entry, ordered most-common-first
-//   - desc kept under ~90 characters, patient-friendly
-//
-// Runs in the background (fire-and-forget) so the add-medicine response is
-// not delayed. Updates the row only if it still has an empty
-// common_side_effects array, so we never overwrite values that were set by
-// the AI extractor or by a later edit.
-
 import pool from "../../config/db.js";
 import { createLogger } from "../logger.js";
 import { BATCH_ENABLED, enqueue } from "../batch/batchQueue.js";
 
 const { log: info, error } = createLogger("CommonSideEffectsAI");
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-
-// NOTE — keep this rule wording identical to the COMMON SIDE EFFECTS bullet
-// in services/healthray/parser.js (CLINICAL_EXTRACTION_PROMPT) so the manual
-// add path and the AI extractor produce identical-shaped, identically-toned
-// output for the patient app. If you change one, change the other.
 const SYSTEM_PROMPT = `You are a clinical pharmacology assistant. You will be given a single medication (brand name and optional composition). Return its common side effects by calling the "report_common_side_effects" tool exactly once.
 
 COMMON SIDE EFFECTS — populate the "common_side_effects" array with at MOST 3 entries describing the most clinically relevant common side effects of that drug (use general medical knowledge of the drug — these are the well-known common side effects the patient should be aware of). Each entry has: name (short label, e.g. "Stomach upset / loose stools"), desc (one short patient-friendly line, e.g. "Take with food. Extended-release form helps."), severity ("common" for the typical mild ones, "uncommon" for less frequent, "warn" for rare-but-serious things the patient should seek help for — at most one "warn" entry). Order by importance: most common first. If the drug is a generic supplement / multivitamin / non-pharmacological item with no notable side effects, return []. Do NOT exceed 3 entries. Keep desc under 90 characters.
 
 Do not produce any text output — only the tool call.`;
 
-// Anthropic tool definition. We use forced tool use as Claude's structured-
-// output mechanism: the model must emit a tool_use block whose `input`
-// matches this JSON schema, so we don't need to text-parse JSON out of
-// freeform completion content.
 const SIDE_EFFECTS_TOOL = {
   name: "report_common_side_effects",
   description:
@@ -106,9 +81,6 @@ function sanitizeEntries(arr) {
   return out;
 }
 
-// ── Build the Messages API request body for one medication ──────────────────
-// Shared by the inline path (generateCommonSideEffects) and the batch path so
-// both produce identically-shaped requests.
 export function buildSideEffectsRequest({ name, composition }) {
   return {
     model: "claude-sonnet-4-6",
@@ -158,11 +130,6 @@ export async function generateCommonSideEffects({ name, composition } = {}) {
     return null;
   }
 }
-
-// ── Batch apply handler: write side effects from a completed batch result ────
-// Mirrors the inline write below. The patient app receives the new side effects
-// on the next genie medication sync (startGenieSyncCron), so this handler only
-// needs to persist the column — exactly like the inline path.
 export async function applySideEffectsResult(context, message) {
   const id = Number(context?.medication_id);
   if (!Number.isFinite(id) || id <= 0) return;
@@ -179,9 +146,6 @@ export async function applySideEffectsResult(context, message) {
   info("batch-apply", `filled ${effects.length} side effects for med #${id}`);
 }
 
-// ── Background fill: generate + persist for a medication row, but only if
-// the row still has no common_side_effects (so we don't clobber values the
-// extractor or a manual edit already wrote). Safe to fire-and-forget.
 export async function backfillCommonSideEffectsForMed(medicationId) {
   const id = Number(medicationId);
   if (!Number.isFinite(id) || id <= 0) return;
@@ -198,10 +162,6 @@ export async function backfillCommonSideEffectsForMed(medicationId) {
     const existing = Array.isArray(row.common_side_effects) ? row.common_side_effects : [];
     if (existing.length > 0) return;
 
-    // Batch path: enqueue and return immediately. The caller's follow-up genie
-    // sync still runs (meds sync now, without side effects); the side effects
-    // land on the row when the batch result applies (~1h), and propagate to the
-    // patient app on the next genie medication sync.
     if (BATCH_ENABLED) {
       await enqueue({
         jobType: "med_side_effects",

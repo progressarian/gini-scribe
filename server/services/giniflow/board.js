@@ -61,21 +61,6 @@ export async function getSlaConfig(db = pool) {
 
 export const budgetMap = (slaConfig) =>
   Object.fromEntries(slaConfig.map((s) => [s.station, s.budgetMinutes]));
-
-// Per-category budgets (brief §3 `sla_config.category_overrides`, Phase 4).
-//
-// A station's budget is not one number for every patient. A red-category
-// patient — worse and out of range — is meant to take the doctor longer than an
-// in-control follow-up, and judging both against 20 minutes makes the board lie
-// twice: the careful consultation shows red, and the rushed one shows green.
-//
-// `budgetMap` stays for the callers with no patient in hand — the timeline's
-// lab_total, the day's per-station averages, which are across all categories by
-// definition. Anything looking at ONE visit resolves through this instead.
-//
-// The override is a plain `{category: minutes}` object on the row; anything
-// missing, null, or non-positive falls back to the station budget, so a
-// half-filled override cannot blank a budget out.
 export const budgetLookup = (slaConfig) => {
   const byStation = new Map(slaConfig.map((s) => [s.station, s]));
   return (station, category = null) => {
@@ -194,9 +179,6 @@ const MACHINE_HOLD_SQL = (v, p, manualParam) => `
         ) AS vitals_at,
         ${ROOM_SOURCE_SQL(v)} AS room_source`;
 
-// One round trip for the whole day. The lateral joins keep it to a single query
-// no matter how many visits the day has — the board polls every 10s and a
-// per-visit follow-up query would multiply that by the floor's population.
 const BOARD_SQL = `
   SELECT v.id,
          v.patient_id,
@@ -456,8 +438,6 @@ const subtitleFor = (row) => {
   return STATUS_LABEL[row.current_status] || row.current_status;
 };
 
-// The one-line note under a card explaining what it is waiting on. Blocked
-// reasons take precedence and are rendered in the red variant by the board.
 const hintFor = (row) => {
   if (row.blocked_reason) return null;
   if (row.current_status === "checked_in" || row.current_status === "vitals_pending")
@@ -472,14 +452,6 @@ const hintIconFor = (row) =>
   row.current_status === "ready_for_doctor" && row.category === "in_control" && row.seen_by_sd
     ? "💡"
     : "→";
-
-// What the lab card is waiting on, distinct from the main journey's hints (GF-19).
-// Everything from the moment the tube leaves the patient to the moment the
-// report is filed — including "reported" itself, since a filed report cannot
-// exist without a drawn sample. Derived, so the two rungs the room split added
-// cannot be missed here — a sample sent to the lab and not yet received had
-// neither `collected` nor `atLab`, which is the card claiming the patient left
-// without giving a sample.
 const DRAWN_STATUSES = LAB_RUNGS.filter((r) => r.key !== "pending").flatMap(
   (r) => r.sampleStatuses,
 );
@@ -497,9 +469,6 @@ const LAB_HINT = {
   ordered: "Waiting: payment request",
 };
 
-// A samples-only patient still on the board once the lab has finished with
-// them. `hrlab` has dropped them — nothing is pending — so the lab track builds
-// its own line rather than showing an empty card.
 const labOnlySummary = (row) => {
   const cases = row.lab_all_cases ?? 0;
   const reported = row.lab_all_reported ?? 0;
@@ -521,11 +490,6 @@ const LAB_SUBTITLE = {
   results_ready: "📤 Results ready — awaiting upload",
 };
 
-// A visit the floor never closed keeps its clock running, which is right while
-// the day is still being worked and wrong the moment the day is over: reading
-// back a past board, an unfinished patient showed days of waiting and dragged
-// every average and bottleneck with them. The clock stops at midnight IST of
-// the day being read.
 export const boardClock = (visitDate, now = new Date()) => {
   const end = new Date(`${visitDate}T23:59:59.999+05:30`);
   return now < end ? now : end;
@@ -758,10 +722,12 @@ const placeCard = (card, row, machines, now) => {
 const machineColumnName = (key) =>
   BOARD_COLUMNS.find((col) => col.key === key)?.name || "Machine Room";
 
-export async function getTestsPlacement(visitId, now = new Date(), db = pool) {
+export async function getTestsPlacements(visitIds, now = new Date(), db = pool) {
+  const ids = [...new Set(visitIds.filter(Boolean))];
+  if (!ids.length) return new Map();
   const [{ rows }, machines] = await Promise.all([
     db.query(
-      `SELECT v.current_status, v.paused_at,
+      `SELECT v.id, v.current_status, v.paused_at,
               ${labOnlyPredicate("v", "$2")} AS lab_only,
               m.orders AS machine_orders, m.open_tests AS machine_open_tests,
               m.steps AS machine_steps,
@@ -771,13 +737,15 @@ export async function getTestsPlacement(visitId, now = new Date(), db = pool) {
          FROM giniflow_visits v
          JOIN patients p ON p.id = v.patient_id
          CROSS JOIN LATERAL (${MACHINE_HOLD_SQL("v", "p", "$3")}) m
-        WHERE v.id = $1`,
-      [visitId, LAB_ONLY_DOCTOR, labStepsAreManual()],
+        WHERE v.id = ANY($1::uuid[])`,
+      [ids, LAB_ONLY_DOCTOR, labStepsAreManual()],
     ),
     getMachines(db),
   ]);
-  const row = rows[0];
-  if (!row) return null;
+  return new Map(rows.map((row) => [row.id, testsPlacementOf(row, machines, now)]));
+}
+
+function testsPlacementOf(row, machines, now) {
   const placed = placeCard(
     {
       status: row.current_status,
@@ -1215,13 +1183,7 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
   const cards = rows.map((row) => placeCard(buildCard(row), row, machines, now));
 
   function buildCard(row) {
-    // A finished visit's clock stopped when it exited; only a patient still in
-    // the building is timed against the present moment.
     const finished = TERMINAL_STATUSES.includes(row.current_status);
-    // A paused patient's clocks read against the moment they stepped out, so
-    // the card holds still instead of counting a break nobody is waiting on.
-    // Resume shifts the anchors forward by the same span, which is what keeps
-    // every other duration in the system right without it knowing about pause.
     const paused = !!row.paused_at;
     const clock = finished && row.status_since ? new Date(row.status_since) : now;
     const liveClock = paused ? new Date(row.paused_at) : now;
@@ -1244,14 +1206,8 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       : wholeVitals
         ? wholeVitalsBudget(budgetFor, row.category)
         : budgetFor(slaKeyForStatus(row.current_status), row.category);
-    // Settled entirely in SQL by labOnlyPredicate, so this board and the lab
-    // station cannot drift apart on who counts as samples-only.
     const labOnly = !!row.lab_only;
     const labOnlyLine = labOnly ? labOnlySummary(row) : null;
-    // Trust the floor's own pipeline once it is done, rather than falling
-    // back to HealthRay's mirrored case (`hrlab`/`tests`) which only updates
-    // as the HealthRay sync polls — paused sync leaves it looking permanently
-    // unreported even after the report has actually been uploaded locally.
     const locallySettled = (row.lab_orders_today ?? 0) > 0 && (row.reports_outstanding ?? 0) === 0;
     return {
       id: row.id,
@@ -1272,8 +1228,6 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
         : null,
       resultsStatus: row.results_status,
       blockedReason: row.blocked_reason,
-      // Carried to the card so the client can tell, before a drag starts, which
-      // columns this patient may legally be dropped on.
       resumeStatus: row.resume_status,
       paused,
       pausedAt: paused ? new Date(row.paused_at).toISOString() : null,
@@ -1281,20 +1235,10 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       pausedMinutes: Math.round(Number(row.paused_ms_total || 0) / 60000),
       priority: row.priority,
       priorityReason: row.priority_reason,
-      // A manual position belongs to the queue it was set in. advanceStatus
-      // clears it on every move, but a status written by any other path — the
-      // demo seeder, a backfill, a manual UPDATE — would otherwise leave a
-      // position behind that pins the patient to the top of a column they have
-      // already left (BQ-06). Trusting the stored column rather than the
-      // clearing makes that impossible by construction.
       queuePosition:
         row.queue_column && row.queue_column === columnForStatus(row.current_status)
           ? row.queue_position
           : null,
-      // What HealthRay says about this patient, when the floor has not caught up
-      // (39-HYBRID-FLOOR-PLAN.md §5.4). Present only when a desk is actually
-      // behind, so a card carries the warning or nothing at all — never a
-      // reassuring "in agreement" badge nobody needs to read.
       behind: row.behind_station
         ? {
             station: row.behind_station,
@@ -1303,8 +1247,6 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
             minutes: minutesSince(row.healthray_status_at, now),
           }
         : null,
-      // Waiting on the lab, not on a person. Shown only while they are short of
-      // the doctor — past that point the reports are in by definition.
       awaitingReports:
         row.reports_outstanding - (row.unpaid_orders ?? 0) > 0 &&
         isChainStatus(row.current_status) &&
@@ -1314,11 +1256,6 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       unpaidTests: row.unpaid_tests || [],
       labOnly,
       online: !!row.online,
-      // Nothing left for the lab to do. Used to retire a finished patient from
-      // the lab track: a sample that was never collected is still worth showing
-      // after they leave, a report that is already back is not. Covers both the
-      // HealthRay-only path (hrlab has dropped them, no active local record) and
-      // Gini Flow's own lab pipeline (all of today's local orders are uploaded).
       labSettled:
         ((row.lab_all_cases ?? 0) > 0 &&
           (row.lab_all_reported ?? 0) >= row.lab_all_cases &&
@@ -1387,9 +1324,6 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
               blocking: false,
               source: "healthray",
               caseCount: row.hr_lab_cases,
-              // Drawn and at the analyzer are two different facts. The card said
-              // "Left without giving a sample" whenever the lab had not RECEIVED
-              // the tube, which is true of every sample drawn in the last hour.
               collected: !!row.hr_lab_all_collected || !!row.hr_lab_at_lab,
               atLab: !!row.hr_lab_at_lab,
             }
@@ -1398,10 +1332,6 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
                 since: row.journey_started_at
                   ? new Date(row.journey_started_at).toISOString()
                   : null,
-                // Derived, never assumed. Hardcoding results_ready/atLab:false
-                // told the card the patient had left without giving a sample
-                // while the row beside it read "Reports ready" — a report
-                // cannot exist without a sample.
                 sampleStatus: !row.lab_all_cases
                   ? "paid"
                   : (row.lab_all_reported ?? 0) >= row.lab_all_cases
@@ -1435,22 +1365,13 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
 
   const onFloor = cards.filter((c) => !OFF_BOARD_STATUSES.includes(c.status));
 
-  // Admin-toggleable (floorSettings.js, /settings/flow): whether samples-only
-  // patients show on this board at all. Off by default. When it's back on,
-  // this restores exactly where they used to live — the lab track while
-  // active, the Done column once exited, reachable for a coordinator to
-  // assign a real consultant — not a redesigned version of it.
   const chainAllowsLabOnly = (col) => !hideLabOnly && col.key === "done";
   const shown = hideLabOnly ? onFloor.filter((c) => !c.labOnly) : onFloor;
 
   const columns = BOARD_COLUMNS.map((col) => {
     const items =
       col.key === "lab"
-        ? // A finished patient stays in the lab track only while the lab still
-          // holds something of theirs. Once the reports are back and they have
-          // gone home there is nothing to work, and leaving them here is what
-          // kept an exited patient sitting in the column all day.
-          shown.filter(
+        ? shown.filter(
             (c) =>
               c.placement === "lab" ||
               (!hideLabOnly && c.labOnly && c.lab && !(c.finished && c.labSettled)) ||
@@ -1473,9 +1394,6 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
         ? mean(machineTimed.map((c) => c.machine.budget))
         : null
       : (budgets[col.slaKey] ?? null);
-    // Blocked patients are excluded from the average: they are stuck on missing
-    // reports, not on this station's throughput, and letting them skew it points
-    // the bottleneck banner at the wrong station.
     const timedCards = items.filter(
       (c) => !c.blockedReason && !c.heldForTests && (col.key === "lab" || !c.paused),
     );
@@ -1491,13 +1409,6 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       count: items.length,
       avgMinutes: avg,
       hot: col.key !== "done" && !!budget && timed.length > 0 && avg > budget,
-      // Sorted here rather than only in the component so every consumer of the
-      // board — the day report, a future station screen — sees the same queue
-      // the floor manager arranged.
-      // The lab track is timed on its own clock against the lab_total budget, so
-      // compareQueue's last tiebreak — statusMinutes — would order it by how long
-      // the patient has been waiting somewhere else entirely (BQ-04). It keeps
-      // the SQL's ordering, as Done does.
       cards:
         col.key === "done" || SIDE_TRACK_COLUMNS.includes(col.key)
           ? items
@@ -1530,26 +1441,12 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
 
   return { cards, onFloor, columns };
 }
-
-// Server-side patient search across one day's board. Server-side because the
-// floor can hold 100+ patients and the answer must not depend on which cards a
-// column happened to have rendered — and because matching a phone number means
-// normalising it the same way the rest of the repo does.
-//
-// Returns visit ids; the board filters itself to them. Scoped to the day, so it
-// can never become a back-door patient directory.
 export async function searchDayVisits(visitDate, query, db = pool) {
   const raw = String(query || "").trim();
   if (raw.length < 2) return [];
 
   const digits = toLocal10(raw);
-  // A short numeric string is a partial phone or a file number, not a 10-digit
-  // mobile — match it as a suffix so "1547" finds P_181547 and ...81547.
   const numeric = raw.replace(/\D/g, "");
-
-  // LIKE patterns are built here rather than concatenated in SQL. Two untyped
-  // operands make Postgres resolve `||` to ARRAY concatenation, which fails with
-  // "malformed array literal" — and a complete parameter is clearer anyway.
   const like = `%${raw}%`;
   const phoneSuffix = digits.length === 10 ? `%${digits}` : null;
   const numericLike = numeric ? `%${numeric}%` : null;
@@ -1626,9 +1523,6 @@ export function getBottleneck(columns) {
 
 export async function getDayStats(visitDate, board, slaConfig, db = pool) {
   const budgets = budgetMap(slaConfig);
-  // "of N booked" is the day's expected patients: scheduled appointments that
-  // were not cancelled and did not no-show, excluding blocked patients the way
-  // every other list in this repo does (GF-10).
   const { rows } = await db.query(
     `SELECT COUNT(*) FILTER (WHERE a.status NOT IN ('cancelled', 'no_show'))::int AS booked,
             COUNT(*) FILTER (WHERE a.status = 'no_show')::int   AS no_show,
@@ -1642,9 +1536,6 @@ export async function getDayStats(visitDate, board, slaConfig, db = pool) {
   );
   const appts = rows[0] || { booked: 0, no_show: 0, cancelled: 0 };
 
-  // Admin-toggleable (floorSettings.js): while samples-only patients are
-  // hidden from the board's columns, these tiles hide them too, so a count
-  // here never says "14" while every card on screen adds up to fewer.
   const hideLabOnly = await hideLabOnlyPatients(db);
   const inBuilding = board.onFloor.filter(
     (c) => (!hideLabOnly || !c.labOnly) && !["dispensed", "exited"].includes(c.status),
@@ -1659,18 +1550,10 @@ export async function getDayStats(visitDate, board, slaConfig, db = pool) {
   const avgJourney = journeys.length
     ? Math.round(journeys.reduce((a, b) => a + b, 0) / journeys.length)
     : null;
-
-  // Samples-only patients are excluded: they hold a pre-consultation status
-  // judged against the wait-for-SD budget, but they are not in that queue and
-  // nobody is going to call them. Counting them made the tile read "7 need
-  // attention" while With SD / MO showed 0, three of the seven waiting on
-  // nothing. Their lab clock is the one that matters and it is timed separately.
   const overBudget = inBuilding.filter((c) => !c.labOnly && c.statusColour === "red").length;
   const blocked = board.onFloor.filter(
     (c) => !c.labOnly && (c.status === "blocked_reports" || c.blockedReason),
   ).length;
-  // GF-21: this counted live cards, not transitions. Measure what the label says
-  // — completed station-to-station hops today that finished inside their budget.
   const { rows: hops } = await db.query(
     `SELECT e.status,
             EXTRACT(EPOCH FROM (nxt.occurred_at - e.occurred_at)) / 60 AS minutes
@@ -1711,8 +1594,6 @@ export async function getDayStats(visitDate, board, slaConfig, db = pool) {
   };
 }
 
-// Today's average per station, for the footer strip. Reads closed transitions
-// from the log rather than the live cards, so it reflects the whole day.
 export async function getStationAverages(visitDate, slaConfig, db = pool) {
   const budgets = budgetMap(slaConfig);
   const { rows } = await db.query(
@@ -1751,9 +1632,6 @@ export async function getStationAverages(visitDate, slaConfig, db = pool) {
     byStation[key].samples += row.samples;
   }
 
-  // Two budgets are not measured by a status dwell time and so never appear in
-  // the query above: the lab track lives in its own table, and the journey total
-  // spans the whole chain (GF-07).
   const [{ lab_minutes: labMinutes, lab_samples: labSamples }] = (
     await db.query(
       `SELECT AVG(mins)::numeric(10, 1) AS lab_minutes, COUNT(*)::int AS lab_samples

@@ -1,24 +1,8 @@
-// ============================================================================
-// Scheme daily cap — how many CGHS / ECHS patients the hospital will see in a
-// day (33-PATIENT-SCHEME-PLAN.md §5, D1, D4).
-//
-// Dimension: per scheme, per calendar day, HOSPITAL-WIDE. Not per doctor and
-// not per slot — a reimbursement ceiling is an agreement with the scheme, not a
-// scheduling matter for one consultant.
-//
-// Its own switch, deliberately: SCHEDULE_ENFORCEMENT is `off` in production, and
-// a cap that inherited a disabled guard would silently never fire.
-//   off    → never checked (default)
-//   warn   → compute, attach a warning, still book
-//   strict → refuse unless an admin passes force=true
-// ============================================================================
 import pool from "../config/db.js";
 import { hasCapability, CAPABILITIES } from "../../shared/permissions.js";
 
 export const SCHEME_CAP_ENFORCEMENT = (process.env.SCHEME_CAP_ENFORCEMENT || "off").toLowerCase();
 
-// The same definition of a seat-consuming booking that availability.js uses, so
-// the cap counter and every other screen agree on what counts.
 const ACTIVE = `status NOT IN ('cancelled','no_show')`;
 
 async function capScopes(schemeCode, client) {
@@ -81,10 +65,6 @@ function bindingState(scopes, counts, date) {
 
 const allCodes = (scopes) => [...new Set(scopes.flatMap((s) => s.codes))];
 
-// How many of this scheme are already booked that day, and the ceiling.
-// `client` matters: the caller passes its transaction so the count is taken
-// under the same lock as the insert — two bookings racing at 9/10 would both
-// pass an unlocked count.
 export async function schemeDayCount(schemeCode, date, client = pool) {
   const scopes = await capScopes(schemeCode, client);
   if (!scopes.length) return null;
@@ -93,9 +73,6 @@ export async function schemeDayCount(schemeCode, date, client = pool) {
   return bindingState(scopes, counts, day);
 }
 
-// The next few dates that still have room, so a refusal is never a dead end
-// (D4). Mirrors the shape availability.js's findAvailableDoctors returns, on a
-// date axis rather than a doctor axis.
 export async function nextDatesWithRoom(
   schemeCode,
   fromDate,
@@ -116,16 +93,6 @@ export async function nextDatesWithRoom(
     .slice(0, want)
     .map(({ date, booked, cap }) => ({ date, booked, cap }));
 }
-
-// Returns null when the booking is allowed. Otherwise the same two shapes
-// bookingGuard.js uses, so callers handle one contract:
-//   { warn: true, reason: "scheme_cap_full", detail, alternatives }
-//   { blocked: true, reason: "scheme_cap_full", detail, alternatives }
-//
-// Sync-created appointments (HealthRay, Sheets) must never reach this: they
-// count toward the ceiling but cannot be refused, because HealthRay is
-// authoritative and rejecting its rows would only desync the two systems. That
-// is enforced by which callers invoke it, not by a flag here.
 export async function checkSchemeCap({ schemeCode, date, force, role }, client = pool) {
   if (SCHEME_CAP_ENFORCEMENT === "off" || !schemeCode || !date) return null;
 
@@ -138,18 +105,12 @@ export async function checkSchemeCap({ schemeCode, date, force, role }, client =
   if (SCHEME_CAP_ENFORCEMENT === "warn") {
     return { warn: true, reason: "scheme_cap_full", detail, alternatives, ...state };
   }
-  // An admin forcing past a full scheme is allowed, but it is not nothing:
-  // returning null here would let the booking through with no trace, and the
-  // audit row is the only thing that makes the ceiling real (§6). The caller
-  // proceeds on `overridden` exactly as it would on null, and logs it.
   if (force && hasCapability(role, CAPABILITIES.ADMIN)) {
     return { overridden: true, reason: "scheme_cap_full", detail, alternatives, ...state };
   }
   return { blocked: true, reason: "scheme_cap_full", detail, alternatives, ...state };
 }
 
-// Every override is written down. Without this the cap is theatre: it will be
-// forced, and nobody will be able to say how often or by whom (§6).
 export async function logCapOverride(
   { schemeCode, date, booked, cap, actorId, actorName, appointmentId = null },
   client = pool,

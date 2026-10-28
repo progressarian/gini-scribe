@@ -1,24 +1,3 @@
-// ============================================================================
-// Availability resolver — the single source of truth for "is doctor D free at
-// date+slot?". Booking, the GHM page, the OPD queue, and the patient app all
-// ask the same question through these functions.
-//
-// Model: AVAILABLE BY DEFAULT. A doctor is available every working day, all
-// slots, unless something says otherwise. The doctor_profile customizes the
-// recurring picture (days off, working slots, lunch break); date-specific
-// leave/holiday/break (doctor_unavailability) and clinic holidays are
-// exceptions on specific dates.
-//
-// Layers (highest precedence first in the resolver):
-//   day_off        weekday ∈ profile.off_weekdays (default {Sunday})
-//   clinic_holiday clinic_holidays
-//   not_working    profile.working_slots set and slot ∉ it
-//   break          slot ∈ profile.lunch_slots (recurring)
-//   leave/holiday/ doctor_unavailability (date-specific)
-//   emergency/break
-//   manual_block   appointment_slots.is_blocked
-//   full           booked ≥ capacity (capacity only if set on appointment_slots)
-// ============================================================================
 import pool from "../config/db.js";
 import { inLunch, inWorkingHours, profileFromRow } from "./slots/profileRules.js";
 import { activeTemplates, templatesOnDates } from "./slots/templateStore.js";
@@ -33,17 +12,10 @@ import {
   unavailabilityFor,
 } from "./slots/dayView.js";
 import { toMinutes } from "../../shared/slotTemplates.js";
-
-// Statuses that mean "this booking still occupies a slot" — must match the
-// existing availability endpoint so counts agree everywhere.
 const ACTIVE_BOOKING_SQL = "status NOT IN ('cancelled','no_show')";
 
-// Statuses that mean "already done / in progress" — excluded from the
-// reassignment list. Wider + case-insensitive: opd.js uses 'seen','in_visit'…
 const DONE_OR_INPROGRESS = ["cancelled", "no_show", "completed", "seen", "in_visit", "checkedin"];
 
-// Resolve a doctor row + the names it may appear under in legacy appointment
-// rows (name + short_name). Returns null if not found.
 export async function resolveDoctor(doctorId, { client = pool } = {}) {
   const r = await client.query(
     "SELECT id, name, short_name, role, specialty FROM doctors WHERE id=$1",
@@ -214,11 +186,6 @@ export async function isSlotAvailable(doctorId, dateISO, slotLabel, { client = p
   return verdict(doctor, dateISO, slotLabel);
 }
 
-/**
- * Every catalog slot for a doctor on a date, annotated with availability.
- * Returns [{ slot_label, start_time, end_time, capacity, booked, available,
- *            blocked_by }].
- */
 export async function getDoctorDayAvailability(doctorId, dateISO, { client = pool } = {}) {
   return (await getDoctorDayView(doctorId, dateISO, { client })).slots;
 }
@@ -426,10 +393,6 @@ export function rankAvailable(
   }));
 }
 
-/**
- * Across all active doctors, who is available for date+slot. Ranked: same
- * specialty/role as the vacated doctor first, then most free capacity.
- */
 export async function findAvailableDoctors(
   dateISO,
   slotLabel,
@@ -445,10 +408,6 @@ export async function findAvailableDoctors(
   });
 }
 
-/**
- * Patients currently booked to a doctor inside an unavailability window.
- * Excludes done/in-progress statuses. Flags in_progress (active_visits).
- */
 export async function getAffectedAssignments(
   doctorId,
   { startDate, endDate, slotLabels = null, client = pool } = {},

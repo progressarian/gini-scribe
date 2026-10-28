@@ -1,13 +1,3 @@
-// All-time cohort outcomes — "across every patient we have ever seen, how many
-// are doing fine and how many are not?"
-//
-// Unlike the OPD dashboard (one day's appointment list), this looks at the
-// whole patient base and ignores dates entirely: for each marker it takes the
-// patient's LATEST reading and the one before it, however far apart those are.
-//
-// The verdict rules are imported from the same module the dashboard uses, so a
-// patient can never be classified one way here and another way there.
-
 import pool from "../config/db.js";
 import {
   classifyBiomarker,
@@ -44,9 +34,6 @@ export const MARKERS = [
   { key: "weight", label: "Weight" },
 ];
 
-// Latest two readings per patient per marker, from labs and from vitals
-// (BP and weight rarely appear in lab_results). `rn = 1` is current,
-// `rn = 2` is the comparison value.
 const SQL = `
 WITH lab AS (
   SELECT patient_id, canonical_name AS marker, result::float8 AS val, test_date AS d
@@ -196,9 +183,6 @@ function finish(byPatient) {
     patients,
   };
 }
-
-// Flatten the two-baseline structure down to the one the caller asked for, so
-// the page and the export both just see `prev` / `group` / `reason`.
 export function viewFor(data, basis = "last") {
   const b = BASES.includes(basis) ? basis : "last";
   return {
@@ -220,9 +204,6 @@ export function viewFor(data, basis = "last") {
     })),
   };
 }
-
-// The full sweep costs ~2s over half a million lab rows, so hold the result
-// briefly rather than rebuilding it on every page load / filter change.
 let _cache = null;
 const TTL_MS = 10 * 60 * 1000;
 

@@ -71,11 +71,6 @@ function getClient() {
   return sheetsClient;
 }
 
-/**
- * Parse an upcoming-appointments tab into { date, headers, patients }
- * Layout: Row 0 = labels (Tomorrow/Day After/...), Row 1 = dates,
- *         Row 2 = column headers, Row 3+ = patient data.
- */
 function parseSheetRows(rows) {
   if (!rows || rows.length < 3) return { date: null, headers: [], patients: [] };
 
@@ -142,12 +137,6 @@ export async function readTodaysPatients() {
 
   return { date, waitTimeThresholds, statusNotes, patients };
 }
-
-// ── "Today's Appt" tab ──────────────────────────────────────────────────────
-// Layout differs from "LIVE View of Today's patients":
-//   Row 0: summary ("Date","15/Apr/2026","# Patients:41",...)
-//   Row 1: headers (Appointment Date, File No, Patient Name, ..., Show/No-Show)
-//   Row 2+: patient rows
 
 export async function readTodaysAppt() {
   const sheets = getClient();

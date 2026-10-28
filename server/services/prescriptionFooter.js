@@ -1,20 +1,5 @@
 import pool from "../config/db.js";
-
-// The fixed strip printed at the foot of every prescription — the clinic's
-// standing notes and the patient-app line. HealthRay lets staff edit its
-// equivalent from a settings screen; hardcoding ours meant a deploy to change a
-// phone-app name, so it lives in app_kv (2026-06-17_app_kv.sql, written to be
-// reused for exactly this kind of small runtime setting).
-
 const KEY = "rx_footer";
-
-// Also the fallback whenever the row is missing or the DB is unreachable: a
-// prescription must still print if this lookup fails, so nothing here throws.
-// The letterhead identity rides on the same row: it is the same "printed on
-// every prescription" setting, and the templates already receive this object.
-// Unlike the footer lines a blank here is never honoured — a prescription
-// without a hospital name is not a document worth printing — so each field
-// falls back to the shipped value individually.
 export const DEFAULT_HOSPITAL = {
   name: "Gini Advanced Care Hospital",
   address: "Shivalik Hospital, 2nd Floor, Sector 69, Mohali, Punjab, India",
@@ -56,8 +41,6 @@ export function normalizePrescriptionFooter(raw) {
   };
 }
 
-// Every prescription render reads this, so a per-PDF round trip would tax the
-// busiest path in the app for a value that changes a few times a year.
 let cache = null;
 let cachedAt = 0;
 const TTL_MS = 60_000;

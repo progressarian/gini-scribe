@@ -89,9 +89,6 @@ import { startGenieSyncCron } from "./services/cron/genieSync.js";
 import { startReadOnlyGuardCron } from "./services/cron/readOnlyGuard.js";
 import { startHealthrayPatientsCron } from "./services/cron/healthrayPatientsSync.js";
 
-// Cron/sync jobs run in a separate worker process (see server/worker.js) so
-// heavy HealthRay sync work cannot starve the API's DB pool or event loop.
-// Set RUN_CRON_IN_API=1 to fall back to the old single-process behavior.
 const RUN_CRON_IN_API = process.env.RUN_CRON_IN_API === "1";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -101,41 +98,28 @@ const app = express();
 app.set("trust proxy", 1); // trust first proxy (Railway/Render) for accurate IP
 app.use(cors());
 
-// Gzip compression — shrinks JSON API payloads 5-10x on the wire. threshold:0
-// forces compression even for small responses; level 6 is the sweet spot for
-// CPU vs. size. No filter override — compression's default skips already-
-// compressed media types (images, video, gzipped uploads).
 app.use(compression({ threshold: 1024, level: 6 }));
 
-// Route-aware body size limits — only upload/transcript routes get large limits
 app.use((req, res, next) => {
   const p = req.path;
 
-  // 50MB: consultation save (transcripts + full visit data), base64 file/audio uploads
   const isLarge =
     (p === "/api/consultations" && req.method === "POST") ||
     (p.includes("/visit/") && p.endsWith("/document")) ||
     p.includes("/upload-file") ||
-    // Chat attachment uploads (team & patient sides) — base64-encoded
-    // PDFs/images, capped at 10 MB raw → ~13 MB base64. Default 1 MB
-    // limit otherwise rejects the request before our route can run.
     p.endsWith("/attachments") ||
     p.endsWith("/chat-attachment") ||
     p.includes("/audio") ||
     p === "/api/convert-heic" ||
-    // Profile photo upload (base64 image ≤5MB raw → ~6.7MB JSON)
     p === "/api/patient/app/avatar" ||
     p.startsWith("/api/ai/");
 
-  // 5MB: AI-extracted documents, reasoning text, rx-feedback, history import, visit doc uploads
   const isMedium =
     p.includes("/documents") ||
     p.includes("/document") ||
     p.includes("/reasoning") ||
     p.includes("/rx-feedback") ||
     p.includes("/history") ||
-    // The letterhead logo arrives as a base64 data URI, which the 1mb default
-    // rejects for any real artwork.
     p.includes("/prescription-logo");
 
   const isStationReport =
@@ -164,7 +148,6 @@ app.use("/api", syncRoutes);
 // Extraction route (no auth — internal/testing)
 app.use("/api", extractRoutes);
 
-// Auth middleware (attaches req.doctor if valid token, blocks unauthenticated on protected routes)
 app.use(authMiddleware);
 app.use(requireAuth);
 app.use(assistedPatientGuard);
@@ -274,10 +257,6 @@ app.listen(PORT, () => {
       "⚠️  Genie sync: DISABLED — set GENIE_SUPABASE_URL and GENIE_SUPABASE_SERVICE_KEY in .env to enable Track data sync",
     );
   }
-  // Gini Flow live updates. The tailer belongs in the API process, not the
-  // worker: it feeds the screens this process is holding connections for, and
-  // reading the append-only event tables is how it hears about the worker's
-  // HealthRay sync without the two processes talking (12-REALTIME-PLAN.md).
   startEventTailer()
     .then((r) => console.log(`✅ Gini Flow live updates: tailing from`, r.watermarks))
     .catch((e) => console.warn("⚠️  Gini Flow live updates disabled:", e.message));

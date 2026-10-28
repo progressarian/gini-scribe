@@ -5,6 +5,7 @@ import { DEPOSIT_TABLES, refuseMergeWithDeposit } from "../services/billing/depo
 const APPLY = process.argv.includes("--apply");
 const ALLOW_SEX_MISMATCH = process.argv.includes("--allow-sex-mismatch");
 const ALLOW_PHONE_MISMATCH = process.argv.includes("--allow-phone-mismatch");
+const ALLOW_NAME_MISMATCH = process.argv.includes("--allow-name-mismatch");
 const PAIRS = process.argv
   .slice(2)
   .filter((a) => /^GNI-\d+=P_\d+$/.test(a))
@@ -14,7 +15,7 @@ const PAIRS = process.argv
   });
 if (!PAIRS.length) {
   console.error(
-    "Usage: node scripts/fix-obt-shell-duplicates.mjs GNI-00080=P_181841 [...] [--allow-sex-mismatch] [--allow-phone-mismatch] [--apply]",
+    "Usage: node scripts/fix-obt-shell-duplicates.mjs GNI-00080=P_181841 [...] [--allow-sex-mismatch] [--allow-phone-mismatch] [--allow-name-mismatch] [--apply]",
   );
   process.exit(1);
 }
@@ -95,7 +96,7 @@ for (const pair of PAIRS) {
       ALLOW_PHONE_MISMATCH ||
       (last10(gni.phone) === last10(real.phone) && last10(gni.phone).length === 10),
     sameSex: ALLOW_SEX_MISMATCH || gni.sex === real.sex,
-    nameOverlap: gniTokens.some((t) => realTokens.has(t)),
+    nameOverlap: ALLOW_NAME_MISMATCH || gniTokens.some((t) => realTokens.has(t)),
     gniIsPlaceholder: gni.health_id == null && /^GNI-\d+$/.test(gni.file_no),
     realIsHealthray: real.health_id != null,
   };

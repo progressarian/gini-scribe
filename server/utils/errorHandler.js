@@ -1,6 +1,3 @@
-// Log full error server-side, return the real message to the client so the
-// UI can show something more useful than "Internal server error". Honors
-// `e.status` (or `e.statusCode`) when the caller throws a typed error.
 export function handleError(res, e, context = "Request") {
   console.error(`${context} error:`, e?.message, e?.detail || "", e?.stack || "");
 

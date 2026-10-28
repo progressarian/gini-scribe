@@ -1,13 +1,6 @@
 import pool from "../config/db.js";
 import { checkPatientBlocked, resolvePatientId } from "./patientBlockGuard.js";
 
-// The walk-in booking record and the WhatsApp copy that goes with it.
-//
-// Lives here rather than in routes/walkins.js because reception's arrivals
-// screen books walk-ins too, and a second booking path that skipped
-// checkPatientBlocked would be a real safety regression — the blocklist exists
-// because some patients must not be booked.
-
 export function buildWalkinWhatsapp({ patient_name, walkin_date, time_slot, visit_type }) {
   const isNew = !visit_type || visit_type.toLowerCase().includes("new");
   const base =
@@ -33,10 +26,6 @@ export function buildWalkinWhatsapp({ patient_name, walkin_date, time_slot, visi
   return { whatsapp_message: base, additional_whatsapp_message: additional };
 }
 
-// Resolves identity, refuses a blocked patient, then writes the booking.
-// Returns { patientId, booking } — the caller decides what to do with either.
-// `guard` is the request context the blocklist needs to allow an admin override
-// and to name whoever performed it in the block log.
 export async function createWalkinBooking(fields, { force, role, actor } = {}, db = pool) {
   const {
     walkin_date,
@@ -56,9 +45,6 @@ export async function createWalkinBooking(fields, { force, role, actor } = {}, d
     throw Object.assign(new Error("walkin_date and patient_name required"), { status: 400 });
   }
 
-  // Walk-ins carry no patient_id, so resolve identity before checking the
-  // blocklist. Composing the WhatsApp copy is skipped for a blocked patient
-  // too — the booking is refused below unless an admin forces it.
   const patientId =
     fields.patient_id ?? (await resolvePatientId({ fileNo: file_no, phone: contact_number }, db));
   const blocked = await checkPatientBlocked({ patientId, force, role, actor }, db);

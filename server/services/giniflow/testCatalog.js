@@ -1,23 +1,7 @@
 import pool from "../../config/db.js";
 import { catalogBasePriceSql } from "../pricing.js";
 
-// Which station a test belongs to. The lab draws and runs a specimen; the
-// machine room sits a patient at a machine. One list, so the admin screen, the
-// order splitter and the two queues cannot disagree about what exists.
 export const CATEGORIES = ["lab", "machine"];
-
-// The clinic's test list: what the floor can order, what reception prices.
-// One table behind three screens — the consultant's picker, the MO's chips and
-// this admin view — so a test added on the floor is priced here and nowhere else.
-
-// A test the catalogue does not have yet. The floor orders things nobody
-// listed — an outside ultrasound, a one-off panel — and refusing them means the
-// order leaves Gini Flow entirely and stops being tracked. It joins the same
-// catalogue rather than becoming a free-text line, so reception prices it, the
-// lab sees it and the next consultant can pick it from the list.
-//
-// Price 0 because nobody has set one; `source` says who added it, which is how
-// reception's "prices are placeholders" warning already works.
 export async function addCatalogTest(
   name,
   { gloss = null, addedBy = null, category = "lab" } = {},

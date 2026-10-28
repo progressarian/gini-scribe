@@ -72,19 +72,6 @@ const DRAWN_STATUS_SQL = LAB_RUNGS.filter((r) => stageIndexOf(r.key) >= stageInd
   .map((v) => `'${v}'`)
   .join(", ");
 
-// The journey reception builds when a patient arrives — what this patient is
-// here for, in the order they will do it.
-// docs/gini-flow/29-RECEPTION-JOURNEY-PLAN.md
-//
-// The reference data belongs to the /flow module (visit types, step catalog,
-// per-type templates, staff) and stays there: one catalog to edit, not two. What
-// lives here is the per-visit plan.
-//
-// The plan PLANS AND SHOWS. It does not route: the board's columns and every
-// station's buttons work exactly as they did. What the plan gives is the stops
-// this patient will make, who is expected to do them, what that should take, and
-// — through the auto-tick below — where they have got to.
-
 const STEP_SELECT = `
   SELECT id, visit_id, step_order, step_catalog_id, step_name, planned_duration_min,
          station, assigned_role, assigned_staff_id, assigned_staff_name,
@@ -103,8 +90,6 @@ const shapeStep = (r) => ({
   staffName: r.assigned_staff_name,
   chainStatus: r.chain_status,
   status: r.status,
-  // A step with no board column is one nobody else can complete — the screens
-  // show a tick for exactly these.
   manual: !r.chain_status,
   startedAt: r.started_at ? new Date(r.started_at).toISOString() : null,
   completedAt: r.completed_at ? new Date(r.completed_at).toISOString() : null,
@@ -175,10 +160,6 @@ export async function skipsChiefStop(db, visitId) {
 
 const clampMinutes = (v) => Math.min(600, Math.max(0, Math.round(Number(v) || 0)));
 
-// A HealthRay case is registered at their counter, billed there, and its
-// collection and reporting times are the lab's own. Matched the way every other
-// reader of lab_cases matches — id first, healthray_uid only when the case was
-// never linked.
 const RESULTS_STATUS_SQL = LAB_RUNGS.filter((r) => stageIndexOf(r.key) >= stageIndexOf("results"))
   .flatMap((r) => r.sampleStatuses)
   .map((v) => `'${v}'`)
@@ -298,11 +279,6 @@ export async function labCaseAlreadyReported(db, visitId) {
 const trimmed = (v, max = 120) =>
   typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null;
 
-// ── Reference data → an editable plan ──────────────────────────────────────
-
-// The type's template, shaped for the builder. condition_key is carried through
-// rather than flattened: the templates already encode which steps are a choice,
-// and dropping that would quietly make every journey the maximal one.
 export async function defaultPlan(visitTypeId, db = pool) {
   const { rows } = await db.query(
     `SELECT t.step_order, t.is_default, t.condition_key,
@@ -335,12 +311,6 @@ export async function defaultPlan(visitTypeId, db = pool) {
     source: "template",
   }));
 }
-
-// Which visit type to preselect. Data, not a hardcoded id: the flags live on
-// flow_visit_types and an admin can move them. No match — an unflagged type like
-// ONLINE, a deactivated one, or a floor that has not filled the flags in — means
-// no preselection, and reception picks. A type with no template rows is also fine: the builder
-// opens empty and they add what the patient needs.
 export async function suggestVisitType(
   { isFollowUp, isWalkIn, isTests = false, isOnline = false },
   db = pool,
@@ -426,19 +396,6 @@ const insertSteps = async (client, visitId, steps) => {
     );
   }
 };
-
-// A test the desk names at check-in is an order, not a tick.
-//
-// The journey builder is the one place reception says what a patient is here
-// for, so it is the one place the orders come from: a Machine Room step IS a
-// test (one step, one machine, one order), and Blood Sample carries the lab
-// tests the desk picked, because "Blood Sample" alone does not say what to draw
-// and a collection card with no tests on it is a tube nobody can run.
-//
-// Raised unpaid on purpose. Reception is the payment desk, but raising and
-// clearing in one breath would make the billing gate a formality — so these
-// land on the payment queue like a doctor's order, and Lab 1 and the machine
-// room refuse to start until the money is recorded.
 const UNCOLLECTED = UNDRAWN_SAMPLE_STATUSES;
 
 export const labTestsOf = (steps) => [
@@ -538,8 +495,6 @@ export async function raiseOrdersFromSteps(client, visitId, steps, actorId = nul
       });
     }
 
-    // The same rule the MO's own ordering has: a test already ordered and not
-    // yet drawn is one order, not two payment cards on this desk.
     const { rows: already } = await client.query(
       `SELECT DISTINCT t.test_name
          FROM giniflow_lab_orders o
@@ -571,9 +526,6 @@ export async function raiseOrdersFromSteps(client, visitId, steps, actorId = nul
     }
   }
 
-  // One order per machine step, through the machine room's own rules rather than
-  // around them — a price to bill, a patient still on the floor, one open test
-  // per machine.
   const machines = steps.some((s) => s.catalogId) ? await getMachines(client) : [];
   for (const step of steps) {
     const machine = step.catalogId ? machineFor(machines, step.catalogId) : null;
@@ -586,8 +538,6 @@ export async function raiseOrdersFromSteps(client, visitId, steps, actorId = nul
     });
   }
 
-  // Lab Billing is a stop on the journey once there is a bill to pay. Blood
-  // Sample is already there — it is the step that carried the tests.
   if (raised.labOrderId || raised.outsideOrderId) await insertLabStepsForOrder(client, visitId);
   return raised;
 }
@@ -700,10 +650,6 @@ const requireConsultant = async (client, visitId) => {
   }
 };
 
-// Reception's arrival, in one transaction: the status the board reads, the plan
-// the floor and the patient read, and the token the patient's link needs. The
-// WhatsApp is the caller's job, AFTER the commit — a message that fails must
-// never cost the check-in.
 export async function checkInWithJourney(visitId, choices, db = pool) {
   const client = await db.connect();
   try {
@@ -833,10 +779,6 @@ async function settlePlanIn(
   visitId,
   { askedSteps, steps, visitTypeId, actorId, keepPlannedTotal },
 ) {
-  // Assigning a doctor on the journey has to mean what it looks like it
-  // means: the consultant's own queue reads giniflow_visits, not the steps.
-  // Read back from the rows just written, so the catalog's mapping decides
-  // which column a name belongs in rather than anything the client sent.
   const assigned = await client.query(
     `SELECT chain_status, assigned_staff_id::int AS staff_id
          FROM giniflow_visit_steps
@@ -961,10 +903,6 @@ export async function checkInIn(
   const alreadyPlanned = existing.rows[0].steps > 0;
   const alreadyHere = isChainStatus(current) && chainIndex(current) >= chainIndex("checked_in");
 
-  // Someone already down the floor is not arriving again — the same refusal
-  // the Arrived button has always given. A patient standing AT the desk whose
-  // status is already checked_in is the double-tap: no second event, but the
-  // journey they were being given is still attached.
   if (isChainStatus(current) && chainIndex(current) > chainIndex("checked_in")) {
     throw Object.assign(
       new Error(`${STATUS_LABEL[current] || current} — this patient is already past reception`),
@@ -991,13 +929,7 @@ export async function checkInIn(
   };
   if (!alreadyPlanned) {
     await insertSteps(client, visitId, steps);
-    // A plan attached to a patient who is already here has to agree with where
-    // they are, the same way a seeded one does.
     if (alreadyHere) await syncFromStatus(client, visitId, current);
-    // In the same transaction as the arrival: a patient checked in for tests
-    // whose orders failed to write would stand in a queue nobody can see.
-    // Guarded by `alreadyPlanned` for the same reason the steps are — a second
-    // press at a busy counter must not bill the patient twice.
     raised = await raiseOrdersFromSteps(client, visitId, steps, actorId);
     await priceOrdersFromBill(client, visitId, bill, machines);
     await syncBillCharges(client, visitId, bill, machines, await billSuppressor(client, visitId));
@@ -1016,9 +948,6 @@ export async function checkInIn(
   return { alreadyHere, alreadyPlanned, raised };
 }
 
-// Most patients on this floor are checked in by the HealthRay sync, which knows
-// nothing about this screen. Without a plan seeded for them the journey would be
-// a feature only the patients reception happened to press a button for ever got.
 export async function ensurePlan(visitId, db = pool) {
   const { rows } = await db.query(
     `SELECT v.id, v.visit_type_id, v.current_status, v.patient_id, v.visit_date,
@@ -1090,9 +1019,6 @@ export async function ensurePlan(visitId, db = pool) {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
-    // Two screens opening the same patient at once both saw zero steps above.
-    // Without the lock and this second look they would both insert orders
-    // 1..N and collide on the unique key, turning a plain read into a 500.
     await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR UPDATE`, [visitId]);
     const race = await client.query(
       `SELECT count(*)::int AS c FROM giniflow_visit_steps s
@@ -1115,8 +1041,6 @@ export async function ensurePlan(visitId, db = pool) {
         WHERE id = $1`,
       [visitId, visitTypeId, plan.reduce((sum, s) => sum + s.minutes, 0)],
     );
-    // The patient may already be halfway down the floor, so the plan they were
-    // given retrospectively has to agree with where they actually are.
     await syncFromStatus(client, visitId, visit.current_status);
     await insertLabStepsIfHealthrayCase(client, visitId);
     await client.query("COMMIT");
@@ -1129,29 +1053,7 @@ export async function ensurePlan(visitId, db = pool) {
   }
 }
 
-// ── The auto-tick ──────────────────────────────────────────────────────────
-
-// A visit that ended because the patient LEFT, not because they finished. The
-// difference matters to the plan: someone who walked out did none of it, while
-// someone who exited did all the stops the board can see.
 const ABANDONED = ["cancelled", "no_show"];
-
-// Called from inside advanceStatus, so it lands in the same transaction as the
-// status change and cannot drift from it.
-//
-// It runs on EVERY station action in the module, so it is deliberately three
-// plain UPDATEs against its own table — no inserts, no foreign keys, nothing
-// that can raise and take a nurse's "vitals done" down with it. A visit with no
-// plan matches no rows and costs one cheap statement.
-// Which of these stops the events can vouch for. A stop counts when its own
-// status was stamped, or the status that MARKS IT FINISHED was: a nurse who
-// writes `vitals_done` straight from `checked_in` did take the vitals, and the
-// readings are in that event's meta, so the vitals stop is real even though
-// `with_vitals` was never written.
-//
-// `exited` is never evidence. It follows `dispensed` in the chain, so counting it
-// would tick the pharmacy stop for every patient the counter closed without
-// dispensing — the one claim endVisit exists to avoid making.
 async function evidencedStatuses(client, visitId, statuses) {
   const { rows } = await client.query(
     `SELECT DISTINCT status FROM giniflow_visit_events
@@ -1167,8 +1069,6 @@ export async function syncFromStatus(client, visitId, toStatus, meta = null) {
     toStatus === "exited" &&
     (meta?.source === "counter_end_visit" || meta?.reason === "lab_only_reports_complete");
   if (ABANDONED.includes(toStatus)) {
-    // Never 'done': the tracker must not claim an X-Ray happened because the
-    // patient went home.
     await client.query(
       `UPDATE giniflow_visit_steps
           SET status = 'skipped'
@@ -1181,17 +1081,6 @@ export async function syncFromStatus(client, visitId, toStatus, meta = null) {
 
   const reached = chainIndex(toStatus);
   const behind = CHAIN.filter((s) => chainIndex(s) < reached);
-
-  // Everything the patient has passed is done — "at or behind", not "equal", so
-  // a status the floor skipped (allowSkip) cannot strand a step as pending.
-  //
-  // Except when the counter ended the visit. "Patient left — close visit" says
-  // one thing, that they have gone, and it is the one exit no other system
-  // vouches for: a HealthRay checkout means the consultation happened, this
-  // means only that somebody at the pharmacy pressed a button. Ticking every
-  // stop behind it had the tracker claim Prescription Explain and Pharmacy were
-  // done on visits where neither status was ever stamped — the very claim
-  // endVisit refuses to make when it writes `exited` and never `dispensed`.
   if (behind.length) {
     const evidenced = counterEnded ? await evidencedStatuses(client, visitId, behind) : behind;
     if (evidenced.length) {
@@ -1216,10 +1105,6 @@ export async function syncFromStatus(client, visitId, toStatus, meta = null) {
       );
     }
   }
-
-  // Where they are now. Several steps can share one column — an SD consultation
-  // and a chief consultation are two stops in one — so the earliest unfinished
-  // one is the live step and the rest wait their turn.
   await client.query(
     `UPDATE giniflow_visit_steps
         SET status = 'in_progress',
@@ -1236,12 +1121,6 @@ export async function syncFromStatus(client, visitId, toStatus, meta = null) {
       )`,
     [visitId, toStatus],
   );
-
-  // The patient has left the building having done everything the board could
-  // see — the rule above has already completed those. What can still be pending
-  // is a stop with no column that nobody ticked, and that one was genuinely not
-  // done. Ordering matters: skipping first would strike through the pharmacy
-  // stop of every patient who finished properly.
   if (toStatus === "exited") {
     await client.query(
       `UPDATE giniflow_visit_steps
@@ -1251,20 +1130,6 @@ export async function syncFromStatus(client, visitId, toStatus, meta = null) {
     );
   }
 }
-
-// Lab Billing is the counter a patient pays at before the lab draws anything
-// (34-LAB-BILLING-STEP-PLAN.md). Reception and admin tick it, because most tests
-// are still billed in HealthRay where this side sees no money at all. When the
-// money IS here — a Gini order, settled — the tick is not a judgement anybody
-// needs to make, so it happens on its own. One way only: nothing here unticks a
-// step a person ticked.
-// Tests ordered mid-visit. A patient checked in as a plain follow-up who is then
-// sent for bloods has a journey with no lab stops at all, and `addStep` appends
-// at MAX+1 — which would put the counter after the pharmacy. These go in front
-// of the work still to come, which is where the patient is actually going.
-//
-// Runs inside the caller's transaction: an order that rolls back must not leave
-// stops behind for tests nobody ordered.
 
 export async function placeTestsBeforeDoctors(client, visitId) {
   const { rows: plan } = await client.query(
@@ -1375,11 +1240,6 @@ async function insertAutoSteps(client, visitId, wanted, placeIn) {
 }
 
 export async function insertLabStepsForOrder(client, visitId) {
-  // In front of what the patient has not done yet. A journey whose every stop is
-  // finished takes them at the end, which is still the next thing that happens.
-  // A plan that already holds the sample puts the counter in front of THAT: the
-  // lab cannot draw until the money is settled, wherever the rest of the journey
-  // has got to.
   return insertAutoSteps(client, visitId, ["lab_billing", "blood_sample"], (plan) => {
     const pendingSample = plan.find(
       (s) => s.step_catalog_id === "blood_sample" && s.status === "pending",
@@ -1531,22 +1391,6 @@ export async function insertLabStepsIfHealthrayCase(client, visitId) {
   return insertLabStepsForOrder(client, visitId);
 }
 
-// The lab's own record, read back onto the journey. Blood Sample is a stop
-// nobody here works: the sample is drawn by the lab, and a HealthRay case that
-// was collected is evidence the journey can trust on its own.
-//
-// Lab Billing is different. HealthRay never sends payment data through the
-// sync — every payment field on lab_cases (payment_status, balance_amount,
-// amount_received, payment_history) comes back null on every case, paid or
-// not (confirmed 15 Sep 2026) — so a HealthRay case existing is NOT evidence
-// it was paid for. Ticking it from hr_cases alone let the lab draw and report
-// an unpaid HealthRay-ordered sample with no payment recorded anywhere in
-// Scribe (P_161750, case 19918). Lab Billing for a HealthRay case is only ever
-// ticked by reception's own hand (setStepStatus), never inferred from the draw.
-//
-// `skipped` is included deliberately: the exit sweep strikes through whatever is
-// still pending when a patient leaves, and evidence from the lab beats a guess
-// made on the way out.
 export async function syncLabStepsFromLab(db, visitId) {
   const { rows } = await db.query(
     `SELECT
@@ -1680,13 +1524,6 @@ export async function setStepStatus(stepId, status, db = pool) {
     throw Object.assign(new Error("Unknown step status"), { status: 400 });
   }
 
-  // A stop only becomes tickable when the ones before it are finished. Billing
-  // sits seventh of eight in every template, and a tick available from check-in
-  // let a patient be marked billed before they had seen the doctor.
-  //
-  // Enforced here as well as hidden on the screen: a hidden button is not a
-  // rule, and this one decides whether a patient's record says they paid.
-  // Undoing is never blocked — a mis-tick has to be correctable.
   if (status === "done") {
     const { rows: earlier } = await db.query(
       `SELECT prev.step_name
@@ -1773,17 +1610,11 @@ export async function removeStep(stepId, db = pool) {
   if (!rows.length) throw Object.assign(new Error("Step not found"), { status: 404 });
   return getJourney(rows[0].visit_id, db);
 }
-
-// The order arrives as the full list of step ids. Renumbering inside one
-// transaction is what the deferrable unique key on (visit_id, step_order) is for.
 export async function reorderSteps(visitId, stepIds, db = pool) {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
     await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR UPDATE`, [visitId]);
-    // A list that is missing a step — someone else added one while this screen
-    // was open — would renumber around it and collide at COMMIT, losing the
-    // whole reorder. Refused up front, with the reason.
     const { rows } = await client.query(
       `SELECT count(*)::int AS c FROM giniflow_visit_steps WHERE visit_id = $1`,
       [visitId],
@@ -1811,11 +1642,6 @@ export async function reorderSteps(visitId, stepIds, db = pool) {
   return getJourney(visitId, db);
 }
 
-// ── The patient's own view ─────────────────────────────────────────────────
-
-// Same shape the /flow tracker returns, so one public page serves both modules.
-// Everything here is visible to anyone holding the link, so it carries a first
-// name and nothing else that identifies the patient.
 export async function trackByToken(token, db = pool) {
   const { rows } = await db.query(
     `SELECT v.id, v.current_status, v.planned_total_min, v.paused_at, p.name,
@@ -1845,8 +1671,6 @@ export async function trackByToken(token, db = pool) {
     current_step: currentStep,
     step_index: currentStep ? doneCount + 1 : doneCount,
     total_steps: totalCount,
-    // dispensed as well as exited: the board calls both terminal, and a patient
-    // holding their medicines should not be shown a countdown.
     remaining_min:
       isTerminalStatus(visit.current_status) || ABANDONED.includes(visit.current_status)
         ? 0

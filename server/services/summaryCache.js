@@ -1,7 +1,4 @@
 import pool from "../config/db.js";
-
-// Clears BOTH pre- and post-visit summary cache for a single appointment.
-// Fire-and-forget — never throws.
 export async function invalidateAppointmentSummaries(appointmentId) {
   const aid = Number(appointmentId);
   if (!aid) return;
@@ -19,12 +16,6 @@ export async function invalidateAppointmentSummaries(appointmentId) {
     console.error("[summaryCache] invalidateAppointment failed:", err?.message || err);
   }
 }
-
-// Clears BOTH pre- and post-visit summary cache for the patient's CURRENT
-// (i.e. most recent) appointment. Past appointments keep their historical
-// summary frozen — that snapshot represents what was true at that visit.
-// A brand-new appointment row has no cache, so the next view generates fresh.
-// Fire-and-forget — never throws.
 export async function invalidatePatientSummaries(patientId) {
   const pid = Number(patientId);
   if (!pid) return;

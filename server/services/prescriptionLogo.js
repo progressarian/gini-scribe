@@ -4,24 +4,9 @@ import { DEFAULT_LOGO_DATA_URI } from "../templates/prescriptionTemplate.js";
 
 const require = createRequire(import.meta.url);
 
-// The letterhead mark, uploaded from Settings instead of committed to the repo.
-// Stored in app_kv beside the footer text, as a data URI: Puppeteer renders the
-// PDF with no network access back to this server, so the bytes have to travel
-// with the HTML either way — keeping them in the row avoids a storage round trip
-// on the hottest path in the app.
-//
-// Everything is normalised on the way IN, never on the way out: one upload is
-// resized once, and every prescription printed afterwards pays nothing.
-
 const KEY = "rx_logo";
-
-// A letterhead prints the mark ~46px tall, and the footer strip ~30px. 200px of
-// source covers both at print resolution with room to spare; anything larger is
-// weight in every PDF for detail no printer resolves.
 const MAX_HEIGHT = 200;
 
-// Guards the request body before sharp ever sees it. The client caps too, but
-// that check is a courtesy, not a control.
 export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 
 const ACCEPTED = new Set(["png", "jpeg", "jpg", "webp", "gif", "svg"]);
@@ -38,10 +23,6 @@ export function decodeDataUri(dataUri) {
   }
   return { mime: m[1].toLowerCase(), buf };
 }
-
-// Re-encoded to PNG rather than passed through: the letterhead is navy, and a
-// JPEG has no alpha channel, so a logo saved as JPEG would print its own white
-// rectangle over the header. PNG keeps whatever transparency the file had.
 export async function normalizeLogo(dataUri) {
   const { buf } = decodeDataUri(dataUri);
   const sharp = require("sharp");
@@ -57,9 +38,6 @@ export async function normalizeLogo(dataUri) {
     throw Object.assign(new Error("Use a PNG, JPG, WebP or SVG file"), { status: 400 });
   }
 
-  // Trimming the transparent or flat-colour margin is what makes an app icon
-  // usable as a letterhead: the artwork is usually a small mark centred in a
-  // large square, and untrimmed it scales to a speck between two columns.
   img = img.trim({ threshold: 12 });
 
   const out = await img
@@ -75,11 +53,6 @@ export async function normalizeLogo(dataUri) {
     warning: await backgroundWarning(out.data),
   };
 }
-
-// An image with no transparent pixel anywhere is a rectangle, and a rectangle
-// on the navy band prints as a visible tile — which is exactly how the app icon
-// looked when it was first dropped into the letterhead. Detected here so the
-// admin is told at upload, not after printing a day of prescriptions.
 async function backgroundWarning(png) {
   try {
     const sharp = require("sharp");
@@ -127,8 +100,6 @@ export async function setPrescriptionLogo(dataUri) {
   return cache;
 }
 
-// Reset drops the row rather than writing the shipped artwork back into it, so
-// "default" keeps meaning whatever the deployed build ships.
 export async function resetPrescriptionLogo() {
   await pool.query("DELETE FROM app_kv WHERE key=$1", [KEY]);
   cache = { dataUri: DEFAULT_LOGO_DATA_URI, isDefault: true };

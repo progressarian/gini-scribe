@@ -2,18 +2,8 @@ import pool from "../../config/db.js";
 import { syncAppointmentsToFlow } from "./appointmentSync.js";
 import { autoCategoriseDay } from "./triage.js";
 
-// Reproduces the floor in docs/gini-flow-manager.html: 18 booked, 14 in the
-// building, 8 done, a hot "Waiting — doctor" column, 2 blocked, 3 on the lab track.
-//
-// Gini Flow has no check-in of its own yet and deliberately does not read the
-// older flow_* module, so until the station screens land this seeder IS the
-// board's data. Events are written with explicit backdated occurred_at values so
-// every timer, average and bottleneck the board computes is real arithmetic over
-// a real log rather than a mocked number.
-
 const MINUTE = 60_000;
 
-// [status, minutes before now that it was entered]
 const JOURNEYS = [
   {
     key: "blocked",
@@ -200,8 +190,6 @@ const JOURNEYS = [
       ["blocked_reports", 20],
     ],
   },
-  // Blocked, then unblocked — the recovery path the coordinator sees most often,
-  // and the one that exercises resume_status.
   {
     key: "recovered",
     category: "getting_better",
@@ -236,13 +224,6 @@ const doneJourney = (offsetMin, totalMin) => ({
   ],
 });
 
-// `events` are [track, status, minutesAgo] — the log the lab and reception
-// screens will write for real. Without them the lab_total and reception_payment
-// footer budgets have nothing to measure (GF-07, GF-12).
-// One order per bucket, so a walkthrough can click every button on the lab
-// screen. `payment_pending` and `paid` both sit in the Sample-pending column but
-// are different states to the technician: the first is blocked on reception, the
-// second is the only one that offers "Mark sample collected".
 const LAB_ORDERS = [
   {
     journey: "with_sd_b",
@@ -349,18 +330,6 @@ const ACTOR_FOR = {
   exited: "pharmacy",
 };
 
-// ── Tomorrow, for the triage board ─────────────────────────────────────────
-// The floor journeys above are TODAY: they build the board and every station
-// queue. The triage board works the day BEFORE the day, off `appointments` —
-// biomarkers, the confirmation call, the patient's own pre-visit note — and the
-// seeder wrote none of those, so that one screen was the only station with
-// nothing to show.
-//
-// One profile per column the engine can produce, plus the two the coordinator
-// most needs to see: a patient with no numbers at all (the call list) and one
-// whose diagnosis triggers a routing suggestion.
-//
-// [key, current HbA1c, previous HbA1c, extra markers, call status, extras]
 const TRIAGE_PROFILES = [
   [
     "t_crisis",
@@ -458,13 +427,6 @@ async function seedTriageDay(client, patientIds, triageDate) {
       );
     }
 
-    // The booking itself. `appointments` has no is_demo column, so these rows
-    // are scoped the way every other demo write is — to the ZZDEMO_ patients,
-    // which is what cleanDemoDay deletes by.
-    // Both shapes the column actually holds, alternating — the patient app's
-    // ARRAY of per-medicine adherence, and the summary OBJECT carrying a pct.
-    // A demo that only ever wrote one of them would leave the other reader
-    // untested on screen.
     const compliance = opts.compliance ?? null;
     const items = [
       {
@@ -517,18 +479,6 @@ async function seedTriageDay(client, patientIds, triageDate) {
   }
   return { created, triageDate, previousDate, lifestyleFileNos };
 }
-
-// ── The consultation, for the consultant station ───────────────────────────
-// The floor journeys give every station a QUEUE. The consult screen behind that
-// queue reads the patient's CHART — biomarkers on the appointment, the lab
-// table, diagnoses, medications, the MO's plan and their proposals — and the
-// seeder wrote none of it, so opening a demo patient gave a screen of "nothing
-// recorded" boxes: no key numbers, no labs, an empty prescription, no diagnoses.
-//
-// Each profile is keyed on the journey's own category, so what the consultant
-// reads agrees with the colour the board gave the card. A `no_reports` patient
-// deliberately gets nothing — that is what the category means, and inventing
-// numbers for them would make the one honest empty state impossible to see.
 const CONSULT_PROFILES = {
   worse_out_of_range: {
     current: {
@@ -788,9 +738,6 @@ async function seedConsultFor(
     );
   }
 
-  // Today's appointment — where the consult screen reads "today's numbers" and
-  // the compliance percentage from. The visit is pointed at it, which is the
-  // join `getConsult` makes.
   const { rows: appt } = await client.query(
     `INSERT INTO appointments (patient_id, patient_name, file_no, appointment_date, status,
                                visit_type, biomarkers, pre_visit_compliance, pre_visit_compliance_at,
@@ -863,9 +810,6 @@ async function seedConsultFor(
       [patientId, name, composition, dose, doctor, await dateAt(3)],
     );
   }
-
-  // Vitals taken at the chair an hour ago — what the consult header's BP and
-  // weight come from, and what tops up today's numbers.
   await client.query(
     `INSERT INTO giniflow_vitals (visit_id, patient_id, weight, height, bmi, bp_sys, bp_dia,
                                   pulse, spo2, source, recorded_by, recorded_at)
@@ -884,8 +828,6 @@ async function seedConsultFor(
     ],
   );
 
-  // The MO's workup note and their proposals — the first section the consultant
-  // reads, and the one the screen opens on.
   await client.query(
     `INSERT INTO giniflow_sd_notes (visit_id, plan, source, authored_by)
      VALUES ($1, $2, 'typed', $3)
@@ -907,11 +849,6 @@ async function seedConsultFor(
 
 const DEMO_MARKER = "giniflow-demo";
 
-// GF-03: the seeder used to pick real patients (`SELECT id FROM patients ORDER BY
-// id LIMIT n`) and write fabricated categories, vitals and blocked reasons against
-// them. Those are clinical attributes about identifiable people, in a DPDP-covered
-// production database. It creates its own patients instead, marked unmistakably in
-// both the name and the file number, and deletes them again on clean.
 export const DEMO_FILE_PREFIX = "ZZDEMO_";
 
 const DEMO_NAMES = [
@@ -937,9 +874,6 @@ const DEMO_NAMES = [
   "Demo Rajesh Bansal",
   "Demo Kiran Bala",
   "Demo Surinder Pal",
-  // Tomorrow's triage list is a different set of people from today's floor, so
-  // the roster has to be long enough for both — a wrapped name would put the
-  // same person on two days with two different clinical stories.
   "Demo Paramjit Singh",
   "Demo Veena Sharma",
   "Demo Karan Malhotra",
@@ -952,10 +886,6 @@ const DEMO_NAMES = [
   "Demo Meena Kumari",
   "Demo Jagdish Rai",
 ];
-
-// Sex follows the NAME, not the row's parity — which is what it used to do, so
-// every other demo card read "Demo Sunita Devi · 52M". On a screen built to be
-// shown to clinicians that is the first thing anyone notices.
 const FEMALE_MARKERS = [
   "kaur",
   "devi",
@@ -1009,8 +939,6 @@ async function pickDoctors(client) {
   return { chief: rows[0]?.id ?? null, sd: rows[1]?.id ?? rows[0]?.id ?? null };
 }
 
-// GF-P0: a destructive/fabricating routine needs more than a role check on the
-// live host. Both entry points refuse unless GINIFLOW_ALLOW_DEMO is set.
 export const demoAllowed = () => process.env.GINIFLOW_ALLOW_DEMO === "1";
 
 const assertDemoAllowed = () => {
@@ -1022,14 +950,6 @@ const assertDemoAllowed = () => {
   }
 };
 
-// `date` exists so the smoke suite can seed a day of its own. Once the HealthRay
-// sync runs, today belongs to real patients — a test that seeds into it collides
-// with them and asserts against a mixture of both.
-// `sdId` is who the demo patients belong to. Left null they belong to NOBODY,
-// which is the point: `groupOf` treats an unassigned visit as the viewer's own,
-// so whoever opens the MO station can pick every demo patient up. Assigning them
-// to a real doctor — which this used to do unconditionally — put the entire demo
-// day in "With another SD", disabled, for everyone except that one person.
 export async function seedDemoDay({ db = pool, date = null, sdId = null } = {}) {
   assertDemoAllowed();
   const client = await db.connect();
@@ -1048,21 +968,12 @@ export async function seedDemoDay({ db = pool, date = null, sdId = null } = {}) 
       doneJourney(91, 70),
     ];
 
-    // Today's floor and tomorrow's triage list are DIFFERENT people, as they are
-    // on a real day. Sharing them meant one patient carried two clinical stories
-    // — the consult trail said HbA1c 7.2 → 7.9 while the triage row said 8.2 for
-    // the same week — and whichever appointment sorted latest silently became
-    // the "previous reading" the consult screen measured today against.
     const patientIds = await ensureDemoPatients(client, journeys.length + TRIAGE_PROFILES.length);
     const floorPatientIds = patientIds.slice(0, journeys.length);
     const triagePatientIds = patientIds.slice(journeys.length);
     const doctors = await pickDoctors(client);
     const now = Date.now();
     const at = (minsAgo) => new Date(now - minsAgo * MINUTE).toISOString();
-
-    // Bulk inserts, not a loop of round trips: the seeder runs against a remote
-    // pooler and ~200 sequential statements inside one transaction is long
-    // enough for the connection to be dropped mid-way.
     const visitRows = journeys.map((journey, i) => ({
       journey,
       patientId: floorPatientIds[i],
@@ -1128,9 +1039,6 @@ export async function seedDemoDay({ db = pool, date = null, sdId = null } = {}) 
       ],
     );
 
-    // The chart behind each card: biomarkers on the appointment, the lab table,
-    // diagnoses, medications, vitals, the MO's note and their proposals. Without
-    // it every consult screen opened on a wall of "nothing recorded" boxes.
     const { rows: floorDay } = await client.query(
       `SELECT COALESCE($1::date, (NOW() AT TIME ZONE 'Asia/Kolkata')::date)::text AS d`,
       [date],
@@ -1161,9 +1069,6 @@ export async function seedDemoDay({ db = pool, date = null, sdId = null } = {}) 
       const visitId = byKey[order.journey];
       if (!visitId) continue;
       const created = await client.query(
-        // amount_paid follows payment_status: the money is what the status is
-        // derived from now, so a demo order marked paid with nothing collected
-        // would render as unpaid on the very screen the demo is showing.
         `INSERT INTO giniflow_lab_orders
            (visit_id, ordered_by, urgency, payment_status, amount_total, sample_status,
           created_at, updated_at, uploaded_at, amount_paid)
@@ -1200,8 +1105,6 @@ export async function seedDemoDay({ db = pool, date = null, sdId = null } = {}) 
       labOrders++;
     }
 
-    // Tomorrow, for the triage board. Written inside the same transaction as the
-    // floor, so a demo day is all-or-nothing.
     const { rows: nextDay } = await client.query(
       `SELECT (COALESCE($1::date, (NOW() AT TIME ZONE 'Asia/Kolkata')::date) + 1)::date::text AS d`,
       [date],
@@ -1210,14 +1113,9 @@ export async function seedDemoDay({ db = pool, date = null, sdId = null } = {}) 
 
     await client.query("COMMIT");
 
-    // The triage day's VISIT rows are built the same way the board builds them
-    // on open — through the appointment sync, not by hand — so the seeder can
-    // never produce a shape the real path would not (18-TRIAGE-BOARD-PLAN §3.2b).
     await syncAppointmentsToFlow({ date: triage.triageDate, db });
     const categorised = await autoCategoriseDay(triage.triageDate, { db });
 
-    // `lifestyle_flagged` lives on the visit, which only exists once the sync
-    // above has run — so it is stamped here rather than with the appointment.
     if (triage.lifestyleFileNos.length) {
       await db.query(
         `UPDATE giniflow_visits v SET lifestyle_flagged = TRUE
@@ -1255,41 +1153,22 @@ export async function seedDemoDay({ db = pool, date = null, sdId = null } = {}) 
   }
 }
 
-// Removes only rows this seeder created. Never date-wide: once check-in ships,
-// a date-wide delete here would wipe the live floor (GF-01).
 export async function cleanDemoDay(db = pool) {
   assertDemoAllowed();
   const client = await db.connect();
   try {
     await client.query("BEGIN");
-    // Scoped by the demo file-number prefix, so a real patient can never be
-    // caught by any of the deletes below.
     const demoPatients = await client.query(
       `SELECT id FROM patients WHERE file_no LIKE $1 || '%'`,
       [DEMO_FILE_PREFIX],
     );
     const demoIds = demoPatients.rows.map((r) => r.id);
-
-    // `is_demo` alone is no longer enough: reception's walk-in check-in creates
-    // an ordinary visit, so a smoke run leaves one behind that is not flagged —
-    // and the patient delete below then fails on its foreign key, which leaves
-    // demo people sitting in production.
     const { rowCount } = await client.query(
       `DELETE FROM giniflow_visits WHERE is_demo OR patient_id = ANY($1::int[])`,
       [demoIds],
     );
 
-    // A finalized demo consult writes into the CHART — `consultations` and
-    // `medications` — because that is the point: the consultant station has one
-    // prescription history and does not keep a demo copy of it. Those rows
-    // reference the demo patient, so deleting the patient fails on the foreign
-    // key, and a failed clean leaves demo people sitting in production.
-    //
     if (demoIds.length) {
-      // The pharmacy station marks a collection row per medicine, and those
-      // reference both the patient and the medication — so they have to go
-      // first, or the medications delete below fails on the foreign key and the
-      // clean leaves demo people sitting in production.
       await client.query(`DELETE FROM medicine_collections WHERE patient_id = ANY($1::int[])`, [
         demoIds,
       ]);
@@ -1297,22 +1176,14 @@ export async function cleanDemoDay(db = pool) {
       await client.query(`DELETE FROM vitals WHERE patient_id = ANY($1::int[])`, [demoIds]);
       await client.query(`DELETE FROM diagnoses WHERE patient_id = ANY($1::int[])`, [demoIds]);
       await client.query(`DELETE FROM lab_results WHERE patient_id = ANY($1::int[])`, [demoIds]);
-      // The consult seed writes a report document per lab date, and documents
-      // reference the patient — so they go with them or the patient delete
-      // fails on the foreign key and demo people stay in production.
       await client.query(`DELETE FROM documents WHERE patient_id = ANY($1::int[])`, [demoIds]);
       await client.query(`DELETE FROM consultations WHERE patient_id = ANY($1::int[])`, [demoIds]);
     }
 
-    // The triage day's appointments. They carry no is_demo flag — the column
-    // does not exist — so they are scoped to the demo patients, and they have to
-    // go AFTER the visits above, which reference them.
     if (demoIds.length) {
       await client.query(`DELETE FROM appointments WHERE patient_id = ANY($1::int[])`, [demoIds]);
     }
 
-    // Reception's walk-in check-in writes the hospital's own booking record, so
-    // a smoke run leaves one behind unless it is cleaned with the patient.
     await client.query(`DELETE FROM walkin_bookings WHERE file_no LIKE $1 || '%'`, [
       DEMO_FILE_PREFIX,
     ]);

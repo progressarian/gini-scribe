@@ -27,6 +27,16 @@ import {
 import { assertPatientExplained, handoverBlockFor } from "../services/giniflow/pharmacyStation.js";
 
 const router = Router();
+
+function pageOf(query) {
+  const limit = Math.min(100, Math.max(1, parseInt(query.limit, 10) || 25));
+  const page = Math.max(1, parseInt(query.page, 10) || 1);
+  return { page, limit, offset: (page - 1) * limit };
+}
+
+const totalOf = (rows) => rows[0]?.total_count ?? 0;
+const withoutTotal = (rows) => rows.map(({ total_count, ...r }) => r);
+
 const canMark = requireCapability(CAPABILITIES.MED_COLLECTION);
 
 // Roll-up status from line counts.
@@ -75,6 +85,8 @@ async function stampRxJourney(client, patientId, apptId, date, markedBy) {
 router.get("/pharmacy/collection/today", async (req, res) => {
   try {
     const date = req.query.date || today();
+    const q = String(req.query.q || "").trim();
+    const { page, limit, offset } = pageOf(req.query);
     const { rows } = await pool.query(
       `SELECT p.id AS patient_id, p.name AS patient_name, p.file_no, p.phone,
               a.id AS appointment_id, a.doctor_name,
@@ -82,7 +94,8 @@ router.get("/pharmacy/collection/today", async (req, res) => {
               COUNT(mc.*) FILTER (WHERE mc.status='given')::int     AS given,
               COUNT(mc.*) FILTER (WHERE mc.status='not_given')::int AS not_given,
               COUNT(mc.*) FILTER (WHERE mc.status='partial')::int   AS partial,
-              COUNT(m.*) FILTER (WHERE mc.id IS NULL)::int          AS pending
+              COUNT(m.*) FILTER (WHERE mc.id IS NULL)::int          AS pending,
+              COUNT(*) OVER ()::int AS total_count
          FROM medications m
          JOIN patients p ON p.id = m.patient_id
          LEFT JOIN LATERAL (
@@ -96,12 +109,14 @@ router.get("/pharmacy/collection/today", async (req, res) => {
            ON mc.medication_id = m.id AND mc.collected_date = $1::date
         WHERE m.is_active AND m.visit_status = 'current'
           AND m.last_prescribed_date = $1::date
+          AND ($2::text = '' OR p.name ILIKE '%' || $2 || '%' OR p.file_no ILIKE '%' || $2 || '%')
         GROUP BY p.id, p.name, p.file_no, p.phone, a.id, a.doctor_name
-        ORDER BY p.name`,
-      [date],
+        ORDER BY p.name, p.id
+        LIMIT $3 OFFSET $4`,
+      [date, q, limit, offset],
     );
-    const patients = rows.map((r) => ({ ...r, status: rollup(r) }));
-    res.json({ date, count: patients.length, patients });
+    const patients = withoutTotal(rows).map((r) => ({ ...r, status: rollup(r) }));
+    res.json({ date, total: totalOf(rows), page, limit, count: patients.length, patients });
   } catch (e) {
     handleError(res, e, "Collection worklist");
   }
@@ -226,36 +241,45 @@ router.get("/pharmacy/collection/report", async (req, res) => {
     const from = req.query.from || today();
     const to = req.query.to || from;
     const doctor = req.query.doctor ? `%${req.query.doctor}%` : null;
-    const statusFilter = req.query.status || ""; // "" | all | partial | none
+    const statusFilter = req.query.status || "";
+    const { page, limit, offset } = pageOf(req.query);
 
     const { rows } = await pool.query(
-      `SELECT mc.patient_id, p.name AS patient_name, p.file_no,
-              mc.collected_date::text AS collected_date,
-              a.doctor_name,
-              COUNT(*)::int                                        AS lines,
-              COUNT(*) FILTER (WHERE mc.status='given')::int       AS given,
-              COUNT(*) FILTER (WHERE mc.status='not_given')::int   AS not_given,
-              COUNT(*) FILTER (WHERE mc.status='partial')::int     AS partial
-         FROM medicine_collections mc
-         JOIN patients p ON p.id = mc.patient_id
-         LEFT JOIN appointments a ON a.id = COALESCE(
-            mc.appointment_id,
-            (SELECT id FROM appointments a2
-              WHERE a2.patient_id = mc.patient_id AND a2.appointment_date = mc.collected_date
-              ORDER BY created_at DESC LIMIT 1))
-        WHERE mc.collected_date BETWEEN $1 AND $2
-          AND ($3::text IS NULL OR a.doctor_name ILIKE $3)
-        GROUP BY mc.patient_id, p.name, p.file_no, mc.collected_date, a.doctor_name
-        ORDER BY mc.collected_date DESC, p.name`,
-      [from, to, doctor],
+      `WITH summary AS (
+         SELECT mc.patient_id, p.name AS patient_name, p.file_no,
+                mc.collected_date::text AS collected_date,
+                a.doctor_name,
+                COUNT(*)::int                                        AS lines,
+                COUNT(*) FILTER (WHERE mc.status='given')::int       AS given,
+                COUNT(*) FILTER (WHERE mc.status='not_given')::int   AS not_given,
+                COUNT(*) FILTER (WHERE mc.status='partial')::int     AS partial
+           FROM medicine_collections mc
+           JOIN patients p ON p.id = mc.patient_id
+           LEFT JOIN appointments a ON a.id = COALESCE(
+              mc.appointment_id,
+              (SELECT id FROM appointments a2
+                WHERE a2.patient_id = mc.patient_id AND a2.appointment_date = mc.collected_date
+                ORDER BY created_at DESC LIMIT 1))
+          WHERE mc.collected_date BETWEEN $1 AND $2
+            AND ($3::text IS NULL OR a.doctor_name ILIKE $3)
+          GROUP BY mc.patient_id, p.name, p.file_no, mc.collected_date, a.doctor_name
+       ), rolled AS (
+         SELECT s.*,
+                CASE WHEN given = lines THEN 'all'
+                     WHEN not_given = lines THEN 'none'
+                     ELSE 'partial' END AS status
+           FROM summary s
+       )
+       SELECT *, COUNT(*) OVER ()::int AS total_count
+         FROM rolled
+        WHERE ($4::text = '' OR status = $4)
+        ORDER BY collected_date DESC, patient_name, patient_id
+        LIMIT $5 OFFSET $6`,
+      [from, to, doctor, statusFilter, limit, offset],
     );
 
-    const withStatus = rows.map((r) => ({
-      ...r,
-      status: r.given === r.lines ? "all" : r.not_given === r.lines ? "none" : "partial",
-    }));
-    const out = statusFilter ? withStatus.filter((r) => r.status === statusFilter) : withStatus;
-    res.json({ from, to, count: out.length, rows: out });
+    const out = withoutTotal(rows);
+    res.json({ from, to, total: totalOf(rows), page, limit, count: out.length, rows: out });
   } catch (e) {
     handleError(res, e, "Collection report");
   }
@@ -266,18 +290,22 @@ router.get("/pharmacy/collection/not-collected", async (req, res) => {
   try {
     const from = req.query.from || today();
     const to = req.query.to || from;
+    const { page, limit, offset } = pageOf(req.query);
     const { rows } = await pool.query(
       `SELECT mc.id, mc.collected_date::text AS collected_date, mc.reason, mc.qty_note,
               mc.marked_by, p.id AS patient_id, p.name AS patient_name, p.file_no, p.phone,
-              m.name AS medicine, m.pharmacy_match, m.dose, m.frequency
+              m.name AS medicine, m.pharmacy_match, m.dose, m.frequency,
+              COUNT(*) OVER ()::int AS total_count
          FROM medicine_collections mc
          JOIN patients p ON p.id = mc.patient_id
          JOIN medications m ON m.id = mc.medication_id
         WHERE mc.status='not_given' AND mc.collected_date BETWEEN $1 AND $2
-        ORDER BY mc.collected_date DESC, p.name`,
-      [from, to],
+        ORDER BY mc.collected_date DESC, p.name, mc.id
+        LIMIT $3 OFFSET $4`,
+      [from, to, limit, offset],
     );
-    res.json({ from, to, count: rows.length, rows });
+    const out = withoutTotal(rows);
+    res.json({ from, to, total: totalOf(rows), page, limit, count: out.length, rows: out });
   } catch (e) {
     handleError(res, e, "Not-collected list");
   }

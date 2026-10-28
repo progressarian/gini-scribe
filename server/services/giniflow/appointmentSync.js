@@ -31,18 +31,6 @@ import { syncDayHolds } from "./coordinatorHold.js";
 
 const DIRECT_CONSULT_HEALTHRAY_WRITES = ["no_show", "cancelled"];
 
-// Vitals HealthRay recorded, which its appointment status cannot express.
-//
-// The nurses take vitals on HealthRay's own screen, and HealthRay has no
-// appointment status meaning "vitals done" — a patient whose BP was measured
-// stays `checkedin` there and so stayed `checked_in` here, sitting in the vitals
-// queue with their readings already on file. On the day this was written that
-// was 11 of the 38 patients the station was showing as waiting, one of them a
-// 166/106 nobody had looked at.
-//
-// So the `vitals` table is read as the observation it is. Only forward, only
-// from a pre-vitals status, and only once: a patient already at `vitals_done` or
-// beyond no longer matches, which is what makes this safe to run every poll.
 const PRE_VITALS = ["checked_in", "vitals_pending", "with_vitals"];
 
 async function observeHealthrayVitals(client, day) {
@@ -70,10 +58,6 @@ async function observeHealthrayVitals(client, day) {
   for (const row of rows) {
     try {
       await client.query("BEGIN");
-      // `allowSkip`, deliberately: checked_in → vitals_done is a three-step jump
-      // the chain would otherwise refuse, and this is exactly the caller that
-      // flag exists for — an observation of a patient further along than we
-      // last saw them, with no knowledge of how they got there.
       await advanceStatus(client, {
         visitId: row.visit_id,
         toStatus: "vitals_done",
@@ -83,8 +67,6 @@ async function observeHealthrayVitals(client, day) {
           source: "healthray",
           observed: "vitals",
           vitals_id: row.vitals_id,
-          // HealthRay stores most of these as a date with no clock time, so the
-          // event carries what it actually knows rather than implying a minute.
           recorded_at: row.recorded_at,
         },
       });
@@ -98,34 +80,11 @@ async function observeHealthrayVitals(client, day) {
   return moved;
 }
 
-// Turns HealthRay's appointment list into Gini Flow visits.
-//
-// HealthRay has no webhooks, so `appointments` is kept current by the worker's
-// own polling loop; this reads that table rather than calling HealthRay again.
-// A screen polling every 10s must never reach HealthRay directly — tight polling
-// trips their WAF into a 403 IP block.
-//
-// It does NOT touch the older flow_* module. `appointments` is the hospital's
-// data, shared by both, which is the one thing the separation decision allows.
-
 const SYNCABLE = Object.keys(HEALTHRAY_STATUS_TO_CHAIN);
 const BILL_RECHECK_MS = 60 * 60 * 1000;
 const BILL_RECHECK_IN_FLIGHT = 2;
 const billRechecks = new Map();
 
-// A visit the floor deliberately took OFF the day must not be put back on it by
-// a poll. `booked` is where every day starts, so it is never evidence of
-// anything: HealthRay reports `scheduled` for any appointment nobody has
-// touched, and an OBT-booked row keeps that value permanently because the
-// appointment exists only in our database — HealthRay was never told about it.
-// So `scheduled` → `booked` over a no-show or a cancellation is the sync
-// asserting the absence of news as news, and it undid reception twice in fifty
-// minutes on 3 Sep 2026.
-//
-// Only `booked` is refused. A target further along the chain IS real evidence —
-// a patient marked no-show who is later checked in at the desk did turn up, and
-// that should still come through. Un-cancelling is a decision, not an
-// observation, so it stays with the desk's own Undo button.
 const revivesException = (currentStatus, target) =>
   isExceptionStatus(currentStatus) && target === "booked";
 
@@ -137,11 +96,6 @@ const absentAfterArrival = (currentStatus, target) =>
   !NOT_ARRIVED.includes(currentStatus) &&
   !isExceptionStatus(currentStatus);
 
-// HealthRay reports `in_visit` when the patient reaches the consultation stage,
-// not when a doctor starts. Advancing everyone straight into `with_doctor` would
-// show one doctor seeing four patients at once — the exact bug the older module
-// hit. So the sync parks them in the queue and only moves one patient into the
-// room when the room is free.
 const roomFree = async (client, visitDate, roomStatus) => {
   const { rows } = await client.query(
     `SELECT 1 FROM giniflow_visits v
@@ -159,34 +113,10 @@ async function consultRoomFree(client, visitDate) {
   return roomFree(client, visitDate, "with_doctor");
 }
 
-// The same rule for the Chief Endocrinologist's room. One patient at a time:
-// the Chief works in HealthRay, so nobody here will ever move them out of the
-// room, and without this every patient of the day would read as being with the
-// Chief simultaneously.
 async function chiefRoomFree(client, visitDate) {
   return roomFree(client, visitDate, "with_sd");
 }
 
-// The pharmacy leg HealthRay cannot see, and the one visit it may not close.
-//
-// A prescription written in Scribe is closed by a station screen or not at all:
-// this side holds the record of what was explained and what was handed over, and
-// a clock ending the visit destroys that record with no way to re-enter it. The
-// sweep below therefore passes over any visit carrying a `consult_finalize`
-// event. A HealthRay prescription has no such record to lose, so the sweep still
-// drains it.
-//
-// HealthRay's `completed` means the consultation is over, and it was mapped
-// straight to `exited` — so a patient walked out of the system the moment the
-// doctor finished, and no visit in the table's history has ever held
-// `doctor_done` or `pharmacy_pending`. The counter's queue was not empty, it was
-// unreachable.
-//
-// A patient with medicines prescribed today and nothing recorded against them in
-// `medicine_collections` still has to be told what they are and then collect
-// them, so `completed` parks them at the START of that leg — the Rx Explain
-// desk — and the nurse hands them on to the counter. Nothing is invented: the
-// evidence is a prescription with no dispensing record.
 const PHARMACY_LEG = ["doctor_done", "rx_pending", "with_rx", "pharmacy_pending", "dispensed"];
 
 const atPharmacyLeg = (currentStatus, target, online = false) =>
@@ -221,11 +151,6 @@ async function patientsAwaitingMedicines(client, day) {
   return new Set(rows.map((r) => r.patient_id));
 }
 
-// For the days the pharmacy screen is not worked: a patient parked on the leg
-// would stay there all day and the board would fill with a queue nobody is
-// standing in, so past three times the station's own budget the sync completes
-// the exit itself. Behind the manual-floor flag — once the counter records its
-// own exits, a timer doing it is a step nobody took.
 async function pharmacyGraceMinutes(client) {
   const { rows } = await client.query(
     `SELECT budget_minutes FROM giniflow_sla_config WHERE station = 'pharmacy'`,
@@ -279,16 +204,6 @@ async function sweepPharmacyLeg(client, day, graceMinutes) {
   return swept;
 }
 
-// A lab-only visit is over when its last report lands. HealthRay will never say
-// so — it has no consultation to complete, so the appointment sits at
-// `checkedin` for ever: across the six days Gini Flow has run, 41 lab-only
-// visits were created and not one of them ever exited. They stayed in "In
-// building now" all day, could never reach "Completed", and their open clock
-// went on counting against a floor they had already left.
-//
-// The evidence is the same one the lab station reads: every case of the day
-// reported. The grace period is short because nothing follows a report — it
-// only covers the patient still at the counter collecting a printout.
 export const LAB_ONLY_EXIT_GRACE_MINUTES = 0;
 
 const LAB_ONLY_DONE_STATUSES = ["results_ready", "uploaded", "reported", "sent_outside", "done"];
@@ -423,9 +338,6 @@ export async function sweepLabOnlyExits(client, day, graceMinutes = LAB_ONLY_EXI
         toStatus: "exited",
         actorRole: "system",
         allowSkip: true,
-        // Dated when the patient actually finished — the last report — not when
-        // the sweep happened to notice. Stamping NOW would give a visit closed
-        // days later a journey of several thousand minutes.
         occurredAt: row.exit_at,
         meta: {
           source: "giniflow",
@@ -565,16 +477,6 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
   try {
     const day = date || (await client.query(`SELECT ${IST_TODAY}::text AS d`)).rows[0].d;
 
-    // Blocked patients are excluded here as they are everywhere else in this
-    // repo — a blocked patient should not appear on a floor board.
-    // One row per PATIENT, not per appointment. A patient can hold several
-    // appointments on one day — five did today, one of them "cancelled" plus
-    // "checkedin". Since there is exactly one visit per patient per day, two rows
-    // fight over it and the sync writes an event for each on every run: the visit
-    // oscillated checked_in → cancelled → checked_in forever.
-    //
-    // The winner is the appointment furthest along the chain, with cancelled and
-    // no-show ranked last: a patient with a cancelled slot and a live one is here.
     const { rows: appts } = await client.query(
       `SELECT DISTINCT ON (a.patient_id)
               a.id, a.patient_id, a.status, a.time_slot,
@@ -627,17 +529,6 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
       [day, SYNCABLE, LAB_ONLY_DOCTOR],
     );
 
-    // The consultant the patient booked with, in one statement for the whole
-    // day. It runs outside the per-appointment loop deliberately: that loop
-    // skips any visit whose status already matches HealthRay, which on a normal
-    // day is every one of them — so an assignment written in there would almost
-    // never run.
-    //
-    // COALESCE, never an overwrite: a consultant who has already claimed the
-    // patient keeps them, because who is in the room beats who was booked.
-    // Assignment stays even on a manual floor: who the patient is booked with is
-    // part of the list reception is given, not a step anybody performs. Still a
-    // COALESCE — a consultant who has claimed them keeps them.
     result.repointed = (
       await client.query(
         `UPDATE giniflow_visits v
@@ -735,30 +626,16 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
     result.assigned = assigned.rowCount;
     result.followedDoctor = await followAppointmentDoctors(client, day, db);
 
-    // Vitals are taken at the vitals station and recorded there. Reading
-    // HealthRay's would fill a chart nobody on this floor wrote.
     result.vitalsObserved = manualFloor() ? 0 : await observeHealthrayVitals(client, day);
 
-    // The exit is the counter's to record. A timer that closes a visit thirty
-    // minutes after the patient reached the pharmacy leg is a step nobody took,
-    // and on a manual floor the counter's own End visit button is the only
-    // thing that ends a day (38-MANUAL-FLOOR-PLAN.md).
     result.pharmacySwept = manualFloor()
       ? 0
       : await sweepPharmacyLeg(client, day, await pharmacyGraceMinutes(client));
-    // Not gated with the pharmacy sweep above: a samples-only patient never
-    // reaches the pharmacy or Rx leg, so the counter's End visit button — the
-    // only manual close on this floor — can never be pressed for them. Gating
-    // this too is what left them in "In building now" all day with no station
-    // able to end it. The reports being in IS the floor's own record here.
     result.labOnlyBilling = await addLabOnlyBillingSteps(client, day);
     result.labOnlySwept = await sweepLabOnlyExits(client, day);
     result.reopenedAfterLabOnly = await reopenAfterLabOnlyExit(client, day);
     result.lateTestsClosed = await sweepLateTestExits(client, day);
     result.coordinatorHolds = await syncDayHolds(client, day);
-    // Only ever used to choose `rx_pending` over `exited`, and on a manual floor
-    // `exited` is not a target the sync can have — so the query is skipped rather
-    // than run every 30 seconds for an answer nothing reads.
     const awaitingMedicines = manualFloor()
       ? new Set()
       : await patientsAwaitingMedicines(client, day);
@@ -777,17 +654,6 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
         appt.direct_consult
           ? DIRECT_CONSULT_HEALTHRAY_WRITES.includes(status)
           : healthrayMayWrite(status) || (appt.online_journey && status === "exited");
-
-      // Nothing to do for a visit already at or past the target, or for one the
-      // floor took off the day: skip it without opening a transaction. A
-      // BEGIN/COMMIT per appointment over the connection pooler is what made a
-      // full day take 20 seconds — and a cancelled patient would otherwise open
-      // one on every poll, all day, to write an event nobody wants.
-      // A step that belongs to a station is the floor's to record, not
-      // HealthRay's. The sync may only write the steps nobody works — the
-      // consultation, and the two absences (39-HYBRID-FLOOR-PLAN.md §4).
-      // Without this the 30-second poll walks a patient forward that nobody
-      // moved, and undoes a no-show reception marked by hand.
       if (appt.visit_id && (!mayWrite(target) || absentAfterArrival(appt.current_status, target))) {
         result.refused++;
         continue;
@@ -874,22 +740,11 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
           result.created++;
         }
 
-        // The same rule for the row that was just created, which would
-        // otherwise be walked forward to HealthRay's status in the same tick — a
-        // step from the sync by the back door. A visit is created at `booked` and
-        // stays there until a person arrives the patient, including one HealthRay
-        // already shows as checked in.
         if (!mayWrite(target) || absentAfterArrival(currentStatus, target)) {
           await client.query("COMMIT");
           result.refused++;
           continue;
         }
-
-        // Never move a patient backwards: a station screen may have advanced
-        // them past what HealthRay knows about, and HealthRay lags by a poll.
-        // Re-checked here and not only above because the ON CONFLICT insert
-        // above returns the EXISTING row's status when a visit was created
-        // between the read and now — which can be a cancellation.
         const alreadyThere =
           currentStatus === target ||
           currentStatus === BACK_FOR_TESTS ||
@@ -904,12 +759,6 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
           result.unchanged++;
           continue;
         }
-
-        // THE HOLD. A step HealthRay reports is only written once every station
-        // before it has recorded its own — otherwise the patient stays exactly
-        // where the floor left them and the desk that owes the step is named on
-        // the board. An absence (`no_show`, `cancelled`) is not a step anybody
-        // performs, so it is never held.
         if (holdOnUnrecorded() && isChainStatus(target)) {
           const owed = await firstUnrecordedStation(client, visitId);
           if (owed) {
@@ -954,13 +803,6 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
           appointment_id: appt.id,
           observed_from: currentStatus,
         };
-
-        // The back-fill, and the one place the allowlist has to be checked on a
-        // status other than the target. Advancing a patient into the consultant's
-        // queue used to imply the arrival that must have happened on the way —
-        // which writes reception's own step for them, and hides the fact that the
-        // desk never recorded it. The arrival is theirs; the chain simply carries
-        // the gap, and the rail is drawn from events so the un-ticked step shows.
         if (
           healthrayMayWrite("checked_in") &&
           isChainStatus(effective) &&
@@ -995,8 +837,6 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
       }
     }
 
-    // Last, so it reads the floor AFTER this tick's own advances rather than
-    // reporting a gap the same run just closed.
     const observed = await recordHealthrayObservation(client, day);
 
     return { date: day, considered: appts.length, ...result, ...observed };

@@ -1,5 +1,3 @@
-// Canonical name mapping for lab results — ensures consistent names across all routes
-// so outcomes page, visit page, and OPD page all show the same data.
 const CANONICAL_MAP = {
   hba1c: "HbA1c",
   "glycated hemoglobin": "HbA1c",
@@ -292,8 +290,6 @@ function stripEmbeddedDate(str) {
   return str.replace(/\s*\(\d{1,2}\/\d{1,2}\/\d{2,4}\)\s*$/i, "").trim();
 }
 
-// Strips "Serum", "S.", "Sr.", "B." lab-report prefixes so variants like
-// "S. Ferritin" and "Serum Calcium" collapse onto the same canonical name.
 function stripReportPrefix(str) {
   return str.replace(/^(serum|plasma|s\.?|sr\.?|b\.?)\s+/i, "").trim();
 }
@@ -305,11 +301,6 @@ export const getCanonical = (name) => {
   if (CANONICAL_MAP[cleaned]) return CANONICAL_MAP[cleaned];
   const stripped = stripReportPrefix(cleaned);
   if (CANONICAL_MAP[stripped]) return CANONICAL_MAP[stripped];
-
-  // Strip parenthetical suffixes — report extraction often returns names like
-  // "Glycated Hemoglobin (HbA1c)" or "HbA1c (%)" that don't match the map.
-  // But skip stripping when the parenthetical content is a clinical qualifier
-  // that changes the test identity (e.g. "Creatinine (Urine)" ≠ "Creatinine").
   const parenMatch = stripped.match(/\(([^)]+)\)/);
   const CLINICAL_QUALIFIER = /\b(urine|random|fasting|post\s*prandial|pp\b|gtt|\d+\s*h(ou)?r)\b/i;
   const parenIsClinical = parenMatch && CLINICAL_QUALIFIER.test(parenMatch[1]);
@@ -318,9 +309,6 @@ export const getCanonical = (name) => {
     const noParens = stripped.replace(/\s*\([^)]*\)\s*/g, "").trim();
     if (noParens && noParens !== stripped && CANONICAL_MAP[noParens])
       return CANONICAL_MAP[noParens];
-
-    // Try the content inside parentheses as a standalone lookup, e.g.
-    // "Glycated Hemoglobin (HbA1c)" → try "hba1c"
     if (parenMatch) {
       const inside = parenMatch[1].trim().toLowerCase();
       if (CANONICAL_MAP[inside]) return CANONICAL_MAP[inside];

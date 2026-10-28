@@ -1,13 +1,5 @@
-// Prescription PDF builder used by the "Paste Clinical Notes" flow.
-// Generates a sectioned A4 prescription mirroring how HealthRay prescriptions
-// are laid out — header, patient meta, then one section per data block:
-// symptoms → diagnoses → meds → previous meds → labs → vitals → investigations
-// → lifestyle → follow-up → advice. Always stamps a "Created by Scribe" footer.
-
 import { getPrescriptionFooter, normalizeHospital } from "./prescriptionFooter.js";
 
-// pdfkit is CJS-only — load lazily via dynamic import so module load doesn't
-// break in ESM-quirky setups (tests, type-checking, etc.).
 async function loadPdfKit() {
   const mod = await import("pdfkit");
   return mod.default || mod;
@@ -117,10 +109,6 @@ export async function buildPrescriptionPdf({ patient = {}, doctor = {}, parsed =
     doc.on("error", reject);
   });
 
-  // ─── HEADER ────────────────────────────────────────────────────────────
-  // Same identity as the Puppeteer letterhead, read from the same setting: this
-  // builder carried its own copy of the address and a second phone number, so
-  // the two prescription paths already printed different contact details.
   const hospital = normalizeHospital((await getPrescriptionFooter())?.hospital);
   doc.fillColor(TEAL).font("Helvetica-Bold").fontSize(20).text(hospital.name);
   doc.fillColor(MUTED).fontSize(9).text(`${hospital.address} · ${hospital.phone}`);

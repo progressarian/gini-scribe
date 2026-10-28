@@ -1,7 +1,3 @@
-// Supabase storage keys must be ASCII-only and URL-safe; filenames that come
-// from the OS (especially after renaming) often contain em-dashes, smart
-// quotes, or other unicode that Supabase rejects with InvalidKey. Sanitize
-// for the key while preserving the extension.
 export function sanitizeForStorageKey(name) {
   if (!name) return `file_${Date.now()}`;
   const lastDot = name.lastIndexOf(".");

@@ -155,7 +155,9 @@ router.post("/crm/referrals", crm, express.json(), async (req, res) => {
   try {
     res.json(await createReferral(req.crmUser, req.body));
   } catch (e) {
-    handleError(res, e, "Log referral");
+    if (e?.status === 400) return res.status(400).json({ error: e.message, fields: e.fields });
+    console.error("Log referral error:", e?.message);
+    res.status(500).json({ error: "Unable to log the referral. Please try again." });
   }
 });
 

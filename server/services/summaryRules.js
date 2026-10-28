@@ -1,6 +1,3 @@
-// Server-side rule engine — mirrors src/components/visit/summaryRules.js
-// No React imports. Pure JS.
-
 const LAB_ALIASES = {
   HbA1c: ["HbA1c", "Glycated Hemoglobin", "A1c", "Glycated Haemoglobin", "HBA1C"],
   FBS: [
@@ -56,11 +53,6 @@ function daysSince(dateStr) {
   return Math.round((Date.now() - new Date(dateStr).getTime()) / 86400000);
 }
 
-// Freshness window for "current value" rules. Labs/vitals older than this
-// are considered stale and won't trigger RED/AMBER alerts (to avoid alarming
-// the doctor with data that may have changed). Set to 120 days (one follow-up
-// cycle, ~4 months). GREEN rules have no freshness check — positive signals
-// are never stale.
 const FRESH_DAYS = 120;
 function isFresh(dateStr) {
   return dateStr != null && daysSince(dateStr) <= FRESH_DAYS;
@@ -84,10 +76,6 @@ function hasMed(meds, ...names) {
     names.some((n) => (m.name || "").toLowerCase().includes(n.toLowerCase())),
   );
 }
-
-// Classify a medication by drug class so stopped-med alerts can carry
-// class-specific clinical implications instead of a generic "treatment gap" note.
-// Matches on brand AND generic names commonly seen in Indian outpatient scripts.
 const MED_CLASSES = [
   {
     className: "thyroid",
@@ -383,9 +371,6 @@ export function runSummaryRules({
   const hba1cH = getLabHist(labHistory, "HbA1c");
   const uacrH = getLabHist(labHistory, "UACR");
 
-  // ─── RED ─────────────────────────────────────────────────────────────────────
-
-  // R1: Missing ACE/ARB with UACR > 30 in T2DM
   if (isT2DM && uacr != null && uacr > 30 && !hasACEorARB) {
     red.push({
       id: "r1_ace_missing",
@@ -395,7 +380,6 @@ export function runSummaryRules({
     });
   }
 
-  // R2: HbA1c rising for 3 consecutive visits
   if (hba1cH.length >= 3) {
     const [a, b, c] = hba1cH.slice(-3).map((v) => parseFloat(v.result));
     if (c > b && b > a && !isNaN(a) && !isNaN(b) && !isNaN(c)) {
@@ -408,7 +392,6 @@ export function runSummaryRules({
     }
   }
 
-  // R3: HbA1c critically high (> 10%) — only if measurement is fresh
   if (hba1c != null && hba1c > 10 && isFresh(hba1cInfo?.date)) {
     red.push({
       id: "r3_hba1c_critical",
@@ -418,8 +401,6 @@ export function runSummaryRules({
     });
   }
 
-  // R4: Recently stopped medication (within 60 days) — exclude non-clinical stops
-  // Skip: data cleanup, medication switches/changes, HealthRay auto-stops, external doctor continuations
   const SKIP_PATTERNS = [
     "duplicate",
     "data cleanup",
@@ -548,11 +529,6 @@ export function runSummaryRules({
     });
   }
 
-  // R5 removed — the summary should surface clinical findings (labs, vitals,
-  // compliance), not document-review todos. "Unreviewed report" alerts belong
-  // in a separate inbox/notification surface, not in the visit summary panel.
-
-  // R6: Compliance critically low (< 50%)
   if (prep.medPct != null && prep.medPct < 50) {
     red.push({
       id: "r6_compliance_critical",
@@ -562,7 +538,6 @@ export function runSummaryRules({
     });
   }
 
-  // R7: BP critically elevated and worsening — only if vitals are fresh
   if (
     latestV?.bp_sys != null &&
     latestV.bp_sys > 150 &&

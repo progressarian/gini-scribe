@@ -1,7 +1,16 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import api from "../../services/api.js";
 import { URGENCIES } from "../../../shared/crmVocab.js";
+import {
+  REFERRAL_FIELD_LIMITS,
+  referralFieldError,
+  referralFormErrors,
+  referralPhoneDigits,
+} from "../../../shared/crmReferralRules.js";
+import { errorText } from "../../components/crm/import/importText.js";
+
+const FIELD_ORDER = ["patient_name", "patient_phone", "reason_category", "expected_action"];
 
 // Log a referral (brief §6).
 //
@@ -32,6 +41,9 @@ export default function AddReferralPage() {
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
+  const [errors, setErrors] = useState({});
+  const [touched, setTouched] = useState({});
+  const formRef = useRef(null);
 
   useEffect(() => {
     api
@@ -46,24 +58,78 @@ export default function AddReferralPage() {
     }
   }, [doctorId, doctorName]);
 
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  const canSave = form.patient_name.trim() || form.patient_phone.trim();
+  const hasPatient = Boolean(form.patient_name.trim() || form.patient_phone.trim());
+
+  const errorFor = (key, values) =>
+    key === "patient_name"
+      ? referralFormErrors(values).patient_name
+      : referralFieldError(key, values[key]);
+
+  const set = (k, v) =>
+    setForm((f) => {
+      const next = { ...f, [k]: v };
+      setErrors((x) => {
+        const updated = { ...x };
+        for (const key of k === "patient_phone" ? [k, "patient_name"] : [k]) {
+          if (touched[key] || x[key]) updated[key] = errorFor(key, next) || undefined;
+        }
+        return updated;
+      });
+      return next;
+    });
+
+  const touch = (key) => {
+    setTouched((t) => ({ ...t, [key]: true }));
+    setErrors((x) => ({ ...x, [key]: errorFor(key, form) || undefined }));
+  };
 
   const save = async () => {
-    if (!canSave) return;
+    const found = referralFormErrors(form);
+    setErrors(found);
+    setTouched(Object.fromEntries(FIELD_ORDER.map((k) => [k, true])));
+    const first = FIELD_ORDER.find((k) => found[k]);
+    if (first) {
+      setErr(null);
+      formRef.current?.querySelector(`#ref-${first}`)?.focus();
+      return;
+    }
     setSaving(true);
     setErr(null);
     try {
       const { data } = await api.post("/api/crm/referrals", {
         referring_doctor_id: doctorId,
         ...form,
+        patient_phone: form.patient_phone ? referralPhoneDigits(form.patient_phone) : "",
       });
       navigate(`/crm/home?referral=${encodeURIComponent(data.referral_code)}`);
     } catch (e) {
-      setErr(e?.response?.data?.error || "Could not log the referral");
+      const fields = e?.response?.data?.fields;
+      if (fields) setErrors(fields);
+      setErr(errorText(e, "Unable to log the referral."));
       setSaving(false);
     }
   };
+
+  const errorCount = FIELD_ORDER.filter((k) => errors[k]).length;
+
+  const inputProps = (key, extra = {}) => ({
+    id: `ref-${key}`,
+    className: "rep__input",
+    value: form[key],
+    onChange: (e) => set(key, e.target.value),
+    onBlur: () => touch(key),
+    maxLength: REFERRAL_FIELD_LIMITS[key],
+    "aria-invalid": Boolean(errors[key]),
+    "aria-describedby": errors[key] ? `ref-${key}-err` : undefined,
+    ...extra,
+  });
+
+  const fieldError = (key) =>
+    errors[key] && (
+      <span className="dfm__err" id={`ref-${key}-err`}>
+        {errors[key]}
+      </span>
+    );
 
   return (
     <div className="rep">
@@ -77,25 +143,57 @@ export default function AddReferralPage() {
         </div>
       </header>
 
-      {err && <div className="rep__err">{err}</div>}
+      {err && (
+        <div className="rep__err" role="alert">
+          {err}
+        </div>
+      )}
 
-      <div className="rep__form">
+      <form
+        className="rep__form"
+        ref={formRef}
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          save();
+        }}
+      >
         <section className="rep__field">
           <span className="rep__label">Patient</span>
-          <input
-            className="rep__input"
-            value={form.patient_name}
-            onChange={(e) => set("patient_name", e.target.value)}
-            placeholder="Name"
-            autoFocus
-          />
-          <input
-            className="rep__input"
-            type="tel"
-            value={form.patient_phone}
-            onChange={(e) => set("patient_phone", e.target.value)}
-            placeholder="Phone — how we match them at registration"
-          />
+          <span className="dfm__hint">Enter the name, the mobile, or both.</span>
+          <div className={`dfm__field ${errors.patient_name ? "dfm__field--err" : ""}`}>
+            <label className="dfm__label" htmlFor="ref-patient_name">
+              Name
+            </label>
+            <input
+              {...inputProps("patient_name", {
+                placeholder: "Ramesh Kumar",
+                autoComplete: "off",
+                autoFocus: true,
+              })}
+            />
+            {fieldError("patient_name")}
+          </div>
+          <div className={`dfm__field ${errors.patient_phone ? "dfm__field--err" : ""}`}>
+            <label className="dfm__label" htmlFor="ref-patient_phone">
+              Mobile
+            </label>
+            <input
+              {...inputProps("patient_phone", {
+                type: "tel",
+                inputMode: "numeric",
+                autoComplete: "off",
+                placeholder: "10-digit mobile",
+                maxLength: 14,
+                onChange: (e) => set("patient_phone", referralPhoneDigits(e.target.value)),
+              })}
+            />
+            {errors.patient_phone ? (
+              fieldError("patient_phone")
+            ) : (
+              <span className="dfm__hint">How we match them at registration.</span>
+            )}
+          </div>
         </section>
 
         <section className="rep__field">
@@ -107,6 +205,7 @@ export default function AddReferralPage() {
               <button
                 key={l.id}
                 type="button"
+                aria-pressed={form.service_line_id === l.id}
                 className={`rep__chip ${form.service_line_id === l.id ? "rep__chip--on" : ""}`}
                 onClick={() => set("service_line_id", form.service_line_id === l.id ? null : l.id)}
               >
@@ -123,6 +222,7 @@ export default function AddReferralPage() {
               <button
                 key={u.value}
                 type="button"
+                aria-pressed={form.urgency === u.value}
                 className={`rep__chip ${form.urgency === u.value ? "rep__chip--on" : ""}`}
                 onClick={() => set("urgency", u.value)}
               >
@@ -132,46 +232,46 @@ export default function AddReferralPage() {
           </div>
         </section>
 
-        <section className="rep__field">
-          <span className="rep__label">
+        <section className={`rep__field ${errors.reason_category ? "dfm__field--err" : ""}`}>
+          <label className="rep__label" htmlFor="ref-reason_category">
             Reason <em>optional</em>
-          </span>
+          </label>
           <input
-            className="rep__input"
-            value={form.reason_category}
-            onChange={(e) => set("reason_category", e.target.value)}
-            placeholder="Chest pain, second opinion…"
+            {...inputProps("reason_category", { placeholder: "Chest pain, second opinion…" })}
           />
+          {fieldError("reason_category")}
           {/* Not a clinical note. Anything clinical belongs in the record, not
               in a field the growth team can read. */}
           <span className="rep__hint">Keep this non-clinical — a category, not a history.</span>
         </section>
 
-        <section className="rep__field">
-          <span className="rep__label">
+        <section className={`rep__field ${errors.expected_action ? "dfm__field--err" : ""}`}>
+          <label className="rep__label" htmlFor="ref-expected_action">
             Expected action <em>optional</em>
-          </span>
+          </label>
           <input
-            className="rep__input"
-            value={form.expected_action}
-            onChange={(e) => set("expected_action", e.target.value)}
-            placeholder="Cardiology opinion, admission…"
+            {...inputProps("expected_action", { placeholder: "Cardiology opinion, admission…" })}
           />
+          {fieldError("expected_action")}
         </section>
-      </div>
 
-      <div className="rep__save">
-        <button
-          className="rep__btn rep__btn--primary rep__btn--lg"
-          onClick={save}
-          disabled={saving || !canSave}
-        >
-          {saving ? "Saving…" : "Log referral"}
-        </button>
-        <span className="rep__hint rep__hint--center">
-          {canSave ? "You'll own the follow-up on this one" : "A name or a phone number is needed"}
-        </span>
-      </div>
+        <div className="rep__save">
+          <button
+            type="submit"
+            className="rep__btn rep__btn--primary rep__btn--lg"
+            disabled={saving}
+          >
+            {saving ? "Saving…" : "Log referral"}
+          </button>
+          <span className="rep__hint rep__hint--center" role="status">
+            {errorCount
+              ? `Fix ${errorCount} highlighted field${errorCount === 1 ? "" : "s"} before saving.`
+              : hasPatient
+                ? "You'll own the follow-up on this one"
+                : "A name or a mobile number is needed"}
+          </span>
+        </div>
+      </form>
     </div>
   );
 }

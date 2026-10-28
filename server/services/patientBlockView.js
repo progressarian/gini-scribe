@@ -1,12 +1,3 @@
-// What a given role is allowed to see about a block.
-//
-// The badge goes to everyone who can see the patient at all; the reason, note,
-// blocker name and date go only to ADMIN and CLINICAL_WRITE holders. Reception
-// and OBT are the roles that trigger refused bookings, so this has to be
-// applied to the 409 body as well as to the API responses — hence a shared
-// module rather than a helper inside the router.
-//
-// Design: docs/PATIENT_BLOCKLIST_PLAN.md §3.4
 import { hasAnyCapability, CAPABILITIES } from "../../shared/permissions.js";
 import { blockReasonLabel } from "../../shared/patientBlockReasons.js";
 

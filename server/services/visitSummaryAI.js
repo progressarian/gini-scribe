@@ -1,8 +1,3 @@
-// Generates a one-paragraph clinical visit summary via Claude. The summary is
-// written as a doctor's narrative for the prescription PDF — not a JSON
-// document. Idempotency / persistence is the caller's responsibility (write
-// the result to doctor_summaries as a new version).
-
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = "claude-sonnet-4-6";
 
@@ -66,8 +61,6 @@ function buildContext(data) {
   const fbsLatest = pickLab("fbs");
   const ldlLatest = pickLab("ldl", "ldl cholesterol");
 
-  // labHistory[k] is newest-first (DB query ORDER BY test_date DESC),
-  // so arr[0] is the latest reading and arr[1] is the immediately-prior one.
   const previousOf = (key) => {
     const aliases = {
       hba1c: ["HbA1c", "hba1c", "A1c"],

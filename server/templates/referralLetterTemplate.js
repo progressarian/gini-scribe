@@ -2,19 +2,6 @@ import { escapeHtml as escape, LETTERHEAD_CSS, letterheadHtml } from "./prescrip
 import { normalizeHospital } from "../services/prescriptionFooter.js";
 import { specialtyLabel, specialtyIcon, urgencyMeta } from "../../shared/giniflowReferrals.js";
 
-// The referral letter — docs/gini-flow/19-REFERRALS-STATION-PLAN.md §7.
-//
-// The prototype has no letter at all: no template, no preview, no window.print(),
-// no @media print. "Referral letter" exists there only as a button that toasts.
-// So the letter is designed here, and the one rule it inherits is that it must
-// look like the prescription — same `.rx-header`, same hospital line, same
-// Instrument Serif / Outfit / DM Mono stack, imported rather than re-typed. A
-// letter that looks like it came from somewhere else reads as coming from
-// somewhere else.
-//
-// Rendered by generateReferralLetterPdf() in services/prescriptionHtmlPdf.js,
-// which shares the one warm Chromium rather than launching a second.
-
 const LETTER_CSS = `
 .rl-body{padding:20px 22px}
 .rl-date{font-family:var(--fm);font-size:11px;color:var(--ink3);margin-bottom:14px;display:flex;justify-content:space-between;gap:12px;align-items:baseline}
@@ -66,8 +53,6 @@ const fmtDateTime = (value) =>
     timeZone: "Asia/Kolkata",
   });
 
-// DOB prints as a date, never as a locale string with a weekday — a receiving
-// clinic matches it character by character against their own record.
 const fmtDob = (value) => {
   if (!value) return null;
   const d = new Date(value);
@@ -84,9 +69,6 @@ const fmtDate = (value) =>
     timeZone: "Asia/Kolkata",
   });
 
-// "e.g. HbA1c, UACR, eGFR, Retinopathy report from Oct 2025" is one free-text
-// field on the form, so the letter splits it the way it was typed rather than
-// demanding the desk enter a structured list.
 const splitInvestigations = (raw) =>
   String(raw || "")
     .split(/[,\n·;]+/)
@@ -115,9 +97,6 @@ export function buildReferralLetterHtml(data = {}) {
     trend = [],
   } = data;
 
-  // Three states, and each says something different to a prescriber. "Not asked"
-  // must never render as an empty line, because an empty allergy field on a
-  // letter reads as "none".
   const allergyText =
     allergies?.status === "known" && allergies.note
       ? { label: allergies.note, unknown: false }
@@ -125,8 +104,6 @@ export function buildReferralLetterHtml(data = {}) {
         ? { label: "None known — asked at referral", unknown: false }
         : { label: "NOT ASKED — please check with the patient before prescribing", unknown: true };
 
-  // Only what the chart actually holds. A findings row for a value nobody
-  // measured would be a fabricated observation on a clinical document.
   const findingRows = !findings
     ? []
     : [

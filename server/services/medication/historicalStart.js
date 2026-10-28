@@ -1,18 +1,3 @@
-// ── Historical started_date lookup ──────────────────────────────────────────
-// When a patient's prescription is re-extracted or re-synced, each medication's
-// `started_date` should be the EARLIEST time we've ever seen that drug in this
-// patient's chart — not the current prescription's date. Two sources:
-//
-//   1. `medications` rows (any source, active or stopped) with a matching
-//      canonical key — use MIN(started_date).
-//   2. Prior `documents.extracted_data->'medications'` on prescription docs
-//      for the same patient — use MIN(doc_date). Catches drugs whose original
-//      medications row was deleted by a re-extract/sweep cycle.
-//
-// Callers pass the DB client (so this can run inside a transaction) and a list
-// of canonical keys they're about to insert. Returns a Map<canonical, ISO-date>
-// with the earliest known date per canonical, or empty map if none.
-
 import { canonicalMedKey, stripFormPrefix } from "./normalize.js";
 
 function toISO(v) {

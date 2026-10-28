@@ -13,14 +13,6 @@ import {
   readNumber,
 } from "./billing/common.js";
 
-// The scheme vocabulary, read from patient_schemes rather than the hardcoded
-// array shared/patientCategories.js used to be (33-PATIENT-SCHEME-PLAN.md §1).
-//
-// `code` is the join key every later feature hangs off — category rates,
-// category rules, the daily cap — so a code is never renamed, and is deleted
-// only when nothing uses it (billing plan D9). Retiring a scheme flips
-// is_active, which keeps historical appointments resolving their label.
-
 const COLUMNS = `s.code, s.label, s.color, s.is_active, s.requires_ref, s.daily_cap, s.sort_order,
                  s.parent_code, s.payer_name, s.requires_referral, s.requires_referral_doc,
                  s.print_category_on_bill, s.allow_pay_later,
@@ -53,9 +45,6 @@ export async function listSchemeTree({ all = false } = {}, db = pool) {
   }));
 }
 
-// The server's own validator. Reads the table rather than a cached list on
-// purpose: a scheme added a minute ago must be accepted by the very next PATCH,
-// and a cold cache would reject it (§2).
 export async function isKnownScheme(code, db = pool) {
   if (!code) return true; // "" / null is General — the absence of a scheme
   const { rows } = await db.query(

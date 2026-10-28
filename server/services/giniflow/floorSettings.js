@@ -1,10 +1,5 @@
 import pool from "../../config/db.js";
 
-// Small admin-toggleable flags for floor behaviour — starting with one: whether
-// samples-only ("lab-only") patients show on the station screens and the
-// coordinator board. Cached like machineCatalog.js's catalogue, for the same
-// reason: every station queue reads this on every poll.
-
 const TTL_MS = 30_000;
 let cached = null;
 let cachedAt = 0;
@@ -25,8 +20,6 @@ export function clearFloorSettingsCache() {
   cachedAt = 0;
 }
 
-// Defaults TRUE (hidden) if the row is ever missing — the safe direction,
-// since that is the behaviour this shipped with.
 export async function hideLabOnlyPatients(db = pool) {
   const settings = await getFloorSettings(db);
   return settings.hide_lab_only_patients !== false;

@@ -2,24 +2,6 @@ import pool from "../../config/db.js";
 import { parseClaudeJson } from "../extraction.js";
 import { getTestPanels } from "./moStation.js";
 
-// Reads the plan the MO already typed and points at the controls underneath it.
-//
-// docs/gini-flow/08-MO-SD-STATION-PLAN.md — the Plan textarea sits directly above
-// "Suggest to the doctor" (four fields) and "Tests to order" (six panels and
-// twenty-five chips). An MO who has written "start Vit D, recheck TSH and B12
-// next visit" then hunts three chips out of twenty-five and fills a form with
-// what they just said. The sentence already holds the answer.
-//
-// THIS EXTRACTS, IT DOES NOT AUTHOR. It is given the MO's own words and returns
-// only what those words name — never a test the plan does not mention, never a
-// dose the plan does not state. Nothing here reaches the database: the endpoint
-// returns a proposal, the chips light up, and the MO confirms. That is the whole
-// safety property, and it is why this is a separate module from anything that
-// writes.
-//
-// Model: Haiku. This is a matching task against a fixed catalogue, not clinical
-// reasoning, and the MO is watching the chips light up as they read the answer.
-
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
 const SYSTEM = `You are a parser for a hospital's OPD software. You are given a medical officer's own free-text plan for one patient, a catalogue of orderable tests, and that patient's active medicines.
@@ -92,8 +74,6 @@ export async function extractPlan(visitId, planText, db = pool) {
       system: SYSTEM,
       messages: [{ role: "user", content: userText }],
     }),
-    // A model that never answers must not hold the MO's screen. The button
-    // fails and they carry on tapping chips by hand, which still works.
     signal: AbortSignal.timeout(20_000),
   }).catch((e) => {
     throw Object.assign(new Error(`Could not reach the AI service: ${e.message}`), { status: 502 });
@@ -111,10 +91,6 @@ export async function extractPlan(visitId, planText, db = pool) {
   if (error || !data) {
     throw Object.assign(new Error("Could not read the AI's answer — try again"), { status: 502 });
   }
-
-  // The catalogue is the authority, not the model. A name that is not in it is
-  // dropped rather than passed to the order, which would fail at the price
-  // lookup or, worse, order a test nobody stocks.
   const known = new Map(catalogue.map((n) => [n.toLowerCase(), n]));
   const matched = [];
   const unmatched = [...new Set((data.unmatched || []).map(String))];

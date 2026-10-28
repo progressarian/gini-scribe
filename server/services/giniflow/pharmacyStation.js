@@ -25,27 +25,11 @@ import {
 import { LAB_ONLY_DOCTOR, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
 import { hideLabOnlyPatients } from "./floorSettings.js";
 
-// The board's column name, not the raw status — `vitals_done` means the patient
-// is with the SD, and printing the status made the lab screen claim otherwise.
 const COLUMN_NAME = Object.fromEntries(BOARD_COLUMNS.map((c) => [c.key, c.name]));
 
 // The visit is over: nobody is coming to the counter for these.
 const FINISHED = ["dispensed", "exited", "no_show", "cancelled"];
 
-// The pharmacy — the last station on the floor.
-//
-// Design: docs/gini-flow/16-PHARMACY-STATION-PLAN.md
-//
-// Almost all of this already existed. `medicine_collections` is the per-medicine
-// dispensing record and is in daily use; `buildCard` is the one medicine card;
-// MSG91 is the hospital's WhatsApp. This module is the screen over them plus the
-// two things only it can do: end the visit, and refuse to record a patient as
-// fully dispensed when something was not handed over.
-
-// "To dispense" is both statuses the board's At-pharmacy column holds. A visit
-// finalized by the consultant lands on `pharmacy_pending`; `doctor_done` is the
-// half-second before that, and a patient the HealthRay sync moved by hand can
-// sit there, so the counter must be able to see and serve them.
 const QUEUE_STATUSES = ["doctor_done", "rx_pending", "with_rx", "pharmacy_pending"];
 const DONE_STATUSES = ["dispensed", "exited"];
 const AWAITING_RX = ["doctor_done", "rx_pending", "with_rx"];
@@ -167,8 +151,6 @@ const QUEUE_SQL = `
      -- without this they leaked into "dispensed".
      AND NOT ${labOnlyHiddenPredicate("v", "$3", "$4")}`;
 
-// The groups the counter's two columns split into, and the only values `group`
-// accepts. pendingHandover is one list holding both onFloor and gone.
 export const PHARMACY_GROUPS = ["toDispense", "onFloor", "dispensed", "gone"];
 
 export async function getPharmacyQueue(
@@ -178,8 +160,6 @@ export async function getPharmacyQueue(
   { group = "all", q = null } = {},
 ) {
   const search = pharmacySearchTerm(q);
-  // Resolved per row, not once: the pharmacy budget can be overridden per
-  // category, and this queue holds every category at the same moment.
   const budgetFor = budgetLookup(await getSlaConfig(db));
   const hideLabOnly = await hideLabOnlyPatients(db);
 
@@ -221,17 +201,8 @@ export async function getPharmacyQueue(
         notGiven: r.not_given ?? 0,
         partial: r.partial ?? 0,
       },
-      // Absent entirely while `pharmacy_inventory` is empty — NOT rendered as
-      // "all in stock", which is a claim this system cannot currently make
       // (16 §4.2, review CS-06).
       stock: low || out ? { low, out } : null,
-      // Did this counter actually hand anything over?
-      //
-      // `DONE_STATUSES` holds `exited` as well as `dispensed`, so every visit the
-      // HealthRay sync closed counted as dispensed — 72 of them today, all
-      // written by `system`, on a day this station dispensed nobody. A visit was
-      // worked here only if it reached `dispensed`, or if a medicine carries a
-      // collection record.
       matches: r.matches === true,
       dispensedHere:
         r.current_status === "dispensed" ||
@@ -272,12 +243,7 @@ export async function getPharmacyQueue(
   return {
     counts: {
       toDispense: toDispense.length,
-      // Only what this counter did. The rest are visits HealthRay closed, which
-      // is a different fact and gets its own number rather than inflating this one.
       closedElsewhere: dispensed.filter((c) => !c.dispensedHere).length,
-      // Of those waiting, how many carry a low or out-of-stock medicine. Reads 0
-      // until the inventory has rows — §11 q2, and deliberately not hidden: a
-      // count of zero is honest, a missing tile looks like a permissions problem.
       stockWarnings: toDispense.filter((c) => c.stock).length,
       dispensed: dispensed.filter((c) => c.dispensedHere).length,
     },
@@ -289,8 +255,6 @@ export async function getPharmacyQueue(
     ),
     group: wanted,
     q: search,
-    // Whole-day totals for the filter chips, taken before the slice above —
-    // counted from the returned lists they would read 0 for every group but one.
     groupCounts: {
       toDispense: found.length,
       onFloor: handover.filter((r) => !r.gone).length,
@@ -300,17 +264,6 @@ export async function getPharmacyQueue(
   };
 }
 
-// The counter's real backlog, from the table the hospital actually fills.
-//
-// `toDispense` queues `doctor_done`/`pharmacy_pending`, which no visit in this
-// table's history has ever held — the floor finalizes on HealthRay, so the
-// station reads zero on a day 46 patients were prescribed medicines. This is the
-// same shape of fallback the lab screen uses: `medications` written today with
-// nothing recorded against them in `medicine_collections`.
-//
-// Read-only and deliberately separate from `toDispense`: these patients have no
-// Gini Flow prescription to close, so the counter cannot run the dispense flow
-// on them — it can only see who is owed medicines.
 async function getPendingHandover(visitDate, db = pool, search = null) {
   const { rows } = await db.query(
     `SELECT p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
@@ -348,8 +301,6 @@ async function getPendingHandover(visitDate, db = pool, search = null) {
     sex: r.sex,
     medicines: r.medicines,
     names: r.names || [],
-    // Where they are, by the board's column rather than the raw status — the
-    // same rule the lab screen uses, so the two cannot disagree about a patient.
     station: FINISHED.includes(r.current_status)
       ? STATUS_LABEL[r.current_status] || r.current_status
       : COLUMN_NAME[columnForStatus(r.current_status)] ||
@@ -385,10 +336,6 @@ async function loadVisit(visitId, db = pool) {
   );
   return rows[0] || null;
 }
-
-// Medicines stopped at today's consultation. They are `is_active = false`, so
-// the card cannot show them — but "stop taking this one" is the single most
-// important sentence at this counter, so the counselling note needs them.
 export async function stoppedToday(patientId, visitDate, db) {
   const { rows } = await db.query(
     `SELECT id, name, dose, previous_dose, stop_reason
@@ -408,8 +355,6 @@ export async function stoppedToday(patientId, visitDate, db) {
   }));
 }
 
-// Per medicine, only where the inventory actually knows. Inert until stock data
-// exists — which is the whole of §5.2 today.
 const stockWarningFor = (medicine) => {
   const stock = medicine.stock;
   if (!stock) return null;
@@ -460,9 +405,6 @@ export async function getPharmacyPatient(visitId, db = pool) {
             markedAt: iso(mark.marked_at),
           }
         : null,
-      // External medicines get NO control. They are shown, with the prescriber's
-      // name, because the patient takes them — but the Gini pharmacy does not
-      // hand them over and must not record that it did (16 §5.3).
       dispensable: !medicine.external,
       warning: stockWarningFor(medicine),
     };
@@ -505,9 +447,6 @@ export async function getPharmacyPatient(visitId, db = pool) {
       partial,
       pending,
     },
-    // Rule 1 (16 §6): anything not handed over turns the blanket button into
-    // "Dispense the rest". The screen renders that; the service is what makes it
-    // true, by never marking a not-given row as given.
     blockedByNotGiven: notGiven > 0,
   };
 }
@@ -533,14 +472,6 @@ export async function dispenseItem(
   const visit = await loadVisit(visitId, db);
   if (!visit) throw Object.assign(new Error("Visit not found"), { status: 404 });
 
-  // A closed visit takes no more marks.
-  //
-  // `dispenseAll` has refused this since it was written; this function never
-  // did, so the per-medicine buttons stayed live after "✓ Dispensed · visit
-  // closed" and every press still wrote to medicine_collections. The visit was
-  // already `exited`, the day's stats were already computed, and the WhatsApp
-  // card was already sent — so the write changed the record of what the patient
-  // was handed AFTER they had left with it.
   if (DONE_STATUSES.includes(visit.current_status)) {
     throw Object.assign(
       new Error("This visit is closed — the medicine card has already gone to the patient"),
@@ -588,16 +519,6 @@ export async function dispenseItem(
     actorId,
   };
 }
-
-// ── The exit ────────────────────────────────────────────────────────────────
-//
-// One transaction: every pending Gini medicine marked `given`, then
-// pharmacy_pending → dispensed → exited. The WhatsApp send happens AFTER the
-// commit and never inside it (16 §6, §10).
-//
-// A row already marked `not_given` is left exactly as it is. That is what makes
-// the not-collected report true: a patient who went home without two of their
-// medicines must not be recorded as fully dispensed.
 
 export async function dispenseAll(visitId, { actorId = null, actorName = null } = {}, db = pool) {
   const client = await db.connect();
@@ -647,9 +568,6 @@ export async function dispenseAll(visitId, { actorId = null, actorName = null } 
       });
     }
 
-    // A patient who was moved here by hand can still be at `doctor_done`. Writing
-    // their arrival before their exit keeps the pharmacy budget measuring
-    // something real rather than jumping the column.
     if (["doctor_done", "rx_pending", "with_rx"].includes(visit.current_status)) {
       await advanceStatus(client, {
         visitId,
@@ -666,8 +584,6 @@ export async function dispenseAll(visitId, { actorId = null, actorName = null } 
       actorId,
       meta: { source: "pharmacy_dispense_all", medicines: meds.length, marked: pending.length },
     });
-    // `exited` ends the visit. The board's Done column is the only place this
-    // patient appears again.
     await advanceStatus(client, {
       visitId,
       toStatus: "exited",
@@ -695,37 +611,6 @@ export async function dispenseAll(visitId, { actorId = null, actorName = null } 
   }
 }
 
-// ── The medicine card on WhatsApp ───────────────────────────────────────────
-//
-// After the commit, fired and forgotten from the exit path, and re-sendable by
-// hand from the pane. Idempotent: `card_sent_at` is the guard, so the automatic
-// send cannot fire twice for one visit, while a pharmacist asked to resend
-// passes `force`.
-//
-// PH-01. `card_sent_at` is stamped ONLY when a message actually left the
-// building. MSG91 logs instead of sending whenever the WhatsApp template is
-// missing or unapproved (16 §11 q1) — and because that same column is the
-// idempotency guard, stamping it on a no-op would permanently mark a patient as
-// having received a card they never got, and stop the real send from ever
-// reaching them once the template goes live. So the dev/no-op case is returned
-// as `sent: false, dev: true` and left unrecorded, which the screen says out
-// loud rather than showing a green tick.
-//
-// PH-03. The stamp follows the send and is not in a transaction with it — it
-// cannot be. It errs towards sending twice rather than never: a crash between
-// the two leaves `card_sent_at` unset, so the next attempt re-sends. A duplicate
-// medicine card is a nuisance; a missing one is a patient with no instructions.
-
-// Ending a visit that never reaches a dispense.
-//
-// About nine in ten do not: the patient takes the prescription from the counter
-// and goes, buying medicines elsewhere or having none to collect. HealthRay's
-// checkout used to close those — 621 of 698 last month — and with the floor
-// keeping its own record, somebody at the counter has to say it instead.
-//
-// Deliberately NOT a shortcut through the chain: it writes `exited` and nothing
-// else. A visit that never dispensed must not claim it did, because `dispensed`
-// is what the medicine reports count.
 export async function endVisit(
   visitId,
   {
@@ -760,10 +645,6 @@ export async function endVisit(
       return { visitId, currentStatus: from, unchanged: true, tooLate: true };
     }
 
-    // The Rx desk's own button reads "Explained — patient leaving", so pressing it
-    // IS the explanation: it records that step rather than being asked why it is
-    // missing. Same statement as markRxExplained (rxStation.js), written here so
-    // it shares this transaction with the exit.
     const explainedNow = explained && !!rxBlock(from);
     if (explainedNow) {
       await advanceStatus(client, {
@@ -775,21 +656,10 @@ export async function endVisit(
         meta: { source: "rx_station", explained: true, onExit: true },
       });
     }
-
-    // Every patient goes through the Rx desk. The counter could always close a
-    // visit still sitting in the Rx queue, and that is how ~9 in 10 of them left
-    // with no explanation on record — the dispense gate held, this door was open
-    // beside it. Now the only close that passes the Rx desk is the Rx desk's own.
     if (!explainedNow && rxBlock(from)) {
       throw Object.assign(new Error(RX_WAIT_REASON), { status: 409, awaitingRx: true });
     }
 
-    // allowSkip, because a patient who leaves from the consultant's room never
-    // passes through rx or pharmacy and the chain would refuse the jump. The
-    // rail on every screen is drawn from the EVENTS, not from the current
-    // status, so the steps they skipped stay visibly un-ticked rather than
-    // being filled in retrospectively — the record says they left early, which
-    // is what happened.
     await advanceStatus(client, {
       visitId,
       toStatus: "exited",

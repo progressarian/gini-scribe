@@ -1,37 +1,5 @@
 import pool from "../../config/db.js";
 import { t as clipText } from "../../utils/helpers.js";
-
-// Promotion — copying a Gini Flow reading or report forward into the shared
-// clinical record.
-//
-// 06-PHASE-2-PLAN.md question 12. Both `giniflow_vitals` and
-// `giniflow_lab_orders` deliberately stopped short of `vitals` and `documents`,
-// for the same stated reason: "adding a third writer while two floor modules run
-// in parallel invites the same patient being recorded twice with different
-// numbers".
-//
-// That risk is real and does not go away by deciding to promote. It goes away by
-// making promotion impossible to do twice — so every function here is an UPSERT
-// on the Gini Flow row's own id, which the shared table now carries under a
-// unique index (migration 2026-09-02_giniflow_promotion.sql). Re-saving a
-// reading updates one row. Re-uploading a report replaces one document. A
-// replayed call changes nothing.
-//
-// WHY IT MATTERS NOW. The outbound push to the patient app was deleted on
-// 2026-05-01 — the app reads this Postgres directly. So a row landing in `vitals`
-// or `documents` IS delivery: to the doctor's consult view, to the Labs tab, and
-// to the patient's phone. A station reading that stays in `giniflow_vitals`
-// reaches none of them.
-//
-// Never throws into a caller's transaction. Promotion failing must not undo the
-// reading it was promoting — the Gini Flow row is the station's record and stands
-// on its own; a missing copy is a gap in a mirror, not lost data.
-
-// One station reading → one clinical row.
-//
-// `consultation_id` is left null on purpose: the reading is taken before the
-// consultation exists, and `appointment_id` is what ties it to the day. That
-// matches how the HealthRay sync writes vitals.
 export async function promoteVitals(giniflowVitalsId, db = pool) {
   const { rows } = await db.query(
     `SELECT gv.id, gv.patient_id, gv.weight, gv.height, gv.bmi, gv.bp_sys, gv.bp_dia,
@@ -45,16 +13,6 @@ export async function promoteVitals(giniflowVitalsId, db = pool) {
   );
   if (!rows.length) return { promoted: false, reason: "not found" };
   const r = rows[0];
-
-  // A row with no reading in it is not promoted.
-  //
-  // The three `giniflow_vitals` rows on record carry a height and nothing else —
-  // leftovers from the empty-save bug `saveVitals` now guards against. Height is
-  // a standing attribute, not something measured today, so promoting them would
-  // put three vitals entries on three real charts with nothing under them, and
-  // a trend line would gain three empty points. That is precisely the pollution
-  // the original migration refused to risk; the idempotency key stops double
-  // writes, and this stops empty ones.
   const measured = [
     r.bp_sys,
     r.bp_dia,
@@ -112,12 +70,6 @@ export async function promoteVitals(giniflowVitalsId, db = pool) {
   return { promoted: true, vitalsId: written[0].id };
 }
 
-// One uploaded report → one document on the chart.
-//
-// `storage_path` and a null `file_url`, which is the shape every internally
-// stored document uses — the bucket is private, so the path is the handle and
-// `/api/documents/:id/stream` is how it is read. Writing a public URL here would
-// reproduce the 404 the lab station just stopped producing.
 export async function promoteLabReport(orderId, db = pool) {
   const { rows } = await db.query(
     `SELECT o.id, o.report_file_url, o.uploaded_at, v.patient_id,
@@ -133,8 +85,6 @@ export async function promoteLabReport(orderId, db = pool) {
   const r = rows[0];
   if (!r.report_file_url) return { promoted: false, reason: "no report uploaded" };
 
-  // The bucket-relative path, whatever URL shape the row holds — rows written
-  // before the private-bucket fix carry the `/object/public/<bucket>/` form.
   const marker = "/storage/v1/object/";
   const at = r.report_file_url.indexOf(marker);
   if (at < 0) return { promoted: false, reason: "unreadable report path" };
@@ -172,17 +122,10 @@ export async function promoteLabReport(orderId, db = pool) {
   return { promoted: true, documentId: written[0].id };
 }
 
-// Fire-and-forget, for the write paths.
-//
-// Promotion is a mirror, not the record. A station that could not save a reading
-// because the copy failed would be worse than a chart that is briefly missing
-// one — and `backfillPromotions` below closes any gap this leaves.
 export function promoteQuietly(fn, id) {
   return fn(id).catch((e) => console.warn(`[giniflow promote] ${id}:`, e?.message || e));
 }
 
-// Anything a failed or pre-dated write left behind. Safe to run repeatedly —
-// every promotion is an upsert keyed on the source row.
 export async function backfillPromotions({ since = null } = {}, db = pool) {
   const { rows: vitals } = await db.query(
     `SELECT gv.id FROM giniflow_vitals gv

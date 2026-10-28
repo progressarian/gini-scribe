@@ -1,18 +1,3 @@
-// Helpers for the `days_of_week` column on `medications`.
-//
-// AddMedicationModal stores per-medication weekday selections two ways:
-//   1. As an INTEGER[] in `days_of_week` (0=Sun … 6=Sat) — used by the
-//      patient app to decide which days the dose is due.
-//   2. As a "· Mon, Wed" suffix on the `frequency` string — so the existing
-//      doctor-facing UI renders the days naturally without schema awareness.
-//
-// Auto-extraction flows (HealthRay sync, Paste Clinical Notes) historically
-// dropped both. These helpers let those flows infer the correct day(s) from
-// either explicit text in the frequency / timing or — as a sensible default —
-// the weekday of the prescription date.
-//
-// All functions are pure and dependency-free.
-
 export const INT_TO_WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 export const WEEKDAY_TO_INT = {
   sun: 0,
@@ -50,9 +35,6 @@ export function isWeeklyFrequency(freq) {
   );
 }
 
-// Pull weekday names out of arbitrary free text. Recognises both the canonical
-// "· Mon, Wed" suffix used by the app and natural-language mentions like
-// "every Sunday", "on Monday", "Tues & Thurs".
 export function extractWeekdaysFromText(text) {
   if (!text) return [];
   const found = new Set();
@@ -66,10 +48,6 @@ export function extractWeekdaysFromText(text) {
   }
   return [...found].sort((a, b) => a - b);
 }
-
-// Parse a frequency that may already carry a "· Mon, Wed" suffix.
-//   "Once weekly · Mon, Wed" → { base: "Once weekly", days: [1, 3] }
-//   "Once weekly"            → { base: "Once weekly", days: [] }
 export function parseFrequencyWithDays(raw) {
   const s = String(raw || "");
   const m = s.match(/^(.+?)\s*·\s*(.+)$/);
@@ -77,8 +55,6 @@ export function parseFrequencyWithDays(raw) {
   return { base: m[1].trim(), days: extractWeekdaysFromText(m[2]) };
 }
 
-// 0=Sun … 6=Sat. Works for "YYYY-MM-DD" or Date-like inputs. Returns null when
-// the input can't be parsed.
 export function weekdayOfDate(dateLike) {
   if (!dateLike) return null;
   const d =
@@ -96,10 +72,6 @@ export function formatDaysSuffix(days) {
     .join(", ");
 }
 
-// Top-level enrichment used by HealthRay sync + clinical-bulk save.
-// Given a parsed medication and the prescription date, returns the medication
-// with `frequency` normalised to include "· Mon, Wed" and `days_of_week` set
-// when applicable. Non-weekly meds are returned untouched.
 export function enrichMedWithDays(med, fallbackDate) {
   if (!med || typeof med !== "object") return med;
   const out = { ...med };
@@ -124,8 +96,6 @@ export function enrichMedWithDays(med, fallbackDate) {
 
   const weekly = isWeeklyFrequency(base) || isWeeklyFrequency(med.frequency);
 
-  // Fall back to the weekday of the prescription date for weekly meds with no
-  // explicit day. Skip for fortnightly — the day is genuinely ambiguous there.
   if (!days.length && weekly && !/fortnight|14\s*days/i.test(med.frequency || "")) {
     const w = weekdayOfDate(fallbackDate);
     if (w != null) days = [w];

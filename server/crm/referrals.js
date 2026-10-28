@@ -4,6 +4,7 @@ import {
   REFERRAL_STATUS_VALUES,
   URGENCY_VALUES,
 } from "../../shared/crmVocab.js";
+import { isUuid, referralFormErrors, referralPhoneDigits } from "../../shared/crmReferralRules.js";
 
 // Referral capture and the patient journey (brief §6, §7).
 //
@@ -35,12 +36,23 @@ export async function createReferral(crmUser, input) {
     is_self_referral = false,
   } = input;
 
-  if (!referring_doctor_id && !is_self_referral) throw new Error("Pick the referring doctor");
-  if (!clean(patient_name) && !clean(patient_phone)) {
-    throw new Error("A referral needs a patient name or a phone number");
+  const invalid = (message) => Object.assign(new Error(message), { status: 400 });
+  if (!referring_doctor_id && !is_self_referral) throw invalid("Pick the referring doctor");
+  if (referring_doctor_id && !isUuid(referring_doctor_id)) {
+    throw invalid("This doctor could not be found. Go back and open the doctor again.");
   }
-  if (!URGENCY_VALUES.includes(urgency)) throw new Error(`Unknown urgency: ${urgency}`);
-  if (!REFERRAL_SOURCE_VALUES.includes(source)) throw new Error(`Unknown source: ${source}`);
+  if (service_line_id && !isUuid(service_line_id)) throw invalid("Choose a service from the list.");
+  const fieldErrors = referralFormErrors({
+    patient_name,
+    patient_phone,
+    reason_category,
+    expected_action,
+  });
+  const firstError = Object.values(fieldErrors)[0];
+  if (firstError) throw Object.assign(invalid(firstError), { fields: fieldErrors });
+  if (!URGENCY_VALUES.includes(urgency)) throw invalid("Choose an urgency from the list.");
+  if (!REFERRAL_SOURCE_VALUES.includes(source)) throw invalid("Choose a referral source.");
+  const phone = clean(patient_phone) ? referralPhoneDigits(patient_phone) : null;
 
   return withCrmContext(crmUser, async (sql) => {
     const { rows: hos } = await sql("SELECT id FROM crm.hospitals WHERE code = 'GACH'");
@@ -56,8 +68,8 @@ export async function createReferral(crmUser, input) {
         referring_doctor_id ?? null,
         Boolean(is_self_referral),
         source,
-        clean(patient_name),
-        clean(patient_phone),
+        clean(patient_name)?.replace(/\s+/g, " "),
+        phone,
         clean(reason_category),
         service_line_id ?? null,
         urgency,

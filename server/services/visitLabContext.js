@@ -1,10 +1,3 @@
-// Shared helper that builds the same labLatest / labHistory / vitals shapes
-// the /visit/:patientId endpoint returns. Used by /visit, the pre-visit
-// summary, and the post-visit summary so all three see identical numbers.
-//
-// Mirrors server/routes/visit.js (lab query, labLatest/labHistory build,
-// appointments.biomarkers JSONB seeding, patient_vitals_log merge).
-
 import { getCanonical } from "../utils/labCanonical.js";
 import { LAB_MAP } from "../routes/opd.js";
 
@@ -85,21 +78,6 @@ export async function buildVisitLabContext(pool, patientId) {
   }
   for (const v of Object.values(labLatest)) delete v._ca;
 
-  // Seed labLatest + labHistory from appointments.biomarkers across all
-  // appointments. lab_results stays authoritative when a row already covers
-  // that canonical+date.
-  //
-  // HealthRay copies the last-known biomarker value forward into every
-  // subsequent appointment's clinical note. Without de-duplication this
-  // creates phantom trend points (e.g. hba1c=9.5 appears on 4 consecutive
-  // appts → 4 fake readings). Strategy:
-  //   - Sort appts oldest → newest so the earliest appearance of a value
-  //     wins.
-  //   - When `_lab_dates[bioKey]` is set, trust it (HealthRay tagged a real
-  //     lab draw date).
-  //   - When `_lab_dates[bioKey]` is missing, treat the value as a
-  //     carry-forward: keep only its first appearance, dated to that
-  //     appointment.
   const dayOf = (d) => (d ? String(d).slice(0, 10) : null);
   const sortedBios = [...bioR.rows].sort((a, b) =>
     String(a.appointment_date || "").localeCompare(String(b.appointment_date || "")),
@@ -158,8 +136,6 @@ export async function buildVisitLabContext(pool, patientId) {
     arr.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
   }
 
-  // Merge app-logged vitals (patient_vitals_log) into the doctor-side vitals
-  // array so summary consumers see both streams in one chronological list.
   const appVitals = (vitalsLogR.rows || []).map((r) => {
     const recordedAt =
       r.created_at || (r.recorded_date ? new Date(r.recorded_date).toISOString() : null);

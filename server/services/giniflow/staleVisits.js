@@ -12,21 +12,10 @@ const STALE_SQL = `
      AND v.current_status NOT IN ('exited','dispensed','cancelled','no_show','abandoned')
    ORDER BY v.visit_date`;
 
-// A visit nobody closed is not a visit that never happened, and it is not one
-// that finished either. `no_show` for a patient who never moved off `booked`,
-// `abandoned` for one who reached a station and was left there — neither
-// invents an exit time, and neither counts as a completed journey.
 export const targetStatus = (row) => {
   if (row.current_status === BACK_FOR_TESTS) return "exited";
   if (row.hr_status === "no_show") return "no_show";
   if (row.hr_status === "cancelled") return "cancelled";
-  // HealthRay saw the consultation through, so the patient did not walk out —
-  // the floor simply never recorded the last two desks. On a manual floor the
-  // sync stops at `rx_pending` by design (39-HYBRID-FLOOR-PLAN.md §4), which
-  // would leave ~40 finished visits a night to be swept as `abandoned` and
-  // counted as walk-outs. It ranks above the never-moved rule below for the same
-  // reason: a completed consultation is evidence of attendance whatever this side
-  // managed to write down.
   if (row.hr_status === "completed" || row.hr_status === "seen") return "exited";
   if (!row.moved && row.current_status === "booked") return "no_show";
   return "abandoned";

@@ -4,29 +4,6 @@ import { slotStartTime } from "../../../shared/slotHour.js";
 import { LIVE_LAB_CASE_SQL } from "./testsHold.js";
 
 export { LAB_ONLY_DOCTOR };
-
-// One definition of "samples-only", shared by every screen that has to place
-// such a patient.
-//
-// It lives here because two screens deriving it separately is exactly how they
-// came to contradict each other: the manager board moved these patients out of
-// the SD / MO column, while the lab station kept deriving its pill from
-// `columnForStatus(current_status)` alone — which knows only the status→column
-// map in shared/giniflowStatus.js — and went on calling the same patient
-// "With SD / MO" while the board showed that column empty.
-//
-// Asked of the PATIENT'S day rather than of the visit's own appointment: a visit
-// is one row per patient per day and the sync's DISTINCT ON tiebreaks equally
-// advanced appointments by id, so testing the carried appointment would
-// intermittently classify a patient a consultant is waiting for. A NULL
-// doctor_name counts as a real booking — the flow's own walk-ins and OBT rows
-// have one — so an unknown provider is never treated as samples-only.
-//
-// The last clause is what makes it reversible: assigning a real consultant ends
-// the samples-only state, and the patient rejoins the ordinary flow.
-//
-// `visit` is the giniflow_visits alias at the call site, `param` the placeholder
-// carrying LAB_ONLY_DOCTOR.
 export const labOnlyPredicate = (visit, param) => `(
   ${visit}.id IS NOT NULL
   AND EXISTS (
@@ -50,32 +27,9 @@ export const labOnlyPredicate = (visit, param) => `(
     )
   )
 )`;
-
-// Wraps `labOnlyPredicate` with the admin toggle (floorSettings.js): true
-// (exclude this row) only when the patient is samples-only AND the floor has
-// chosen to hide them. `hideParam` is the boolean placeholder carrying
-// `hideLabOnlyPatients()`'s result — fetched once per request, not per row.
 export const labOnlyHiddenPredicate = (visit, doctorParam, hideParam) =>
   `(${hideParam}::boolean AND ${labOnlyPredicate(visit, doctorParam)})`;
 
-// The timeline for a lab-only visit, built only from clocks that exist.
-//
-// The chain timeline could not tell the truth about these patients. It read the
-// `vitals_done` event and drew "Vitals done — 3m wait + 128m station", of which
-// three parts were wrong: HealthRay stamps every vitals row at midnight (all 334
-// rows over seven days), so the 09:30 was when our poller noticed the row, not
-// when anything was measured; the 128m was time-since-that-poll, not time spent
-// at a station; and most of those rows carry a weight and height with no BP at
-// all, so "vitals" overstates what was done. The event even points at a
-// vitals_id the sync has since deleted and re-inserted — 66 of today's events
-// reference a row that no longer exists.
-//
-// HealthRay's lab clocks, by contrast, are real times it recorded itself. So
-// this returns arrival plus those, and nothing else.
-//
-// `collected_on` and `received_on` are deliberately not steps: HealthRay stamps
-// them at case close, identical to `reported_on` on 389 of 422 cases, so drawing
-// them would invent a collection time the hospital never recorded.
 async function labMarks(db, { visitDate, patientId, fileNo }) {
   const { rows: lab } = await db.query(
     `SELECT min(COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'registered_at') AS registered,
@@ -99,28 +53,16 @@ async function labMarks(db, { visitDate, patientId, fileNo }) {
       label: "Lab registered",
       at: new Date(lab[0].registered),
     });
-  // Only once every case is back. A part-reported patient is still waiting, and
-  // dating the step off the first result would close it early.
   if (lab[0]?.reported && lab[0].pending === 0)
     marks.push({ status: "lab_reported", label: "Reports ready", at: new Date(lab[0].reported) });
   return marks;
 }
 
-// Lab milestones are a record of when things happened, not a queue anyone is
-// working, so they carry a timestamp and no duration.
-//
-// The running count was wrong in both directions. On a patient whose reports
-// were already back it described nobody's problem. On one who had gone home it
-// was worse: a patient who exited at 13:09 still read "waiting 320m", counting
-// up against a floor he had left hours earlier.
 const shapeMarks = (marks, now, timestampOnly = false) =>
   [...marks]
     .sort((a, b) => a.at - b.at)
     .map((m, i, sorted) => {
       const next = sorted[i + 1];
-      // Reports back is an end, not a stage in progress. Left as "current" it
-      // drew the live dot and counted to now, so a visit from a previous day
-      // claimed to still be happening — 1,456 minutes and rising.
       const ended = m.status === "lab_reported";
       const minutes = next ? Math.max(0, Math.round((next.at - m.at) / 60000)) : null;
       return {
@@ -155,11 +97,6 @@ export async function getLabOnlyTimeline(db, { visitId, visitDate, patientId, fi
   return shapeMarks(marks, now, true);
 }
 
-// The lab leg of an ORDINARY visit. The board has always shown these patients on
-// two tracks at once — a card in their queue column and a second one in the lab
-// track — but the timeline read only giniflow_visit_events, so the lab was
-// invisible there. A patient checked in at 10:30 with a sample ordered at 10:44
-// showed one step and looked stalled, when the lab was the thing that had moved.
 export async function getLabTrack(db, ids, now) {
   return shapeMarks(await labMarks(db, ids), now, true);
 }

@@ -1,19 +1,3 @@
-// Auto-save prescription PDF when a visit/appointment completes.
-//
-// Two entry points:
-//   savePrescriptionForVisit(pid, payload, opts)
-//     Renders the Rx (Puppeteer) and persists it to documents + Supabase
-//     storage + Genie. Idempotent — skips if a prescription row already
-//     exists for this patient + consultation + source.
-//
-//   buildVisitPayloadFromDb(pid, { appointmentId })
-//     Reconstructs the canonical visit payload (same shape the front-end
-//     POSTs from /visit) from the DB. Used by completion paths that don't
-//     have a client-side payload (HealthRay sync, status PATCH, etc.).
-//
-// The renderer (generatePrescriptionPdf) and template are shared with the
-// in-app End Visit flow so the PDF format is identical regardless of which
-// path triggered the save.
 import { createRequire } from "module";
 import pool from "../config/db.js";
 import { t } from "../utils/helpers.js";
@@ -134,8 +118,6 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
     consultationId = con.rows[0]?.id || null;
   }
 
-  // Idempotency — skip if a prescription already exists for this consultation+source,
-  // unless overwrite is requested (e.g. auto-save after HealthRay sync completes).
   const existing = await findExistingPrescription(pool, pid, consultationId, source);
   if (existing) {
     if (!overwrite) {
@@ -147,18 +129,10 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
         reason: "already-saved",
       };
     }
-    // Overwrite: the stale row is retired only once the replacement PDF is
-    // actually stored. Deleting it up front loses the prescription outright
-    // when the upload then fails — the row that replaces it carries no
-    // storage_path, and the docs panel only lists documents that have a file.
     console.log(
       `[prescriptionAutoSave] Overwriting stale prescription id=${existing.id} for pid=${pid} consultationId=${consultationId}`,
     );
   }
-
-  // Empty-data guard for non-client-initiated saves: skip if there are no meds
-  // and no diagnoses to render. Doctors who explicitly end a visit always save,
-  // even if the payload is sparse.
   if (!clientInitiated) {
     const noMeds = !Array.isArray(data.activeMeds) || data.activeMeds.length === 0;
     const noDx = !Array.isArray(data.activeDx) || data.activeDx.length === 0;
@@ -176,7 +150,6 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
     }
   }
 
-  // Generate patient summary before PDF if not already present in payload.
   if (!data.visitSummaryText) {
     try {
       const summaryResult = await generatePatientSummary(data);
@@ -184,9 +157,6 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
       // Persist back to appointments so future fetches see it.
       if (appointmentId) {
         pool
-          // post_visit_summary is a jsonb column — a bare summary string isn't
-          // valid JSON, so JSON.stringify it into a JSON string value (the read
-          // path in buildPrescriptionData unwraps it back to a plain string).
           .query("UPDATE appointments SET post_visit_summary=$1 WHERE id=$2", [
             JSON.stringify(summaryResult.body),
             appointmentId,
@@ -279,8 +249,6 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
     }
   }
 
-  // An unstorable replacement is worse than the stale document it was meant to
-  // replace, so roll back to that one and let the caller report the failure.
   if (existing && uploadError) {
     await pool.query("DELETE FROM documents WHERE id=$1", [docRow.id]);
     throw new Error(`Could not store the regenerated prescription (${uploadError})`);
@@ -311,9 +279,6 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
   };
 }
 
-// Build the same payload shape the front end POSTs to /visit/:pid/complete,
-// pulled from current DB state. Called from cron/sync paths where no client
-// payload exists.
 export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
   if (!pid) return null;
 
@@ -487,10 +452,6 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
     rxDate:
       appointmentId && appt?.appointment_date ? String(appt.appointment_date).slice(0, 10) : null,
     summary: { totalVisits, firstVisitDate, monthsWithGini, carePhase },
-    // Apply the same clinical ordering the manual Print Prescription path
-    // uses (visit.js -> sortDiagnoses). Without this, auto-saved PDFs list
-    // diagnoses alphabetically by diagnosis_id instead of Primary →
-    // Complication → Comorbidity → External → Monitoring.
     activeDx: sortDiagnoses(activeDxR.rows),
     complaints: complaints.map((c) => c.label),
     history,
@@ -502,11 +463,6 @@ export async function buildVisitPayloadFromDb(pid, { appointmentId } = {}) {
     labHistory,
     consultations: consultationsR.rows,
     goals: goalsR.rows,
-    // The saved PDF is built here rather than from the /visit payload, so the
-    // next visit's tests and preparation instructions have to be carried
-    // across too — passing only the date printed a prescription with no
-    // "bring these reports" grid and no "follow up with" box, while the same
-    // patient's on-screen preview showed both.
     appt_plan:
       followUpDate || fuInvestigations.length > 0 || fuRow?.follow_up_with
         ? {

@@ -6,46 +6,15 @@ import {
   brandToken,
 } from "../../../shared/giniflowInteractions.js";
 
-// The interaction check (24-ADDENDUM-V11-PLAN.md §5.2).
-//
-// Runs over the COMBINED list — the prescription being written plus the
-// medicines another hospital started — because a check that only sees this
-// clinic's own prescribing answers the wrong question.
-//
-// What it will not do is claim more than it knows. A medicine whose class
-// cannot be resolved is returned by name in `unchecked`, and the whole result
-// is `partial` rather than `clear` whenever that list is not empty. Two thirds
-// of the medicine list is unresolvable today, and a screen that said "no
-// interactions" over that would be inventing an assurance.
-
 const DEFAULT_DUPLICATION = {
   severity: "moderate",
   note: "Two drugs from the same class. Check this is deliberate — one is often a combination tablet containing the other.",
 };
 
-// Class comes from the curated reference tables first, and only then from what
-// was typed on a medication row.
-//
-// That order is the wrong way round from what you would expect, and it is
-// deliberate. `medications.drug_class` is per-row and demonstrably wrong in
-// places: "TAB EMPHA M" — a metformin combination — is filed as `Antiplatelet`
-// on some rows and `Biguanide` on others, and taking the first one found made
-// this check report a severe interaction that does not exist. A false severe
-// finding is not a small bug here: it stops a finalize and teaches the
-// consultant that the warnings are wrong.
-//
-// So the class of a brand is what MOST of its rows say, not what this one row
-// says — "Empha" is a biguanide on dozens of rows and an antiplatelet on two.
-// A brand with no majority resolves to nothing and surfaces as unchecked: the
-// database contradicting itself evenly is not knowledge, and the honest answer
-// to "what class is this" is then "nobody knows".
 export async function resolveClasses(names, db = pool) {
   const wanted = [...new Set(names.map((n) => (n || "").trim()).filter(Boolean))];
   if (!wanted.length) return new Map();
 
-  // The brand is the first word that is not a form word — "Glizid MR 60mg" is
-  // Glizid, "INJ LANTUS 12U" is Lantus. Matching the whole string as well
-  // catches the molecules, which are written out in full.
   const heads = wanted.map(brandToken);
 
   const { rows } = await db.query(
@@ -97,9 +66,6 @@ export async function resolveClasses(names, db = pool) {
   return new Map(
     rows.map((r) => {
       if (r.reference_class) return [r.name, r.reference_class];
-      // A clear majority is an answer. A tie is not — and a tie is the shape
-      // the Empha mislabelling would have to take before this check would
-      // repeat that mistake.
       const decided = r.top_class && r.top_votes > r.runner_up;
       return [r.name, decided ? r.top_class : null];
     }),
@@ -112,18 +78,6 @@ const loadRules = async (db) => {
   );
   return new Map(rows.map((r) => [ruleKey(r.class_a, r.class_b), r]));
 };
-
-// One entry per medicine on the combined list, with every class it contributes.
-// A combination tablet contributes more than one, which is how an ARB hidden
-// inside "ARB+CCB" gets seen at all.
-// The class stated on the row is checked against the reference tables and the
-// rest of the database rather than trusted: the row's own label is where the
-// bad data lives, and it is the one place that cannot correct itself.
-// Three sources, in order of how much they can be trusted: the curated
-// reference tables, then what most of the database says about this brand, then
-// the label on the row itself. The row's own label is last because that is
-// exactly where the bad data lives — but it is still better than nothing for a
-// brand nobody has prescribed before, which is the only case that reaches it.
 const expand = (meds, resolved) =>
   meds.map((m) => {
     const stated = resolved.get(m.name) || m.drugClass || null;
@@ -148,8 +102,6 @@ export async function checkCombinedList(meds, db = pool) {
       note: rule.note,
       classes: key.split("|"),
       medicines,
-      // Named, because "two antiplatelets" is a sentence a consultant has to
-      // translate back into which two boxes on the screen.
       sources: [...new Set([...(existing?.sources || []), a.source, b.source])],
     });
   };
@@ -180,16 +132,9 @@ export async function checkCombinedList(meds, db = pool) {
     unchecked,
     checked: expanded.length - unchecked.length,
     total: expanded.length,
-    // Three states, not two. `partial` is the honest answer for a list the
-    // check could only half read, and the screen must not render it as clear.
     status: unchecked.length ? "partial" : expanded.length ? "checked" : "empty",
   };
 }
-
-// The combined list for one visit: what is being prescribed now, plus what
-// another hospital started. The patient's existing Gini regimen is deliberately
-// not added — once the draft is seeded it already contains those rows, and
-// counting them twice would report every continued medicine as a duplication.
 export async function checkVisit(visitId, db = pool) {
   const [{ rows: items }, { rows: external }, { rows: acks }] = await Promise.all([
     db.query(
@@ -244,8 +189,6 @@ export async function checkVisit(visitId, db = pool) {
 
 export async function acknowledge(visitId, { ruleKey: key, reason }, actorId = null, db = pool) {
   const clean = (reason || "").trim();
-  // An override with no reason is not an override, it is a click. The whole
-  // value of stopping the consultant is the sentence it produces on the record.
   if (clean.length < 4) {
     throw Object.assign(new Error("Say why this combination is intended — it goes on the record"), {
       status: 400,

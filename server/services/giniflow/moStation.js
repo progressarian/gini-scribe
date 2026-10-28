@@ -32,34 +32,11 @@ import { ALLERGY_NOT_ASKED } from "../../../shared/giniflowAllergy.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { TESTS_HOLD_SQL, chiefWaitClock } from "./testsHold.js";
 
-// The MO / SD station — where the queue forms.
-//
-// Brief §4.3: queue of sd_pending for the logged-in SD, patient brief, plan
-// textarea, and three actions. The one hard rule is that Close — sending a
-// patient to pharmacy without the doctor seeing them — is green-category only.
-//
-// Design and the gaps it is built around: docs/gini-flow/08-MO-SD-STATION-PLAN.md
-
-// The category no longer gates the close — the MO's recorded reading of the
-// reports does (31 §4 D1). It is still exported: the triage smoke asserts a
-// green patient is categorised as one, and the screen shows the category beside
-// the decision as evidence.
 export const CLOSEABLE_CATEGORY = "in_control";
 
-// Can this patient be ended here, without the consultant? A plan has to exist,
-// and reports — if any were ordered — have to have been read and called normal.
 const closeableNow = ({ hasPlan, orders, outcome }) =>
   !!hasPlan && (orders === 0 || outcome === "normal");
 
-// The orders that gate all of this: the ones that produce something to read
-// TODAY. An order raised for tomorrow or the next visit produces no report now,
-// and counting it deadlocked the patient — results_status could never reach
-// "ready", so reviewReports refused ("the reports are not in yet") and the close
-// refused in turn ("review the reports before closing"), for ever.
-//
-// One rule, used by the queue's grouping, the patient pane's canClose and the
-// close itself. Three readings of "does this visit have tests" is how a row
-// advertises closeable while the service refuses.
 const GATING_ORDER_SQL = `o.urgency = 'today'`;
 
 const gatingOrders = (orders = []) => orders.filter((o) => o.urgency === "today").length;
@@ -80,10 +57,6 @@ const QUEUE_STATUSES = [
   "with_sd",
   "ready_for_doctor",
   "doctor_done",
-  // Closing without the doctor finalizes, and finalize advances the visit past
-  // doctor_done. Stopping the queue there made the patient vanish the moment the
-  // MO closed them: no card, no list of who they had closed today, no way back
-  // into the record. They belong in "Done", which is where groupOf puts them.
   "rx_pending",
   "with_rx",
 ];
@@ -190,9 +163,6 @@ const QUEUE_SQL = `
      AND NOT ${labOnlyPredicate("v", "$5")}
    ORDER BY v.appointment_time NULLS LAST, first_ev.occurred_at NULLS LAST`;
 
-// Five groups, not four: "waiting on results" and "no reports at all" need
-// different actions from the MO, so the prototypes count them separately and so
-// do we. Merging them hides the only group an MO can unblock.
 const waitMinutes = (row, now) => {
   const { since } = chiefWaitClock(row);
   const until = row.paused_at ? new Date(row.paused_at) : now;
@@ -218,8 +188,6 @@ const groupOf = (row, sdId) => {
   }
   if (["vitals_done", "sd_pending"].includes(row.current_status)) {
     if (!mine) return "withOtherSd";
-    // Either source counts: an MO waiting on bloods does not care which system
-    // the order was raised in.
     const openLab = row.open_orders + row.open_cases;
     if (row.results_status !== "ready" && openLab > 0) return "awaitingResults";
     if (row.results_status !== "ready" && !row.biomarkers) return "missingReports";
@@ -282,24 +250,15 @@ export async function getMoQueue(
       sdName: r.sd_name,
       assignedSdId: r.assigned_sd_id,
       appointmentTime: (r.appointment_time || "").slice(0, 5) || null,
-      // "Now" is the patient at the desk and "Next" the head of the waiting
-      // queue, as the vitals station reads. Everyone else keeps their clock
-      // time, which is the only useful thing to say about them.
       slot: null,
       checkedInAt: r.checked_in_at ? new Date(r.checked_in_at).toISOString() : null,
       statusSince: waitSince ? new Date(waitSince).toISOString() : null,
       pausedAt: r.paused_at ? new Date(r.paused_at).toISOString() : null,
-      // The wait is judged against the same budget the board judges it by, so a
-      // patient the coordinator sees in red is red at the MO's desk too. The
-      // client recomputes the minutes every second; the budget and the colour
-      // come from here, where the SLA config lives.
       waitMinutes: waitMinutes(r, now),
       waitBudget: waitBudgetFor(r, budgetFor),
       waitColour: budgetColour(waitMinutes(r, now) ?? 0, waitBudgetFor(r, budgetFor)),
       bios: bioChips(r.biomarkers),
       reports: reportsLine(r.results_status, !!r.biomarkers),
-      // v2 shows "74% compliance". Only render when the source has a value —
-      // it exists on appointments but is unpopulated for most patients.
       compliancePct,
       openOrders: r.open_orders + r.open_cases,
       labStage: r.lab_stage || null,
@@ -313,9 +272,6 @@ export async function getMoQueue(
     };
     const group = groupOf(r, sdId);
     counters[group] = (counters[group] || 0) + 1;
-    // Counters describe the whole day; the groups hold what the search matched.
-    // Otherwise the header numbers would fall as the MO types, and a search
-    // would read as patients leaving the floor.
     if (r.matches) groups[group].push(card);
   }
 
@@ -373,8 +329,6 @@ export async function getMoPatient(visitId, db = pool) {
   if (!rows.length) return null;
   const v = rows[0];
 
-  // Five reads that do not depend on each other. Run together: an MO tapping
-  // through a queue pays one round trip per patient, not six.
   const [
     vitals,
     lastVitals,
@@ -384,14 +338,8 @@ export async function getMoPatient(visitId, db = pool) {
     { rows: orders },
     { rows: reports },
   ] = await Promise.all([
-    // Today's reading and the one before it — the MO is reading a change, not a
-    // number. Through the shared reader, because the reading may be in either
-    // table: a patient whose nurse worked on HealthRay's screen has one, and
-    // that reading is what advanced them to this desk.
     todaysVitals(visitId, { patientId: v.patient_id, visitDate: v.visit_date }, db),
     previousVitals(v.patient_id, v.visit_date, db),
-    // The same markers from the visits before this one, newest first — a tile
-    // shows a change, and a change needs the reading it changed from.
     db.query(
       `SELECT appointment_date, biomarkers FROM appointments
           WHERE patient_id = $1 AND biomarkers IS NOT NULL
@@ -471,10 +419,6 @@ export async function getMoPatient(visitId, db = pool) {
     reportsReviewedAt: notes[0]?.reports_reviewed_at
       ? new Date(notes[0].reports_reviewed_at).toISOString()
       : null,
-    // `patients.allergy_status` exists now (24-ADDENDUM-V11-PLAN.md §5.1). A
-    // patient nobody has asked yet is NULL in the column and "not_known" here,
-    // so every screen deals with the three states and none of them has to read
-    // an absent answer as "no allergies".
     allergyStatus: v.allergy_status || ALLERGY_NOT_ASKED,
     allergyNote: v.allergy_note,
     // No phase column exists either (plan §3b.1). Omitted rather than guessed.
@@ -486,9 +430,6 @@ export async function getMoPatient(visitId, db = pool) {
       .map((h) => ({ date: h.appointment_date, biomarkers: h.biomarkers }))
       .reverse(),
     previousBiomarkers: history[0]?.biomarkers || null,
-    // The prototype's urgency reads "Next visit · Nov 2026". The date lives on
-    // the appointment's biomarkers blob as `followup`; when it is absent the
-    // screen says "Next visit" and nothing more, rather than inventing a month.
     nextVisitDate: v.biomarkers?.followup || null,
     compliance: v.compliance || null,
     compliancePct: v.pre_visit_compliance?.pct ?? null,
@@ -502,11 +443,6 @@ export async function getMoPatient(visitId, db = pool) {
   };
 }
 
-// Plan §6 rule 3. Until now the rule lived only in the screen, which hid the
-// buttons — but a hidden button is not a rule, and the action behind one of
-// these buttons sends a patient home without a doctor seeing them. An
-// unassigned patient stays open to anyone (first-claim, plan §7); once someone
-// holds them, everybody else must take over explicitly, which is logged.
 async function assertOwner(db, visitId, actorId) {
   const { rows } = await db.query(
     `SELECT v.assigned_sd_id, d.short_name
@@ -528,9 +464,6 @@ async function assertOwner(db, visitId, actorId) {
   return owner;
 }
 
-// The explicit hand-off between MOs: a shift change, or a patient genuinely
-// passed across the desk. Recorded, because "who was working this patient" is a
-// question the day's log has to be able to answer.
 export async function takeOver(visitId, actorId = null, db = pool) {
   if (!actorId)
     throw Object.assign(new Error("Sign in as an MO to take a patient over"), { status: 403 });
@@ -566,8 +499,6 @@ export async function takeOver(visitId, actorId = null, db = pool) {
   }
 }
 
-// Claiming mirrors the vitals station: the board's "With SD / MO" column and the
-// queue's "with me now" must agree with what is physically happening.
 export async function startWorkup(visitId, actorId = null, db = pool) {
   const client = await db.connect();
   try {
@@ -582,11 +513,6 @@ export async function startWorkup(visitId, actorId = null, db = pool) {
     if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
     const deskOwner = actorId ? await chiefDeskOwner(actorId, client) : null;
 
-    // One patient, one desk. This used to be a deliberate no-op — a second MO
-    // opening the card kept the first as owner and was let through — but the
-    // patient is physically at one desk, and two MOs working the same visit
-    // meant two sets of test orders and medicine proposals against it. The
-    // second is now refused; releaseWorkup is how the first hands over.
     if (
       actorId &&
       rows[0].current_status === "with_sd" &&
@@ -601,10 +527,6 @@ export async function startWorkup(visitId, actorId = null, db = pool) {
       );
     }
 
-    // Only from the two statuses that mean "vitals are done, this patient is
-    // mine to work up". Claiming from checked_in would skip the vitals station
-    // entirely — no reading taken, the vitals budget measuring nothing, and the
-    // board showing them at the SD desk while they wait for their BP.
     const CLAIMABLE = ["vitals_done", "sd_pending"];
     if (CLAIMABLE.includes(rows[0].current_status)) {
       await advanceStatus(client, {
@@ -621,8 +543,6 @@ export async function startWorkup(visitId, actorId = null, db = pool) {
         { status: 409 },
       );
     }
-    // First MO to open an unassigned patient takes them; anyone else has been
-    // refused above, so reaching here means it is theirs or nobody's.
     if (!rows[0].assigned_sd_id && deskOwner) {
       await client.query(`UPDATE giniflow_visits SET assigned_sd_id = $2 WHERE id = $1`, [
         visitId,
@@ -644,8 +564,6 @@ export async function startWorkup(visitId, actorId = null, db = pool) {
   }
 }
 
-// Autosaved draft. Upsert, not append: the plan that matters is the one standing
-// at hand-off, and an MO interrupted mid-workup should find what they typed.
 export async function savePlan(visitId, { plan, source = "typed", actorId = null }, db = pool) {
   await assertOwner(db, visitId, actorId);
   const { rows } = await db.query(
@@ -693,11 +611,6 @@ export async function withdrawProposal(proposalId, db = pool) {
   return { withdrawn: true };
 }
 
-// `visitId` is optional but matters: without it the picker shows the base
-// catalogue price while orderTests below charges the patient's scheme rate, so
-// an MO ordering for a CGHS patient would be quoted one number and the order
-// created at another. The comment under orderTests — "the patient is charged
-// what they were quoted" — is only true if both read the same tariff.
 export async function getTestPanels(db = pool, visitId = null) {
   const { rows: panels } = await db.query(
     `SELECT panel_key, label, icon, test_names FROM giniflow_test_panels
@@ -740,7 +653,6 @@ export async function getTestPanels(db = pool, visitId = null) {
       icon: p.icon,
       tests: p.test_names,
     })),
-    // The gloss is why an MO picks a test, so it travels with the price.
     tests: tests.map((t) => {
       const price = homePrices[t.test_name];
       return {
@@ -748,8 +660,6 @@ export async function getTestPanels(db = pool, visitId = null) {
         price,
         homeDiscounted: price !== listed[t.test_name],
         gloss: t.gloss,
-        // The picker can say WHY a price differs from the usual one, instead of
-        // the MO wondering whether the list is wrong.
         basePrice: Number(t.price),
         schemePriced: listed[t.test_name] !== Number(t.price),
         uses: usesByName.get(t.test_name) || 0,
@@ -759,19 +669,11 @@ export async function getTestPanels(db = pool, visitId = null) {
   };
 }
 
-// Trigger 2: ordering tests creates the lab order reception collects against.
-// Prices are copied from the catalogue onto the order lines and totalled onto the
-// order, so the patient is charged what they were quoted even if the catalogue
-// moves afterwards.
 export async function orderTests(
   visitId,
   { urgency, tests = [], customTests = [], actorId = null, byReception = false },
   db = pool,
 ) {
-  // Two kinds of line on one order: tests from the clinic's catalogue, priced
-  // from it, and tests typed in for THIS patient, which exist only on this
-  // order. A one-off ultrasound is not a test the whole clinic should be
-  // offered from then on, which is what putting it in the catalogue would mean.
   const custom = (Array.isArray(customTests) ? customTests : [])
     .map((t) => ({
       name: String(t?.name || "")
@@ -813,15 +715,8 @@ export async function orderTests(
         { status: 409 },
       );
     }
-
-    // The scheme this visit is billed under, snapshotted onto the order below.
-    // Resolved once here rather than joined at read time: a card corrected next
-    // week must not re-price a settled order (33-PATIENT-SCHEME-PLAN.md §4a).
     const schemeCode = await schemeForVisit(visitId, client);
 
-    // Override if the scheme has one for this test, else the catalogue price.
-    // Every override table is empty until the hospital's rate card lands, so
-    // today this returns exactly the base prices it always did.
     const priceOf = await withHomeDiscount(
       visitId,
       await testPricesFor(catalogueNames, schemeCode, client),
@@ -834,10 +729,6 @@ export async function orderTests(
       });
     for (const t of customOnly) priceOf[t.name] = t.price;
     const tests = [...catalogueNames, ...customOnly.map((t) => t.name)];
-    // MO-12: the same panel confirmed twice is two lab orders, two payment cards
-    // on reception's desk and two charges. Only an order whose sample has not
-    // been taken counts — once the blood is drawn, re-ordering the same test is
-    // a genuine repeat, which is a real thing an MO does.
     const { rows: already } = await client.query(
       `SELECT DISTINCT t.test_name
          FROM giniflow_lab_orders o
@@ -855,16 +746,6 @@ export async function orderTests(
       );
 
     const total = tests.reduce((sum, name) => sum + priceOf[name], 0);
-
-    // One order per STATION, not one per confirmation. A doctor ticking HbA1c
-    // and ECG together has ordered two different pieces of work in two different
-    // rooms — a tube drawn at the collection bench and a machine a patient sits
-    // at — and a single row carrying both would land the ECG in the lab queue
-    // telling a phlebotomist to draw a sample. Each order therefore carries its
-    // own tests, its own total and its own payment state.
-    //
-    // A test typed in for this patient alone is `lab`: that is what a one-off
-    // has always been, and it is what every order was before `kind` existed.
     const categoryOf = await testCategoriesFor(catalogueNames, client);
     const kindOf = (name) => (categoryOf[name] === "machine" ? "machine" : "lab");
     const outsourced = await outsourcedTestNames(client, tests);
@@ -904,30 +785,12 @@ export async function orderTests(
       orders.push({ id, kind, outside, tests: kindTests, total: kindTotal });
     }
 
-    // The lab order is what the rest of this function has always meant by
-    // "the order" — the visit event it writes, and the journey steps below.
-    // A machine-only confirmation has none, and must not pretend to.
     const labOrder =
       orders.find((o) => o.kind === "lab" && !o.outside) ||
       orders.find((o) => o.kind === "lab") ||
       null;
     const orderId = labOrder?.id ?? orders[0]?.id ?? null;
 
-    // Ordering today's tests ends this sitting: the patient goes to reception
-    // and the lab, the MO takes the next one, and they come back when the
-    // reports land. Three things depended on this and none of them worked while
-    // the patient stayed at `with_sd`:
-    //
-    //   - the lab could not draw the sample at all — `with_sd` is a room, and
-    //     the lab station refuses to collect from a patient another station has;
-    //   - the MO's own "waiting on results" group only holds `vitals_done` /
-    //     `sd_pending`, so the patient they had just sent to the lab never
-    //     appeared in it;
-    //   - the desk stayed occupied, so the queue behind them did not move.
-    //
-    // Written directly, like `releaseWorkup`: `sd_pending` is behind `with_sd`
-    // and the chain only moves forwards. The MO keeps the patient
-    // (`assigned_sd_id` is untouched) so the reports come back to them.
     let sentToLab = false;
     if (urgency === "today" && current === "with_sd") {
       await client.query(
@@ -954,9 +817,6 @@ export async function orderTests(
       );
       sentToLab = true;
     }
-
-    // The journey the patient is shown, and the counter they are about to stand
-    // at. Only today's tests: a next-visit panel is not a stop on this visit.
     const afterExit =
       urgency === "today" && (isTerminalStatus(current) || current === BACK_FOR_TESTS);
     const late = afterExit
@@ -987,8 +847,6 @@ export async function orderTests(
     await client.query("COMMIT");
     return {
       orderId,
-      // Every order this confirmation raised, one per station. `orderId` above
-      // stays the lab one so existing callers read what they always read.
       orders: orders.map((o) => ({
         orderId: o.id,
         kind: o.kind,
@@ -1001,7 +859,6 @@ export async function orderTests(
       total,
       sentToLab,
       backForTests: Boolean(late?.reopened),
-      // Only today's tests reach reception now; the rest wait for their day.
       reachesReceptionToday: urgency === "today",
     };
   } catch (e) {
@@ -1012,10 +869,6 @@ export async function orderTests(
   }
 }
 
-// MO-15: an MO who taps the wrong card has claimed the patient, and the chain
-// only moves forwards — so without this the mistake has no exit and the patient
-// sits at a desk nobody is working. This is a correction, not a transition:
-// it writes the patient back to the queue they came from and records why.
 export async function releaseWorkup(visitId, actorId = null, db = pool) {
   const client = await db.connect();
   try {
@@ -1065,8 +918,6 @@ export async function readyForDoctor(visitId, actorId = null, db = pool) {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
-    // A patient handed over with no plan wastes the consultation the whole board
-    // exists to protect.
     await assertOwner(client, visitId, actorId);
     const { rows } = await client.query(
       `SELECT (SELECT plan FROM giniflow_sd_notes n WHERE n.visit_id = v.id) AS plan
@@ -1080,8 +931,6 @@ export async function readyForDoctor(visitId, actorId = null, db = pool) {
       });
     }
 
-    // A one-status move from with_sd; allowSkip was suppressing the guard that
-    // catches a hand-over from a patient who never reached the desk.
     await advanceStatus(client, {
       visitId,
       toStatus: "ready_for_doctor",
@@ -1098,19 +947,12 @@ export async function readyForDoctor(visitId, actorId = null, db = pool) {
   }
 }
 
-// Close sends a patient to pharmacy without a doctor seeing them. Green category
-// only, enforced here — the button is hidden for everyone else, but a hidden
-// button is not a rule, and this is the one action on the floor that removes a
-// consultation.
 export async function closeWithoutDoctor(visitId, actorId = null, db = pool) {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
     await assertOwner(client, visitId, actorId);
     const { rows } = await client.query(
-      // Subselects, not a LEFT JOIN: FOR UPDATE cannot be applied to the
-      // nullable side of an outer join, and the row that must be locked is the
-      // visit.
       `SELECT v.category, v.results_status,
               (SELECT plan FROM giniflow_sd_notes n WHERE n.visit_id = v.id) AS plan,
               (SELECT reports_outcome FROM giniflow_sd_notes n WHERE n.visit_id = v.id)
@@ -1128,11 +970,6 @@ export async function closeWithoutDoctor(visitId, actorId = null, db = pool) {
       throw Object.assign(new Error("Write a plan before closing this patient"), { status: 409 });
     }
 
-    // The gate is the MO's recorded reading of the reports, not the category
-    // (31 §4 D1). A patient with no tests ordered has nothing to have read, so
-    // the plan above is the whole record; one with reports must have them read
-    // and called normal, by name and at a time, before the consultation is
-    // removed from their visit.
     if (orders > 0 && outcome !== "normal") {
       throw Object.assign(
         new Error(
@@ -1146,20 +983,12 @@ export async function closeWithoutDoctor(visitId, actorId = null, db = pool) {
     await applyChiefNextVisit(client, visitId, actorId);
     await client.query("COMMIT");
   } catch (e) {
-    // If the connection has dropped, ROLLBACK rejects too — and the release
-    // below it would never run, losing a client from the pool every time. Every
-    // sibling in this file uses `finally` for exactly that reason.
     await client.query("ROLLBACK").catch(() => {});
     throw e;
   } finally {
     client.release();
   }
 
-  // Finalize owns the atomic save, the medicine matching, the card, the
-  // counselling note and the status. Closing without it left the draft in
-  // `giniflow_rx_items` and sent the patient to a pharmacy with no prescription
-  // at all (31 §3 G4) — so the close IS the finalize, not a status change
-  // beside one.
   const result = await finalizeConsult(visitId, actorId, db, {
     closedBySd: true,
     requireNextVisit: true,
@@ -1167,9 +996,6 @@ export async function closeWithoutDoctor(visitId, actorId = null, db = pool) {
   return { ...result, status: "doctor_done", skippedDoctor: true };
 }
 
-// The MO's attestation that they read the reports and what they concluded. The
-// close gate reads `normal` from here; `needs_consultant` is the referral, and
-// the screen turns it into the existing hand-off to the consultant.
 export async function reviewReports(visitId, { outcome, note = null, actorId = null }, db = pool) {
   if (!["normal", "needs_consultant"].includes(outcome)) {
     throw Object.assign(new Error(`Unknown review outcome: ${outcome}`), { status: 400 });

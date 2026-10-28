@@ -12,19 +12,6 @@ import { catalogRowsFor, catalogTestsByIds, patientFor } from "./labCatalog.js";
 import { computeFormulas, formulaInputs, rangeText, flagFor } from "../../../shared/labFormula.js";
 import { assertNotHeld } from "./cancelHold.js";
 
-// Results the lab types in, rather than scans.
-// docs/gini-flow/32-LAB-TYPED-RESULTS-PLAN.md
-//
-// The technician has the numbers on the analyser in front of them. Making them
-// produce a PDF so the system will accept it hands the doctor a picture of a
-// value instead of the value — one that cannot be trended, flagged or compared.
-//
-// So the values go where every lab number in this system already goes:
-// lab_results, with source='manual' and a canonical name, exactly as a
-// consultation's typed labs do (routes/consultations.js). Nothing downstream
-// needs a new screen — the Labs tab, the trends, the MO/SD chips and the
-// patient's app read that table already.
-
 const SOURCE = "manual";
 
 const bad = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -50,17 +37,6 @@ const orderContext = async (orderId, db) => {
   return rows[0];
 };
 
-// The same, for a case the hospital raised on HealthRay — which is every lab at
-// this hospital. `giniflow_lab_orders` has six rows in its whole history, so the
-// typed-results feature shipped reachable only through a path nobody uses.
-//
-// The patient is the delicate part. `lab_cases.patient_id` is stamped only by the
-// DETAIL sync, which does not run until results come back, so almost every case
-// the lab is working on has none. The UHID in the payload is the fallback the
-// board and the lab station already group by — but HealthRay REASSIGNS a UHID to
-// a different person over time, and this write puts numbers on a clinical record.
-// So the resolved patient is NAMED back to the caller, and a case that resolves to
-// nobody is refused rather than guessed at.
 const caseContext = async (caseNo, db) => {
   const { rows } = await db.query(
     `SELECT lc.case_no,
@@ -108,20 +84,8 @@ const caseContext = async (caseNo, db) => {
     tests: r.test_names || [],
   };
 };
-
-// What this lab has actually reported before under the panels this order asks
-// for — each parameter's name, and the unit and range it most often carries.
-// The hospital's own history rather than a catalogue somebody would have to
-// build and then keep up to date.
-//
-// Capped per test, because a CBC with an LFT and a KFT has 192 parameters on
-// file between them and that is a form nobody fills in. Each ordered test brings
-// the handful this lab reports most often for it; everything else stays one
-// autocomplete away, and every prefilled row can be deleted.
 const PREFILL_PER_TEST = 12;
 
-// One parameter, however it was typed. Case, punctuation and spacing are the
-// only differences between the variants in `lab_results.canonical_name`.
 const flattenName = (name) =>
   String(name || "")
     .toLowerCase()
@@ -152,19 +116,10 @@ export async function suggestedRows(orderId, db = pool) {
     };
   });
 }
-
-// A hospital case carries its panels in `lab_cases.test_names`, an order carries
-// them in a join table; past that point the question — what does this lab report
-// under these panels — is identical, so it is asked once.
 export async function suggestedCaseRows(caseNo, db = pool) {
   const c = await caseContext(caseNo, db);
   return suggestionsForTests(c.tests || [], db, c.patient_id);
 }
-
-// The catalogue built from HealthRay's own lab master (44-LAB-TEST-CATALOG-PLAN.md)
-// answers first: its fields are the ones the hospital prints, in print order,
-// with the unit, the formula and the range for THIS patient. Only a test the
-// catalogue has never seen falls through to the guess below.
 async function suggestionsForTests(tests, db = pool, patientId = null) {
   if (!tests.length) return [];
 
@@ -207,23 +162,6 @@ async function guessedRowsForTests(tests, db = pool) {
   for (const r of rows) {
     const group = byTest.get(r.ordered_test);
     if (!group || group.length >= PREFILL_PER_TEST) continue;
-    // A parameter belongs to the first ordered test that claims it — creatinine
-    // asked for by both a KFT and an LFT is one row on the form, not two.
-    //
-    // Matched on a flattened name, because `canonical_name` is not canonical:
-    // the column holds "DHEA Sulphate" (143 rows), "DHEA sulphate" (2) and
-    // "DHEA SULPHATE" (1) as three different values, and "Potassium, Serum"
-    // under both "potassium,_serum" (806) and "Potassium Serum" (6). Comparing
-    // them literally put the same parameter on the form three times over,
-    // burning the per-test prefill budget on spellings of one test. Ordering is
-    // already `seen DESC`, so the variant that survives is the one the lab
-    // actually uses.
-    // The label too, not just the canonical name. "Potassium, Serum" is stored
-    // under both `potassium,_serum` (806 rows) and `Potassium` (4138) — two
-    // genuinely different canonical names whose most recent rows carry the same
-    // test_name, so the form printed one analyte twice with identical unit and
-    // range. Two rows a technician cannot tell apart are a duplicate whatever
-    // the column underneath them says.
     const parameter = flattenName(r.canonical_name);
     const label = flattenName(r.test_name);
     if (claimed.has(parameter) || claimed.has(label)) continue;
@@ -238,14 +176,6 @@ async function guessedRowsForTests(tests, db = pool) {
       seen: Number(r.seen),
     });
   }
-  // A test nobody has ever reported has no history to prefill from, and the
-  // LATERAL join is an inner one — so it used to vanish from the form entirely
-  // and the technician had to know to re-add it by hand. That is exactly the
-  // rare endocrine work this hospital sends out (ALDOSTERONE PRA, METANEPHRINES
-  // FREE PLASMA, CREATININE EGFR), so the ordered test carries its own blank
-  // row: no unit, no range, nothing claimed about it beyond the name it was
-  // ordered under. Skipped when another test on the same case already covers
-  // that name, so the fallback cannot itself become a duplicate.
   return [...byTest.entries()].map(([test, params]) => {
     if (params.length) return { test, params };
     const label = flattenName(test);
@@ -266,9 +196,6 @@ async function guessedRowsForTests(tests, db = pool) {
     };
   });
 }
-
-// Autocomplete for a row the technician adds by hand, over the same history —
-// so a name typed here canonicalises the way the feed's does.
 export async function searchTestNames(q, db = pool) {
   const term = String(q || "").trim();
   if (term.length < 2) return [];
@@ -296,8 +223,6 @@ export async function getCaseResults(caseNo, db = pool) {
   return resultsLinkedTo("lab_case_no", caseNo, db);
 }
 
-// The link column is chosen here, never interpolated from a caller: the two
-// literals are the only values this ever takes.
 async function resultsLinkedTo(column, value, db = pool) {
   const where = column === "lab_case_no" ? "lab_case_no = $1" : "lab_order_id = $1";
   const { rows } = await db.query(
@@ -321,10 +246,6 @@ async function resultsLinkedTo(column, value, db = pool) {
     testDate: r.test_date,
   }));
 }
-
-// One transaction: the values onto the patient's record, the order finished the
-// same way an upload finishes it, and the biomarkers the MO and doctor screens
-// read brought up to date.
 const normalise = (rows, panelName) =>
   rows
     .map((r) => {
@@ -345,10 +266,6 @@ const normalise = (rows, panelName) =>
       (r) => r.testName && (Number.isFinite(r.value) || r.valueText || r.calculatedPlaceholder),
     );
 
-// The catalogue has the last word on a calculated value, its range and its flag.
-// A browser can send anything; VLDL is Triglyceride ÷ 5 whatever arrives, and a
-// value is high or low against HealthRay's range for THIS patient or not at all
-// (44-LAB-TEST-CATALOG-PLAN.md D4, D5).
 async function applyCatalog(entries, patientId, db) {
   const ids = entries.map((e) => e.testId).filter(Boolean);
   if (!ids.length) return entries;
@@ -385,9 +302,6 @@ async function applyCatalog(entries, patientId, db) {
     .filter(Boolean);
 }
 
-// The write itself, identical for an order and for a hospital case — only the
-// column that links a row back to what produced it differs. `column` is one of
-// two literals chosen here and never taken from a caller.
 async function writeEntries(db, ctx, entries, column) {
   const link = column === "lab_case_no" ? ctx.caseNo : ctx.id;
   let written = 0;
@@ -400,10 +314,6 @@ async function writeEntries(db, ctx, entries, column) {
       const flag =
         e.flag !== undefined ? e.flag : e.value === null ? null : flagForRange(e.value, e.refRange);
 
-      // uq_lab_results_per_date is a partial unique index over
-      // (patient_id, canonical_name, test_date) that covers 'manual', so a
-      // correction — or a test HealthRay had already sent — has to update the
-      // row that is there rather than collide with it.
       const updated = await client.query(
         `UPDATE lab_results
             SET test_name = $4, result = $5, result_text = $6, unit = $7,
@@ -431,15 +341,6 @@ async function writeEntries(db, ctx, entries, column) {
         written += 1;
         continue;
       }
-
-      // Another source already reported this test today — a HealthRay feed, an
-      // OPD entry, a report extract. Writing a second row would put two values
-      // for one test on one day in front of the doctor with nothing to say which
-      // is right, so the desk is told instead.
-      //
-      // Checked explicitly rather than leaning on uq_lab_results_per_date:
-      // schema.sql declares that index but THIS database does not have it, so a
-      // conflict clause alone would silently write the duplicate.
       const owned = await client.query(
         `SELECT 1 FROM lab_results
           WHERE patient_id = $1 AND canonical_name = $2 AND test_date::date = $3::date
@@ -474,8 +375,6 @@ async function writeEntries(db, ctx, entries, column) {
           e.isCritical === true,
         ],
       );
-      // Saying "3 results saved" when one of them was dropped is the worst of
-      // the three possible answers.
       if (inserted.rowCount) written += 1;
       else skipped.push(e.testName);
     }
@@ -489,10 +388,6 @@ async function writeEntries(db, ctx, entries, column) {
   return { written, skipped };
 }
 
-// The MO and doctor cards read appointments.biomarkers, not lab_results, so
-// without this the numbers would be in the chart and absent from the screens the
-// floor is actually looking at. Best-effort: a biomarker sync that fails must not
-// lose the results.
 const syncBiomarkers = async (patientId, appointmentId) => {
   if (!appointmentId) return;
   try {
@@ -512,11 +407,6 @@ export async function saveResults(
 
   const order = await orderContext(orderId, db);
   await assertNotHeld(db, { orderId });
-
-  // The same gate uploadReport enforces, checked BEFORE anything is written: the
-  // upload path refuses an uncleared order, and advanceSample would refuse this
-  // one too — but only after the values had already landed on the patient's
-  // permanent record, leaving rows behind and an error on the screen.
   if (!opensLabGate(order.payment_status)) {
     throw bad(
       order.payment_status === "insurance_claim"
@@ -533,10 +423,6 @@ export async function saveResults(
     await applyCatalog(entries, order.patient_id, db),
     "lab_order_id",
   );
-
-  // Typed values finish the order exactly as a file does — same call, so the MO
-  // is notified by one code path whether the result arrived as numbers or as a
-  // scan, and a document can still be attached afterwards.
   if (order.kind === "machine") {
     if (order.sample_status !== "reported") {
       await advanceMachineTest(orderId, { to: "reported", actorId }, db);
@@ -549,24 +435,11 @@ export async function saveResults(
   return {
     orderId,
     saved: written,
-    // Named, not counted: the desk has to know WHICH value did not take, because
-    // the one already on file came from somewhere else and may disagree.
     skipped,
     results: await getResults(orderId, db),
   };
 }
 
-// The same, for a case the hospital raised on HealthRay.
-//
-// No payment gate here: the gate belongs at collection, not at typing in
-// results — advanceCaseAction()'s sample_taken step in labStation.js now
-// refuses to draw a HealthRay-ordered sample until reception has cleared Lab
-// Billing on the journey, so a case with results to save already cleared that
-// gate on the way in.
-//
-// Nothing is written back to HealthRay, so the case is finished the only way this
-// system can finish one: the floor's own `results_ready` step, which is what moves
-// it out of the lab queue, plus the visit-level results flag the upload path sets.
 export async function saveCaseResults(
   caseNo,
   { rows = [], actorId = null, actorRole = "lab", panelName = null },
@@ -583,10 +456,6 @@ export async function saveCaseResults(
     "lab_case_no",
   );
 
-  // Both only when something actually landed. A save whose every row was already
-  // owned by another source has written nothing, and the results-ready check
-  // deliberately excludes THIS case — so calling it here would clear the visit on
-  // the strength of a case that still has nothing against it.
   let ready = { rowCount: 0 };
   if (written) {
     await db.query(
@@ -607,8 +476,6 @@ export async function saveCaseResults(
 
   return {
     caseNo,
-    // Whose record this went on. The patient may have been resolved through a
-    // reassignable UHID, so the desk is told the name rather than trusting it.
     patientName: c.patientName,
     saved: written,
     skipped,

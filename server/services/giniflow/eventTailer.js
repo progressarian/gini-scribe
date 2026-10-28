@@ -2,22 +2,6 @@ import pool from "../../config/db.js";
 import { publish } from "./eventHub.js";
 import { publishEvents } from "./realtimeBus.js";
 
-// Everything that happens on the Gini Flow floor is already written to an
-// append-only table: `advanceStatus` writes every status move, the lab order
-// track writes every payment and sample, and the vitals station writes every
-// reading. Nothing new has to be published anywhere — something only has to
-// read them.
-//
-// That is what makes this cheap. One indexed `seq > watermark` lookup per table
-// per second replaces every open browser re-running the queue SQL every fifteen,
-// and it cannot miss an event: the tables are insert-only and the watermark is
-// monotonic.
-//
-// It also means the API hears about work done by the worker process — the
-// HealthRay sync moving a patient to checked_in — without the two processes
-// talking. The transaction pooler on port 6543 rules out LISTEN/NOTIFY, and the
-// events table is a better bus anyway, because it is durable.
-
 const TICK_MS = Number(process.env.GINIFLOW_TAIL_MS || 1000);
 const BATCH = 200;
 
@@ -53,12 +37,6 @@ const STREAMS = [
            WHERE g.seq > $1 ORDER BY g.seq LIMIT ${BATCH}`,
     map: (r) => ({ kind: "vitals", visitId: r.visit_id, date: r.date }),
   },
-  // The coordinator categorising or assigning. Its own table rather than
-  // giniflow_visit_events, because those are journey steps and the station
-  // timers are measured from them — see the migration
-  // 2026-09-02_giniflow_triage_events.sql. The bulk auto-categorise pass writes
-  // nothing here on purpose: it runs on every board load and would be a
-  // heartbeat, not news.
   {
     kind: "triage",
     sql: `SELECT e.seq, e.visit_id, e.action, v.visit_date::text AS date
@@ -89,8 +67,6 @@ let timer = null;
 let running = false;
 const watermarks = new Map();
 
-// Start from where the tables are now, not from the beginning of time: a
-// restart must not replay the whole day into every screen.
 async function primeWatermarks(db) {
   const { rows } = await db.query(
     `SELECT COALESCE((SELECT max(seq) FROM giniflow_visit_events), 0)     AS visit,
@@ -112,18 +88,10 @@ async function tick(db) {
       if (!rows.length) continue;
       const envelopes = rows.map(stream.map);
       for (const ev of envelopes) publish(ev);
-      // The same envelopes, on Supabase Realtime. Published from HERE and not
-      // from the write sites, which is a deliberate departure from
-      // 21-SUPABASE-REALTIME-PLAN.md §4.4(a) — see §4.4.1 there. In short: the
-      // tailer only ever sees committed rows, it is one call site instead of
-      // ten, and it already hears the worker's HealthRay sync, which write-site
-      // publishing in the API process would miss entirely.
       publishEvents(envelopes);
       watermarks.set(streamKey(stream), Number(rows[rows.length - 1].seq));
     }
   } catch (e) {
-    // A blip must not kill the loop; the next tick picks up from the same
-    // watermark, so nothing is lost by failing.
     console.error("[giniflow] event tailer:", e.message);
   } finally {
     running = false;
@@ -143,6 +111,5 @@ export function stopEventTailer() {
   timer = null;
 }
 
-// Exposed for the smoke suite, which drives ticks itself rather than waiting.
 export const tailerTick = tick;
 export const tailerWatermarks = () => Object.fromEntries(watermarks);

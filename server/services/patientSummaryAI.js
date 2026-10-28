@@ -1,8 +1,3 @@
-// Generates a patient-facing visit summary via Claude. Tone is plain,
-// reassuring, and written for the patient (NOT the doctor). The output is
-// what gets printed on the prescription's "Visit summary" block. Persistence
-// is the caller's responsibility — store the returned text as a new version.
-
 import { pickNextVisit } from "../../shared/followUp.js";
 import { sortDiagnoses } from "../utils/diagnosisSort.js";
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
@@ -104,9 +99,6 @@ function buildContext(data) {
     }
     return null;
   };
-  // The summary used to receive only sugar and LDL, so however many conditions
-  // the patient carried, the only numbers it could write about were diabetic
-  // ones. Every marker the diagnosis list can refer to is passed instead.
   const LAB_FIELDS = [
     { key: "hba1c", keys: ["hba1c", "a1c"] },
     { key: "fbs", keys: ["fbs", "fasting blood", "fasting glucose"] },
@@ -138,10 +130,6 @@ function buildContext(data) {
     }
     return null;
   };
-
-  // Drop child/support meds (those with a parent_medication_id) so the
-  // patient-facing summary names only top-level prescriptions, matching
-  // the rule used by the doctor brief and post-visit summary.
   const newOrChanged = (activeMeds || [])
     .filter((m) => m.is_new && !m.parent_medication_id)
     .map((m) => ({
@@ -168,9 +156,6 @@ function buildContext(data) {
   const safeLatestVitals = latestVitals && typeof latestVitals === "object" ? latestVitals : {};
   const safePrevVitals = prevVitals && typeof prevVitals === "object" ? prevVitals : {};
 
-  // Full problem list in the clinical sequence, never truncated: the prompt's
-  // coverage rule requires every active diagnosis, and a slice was silently
-  // dropping the conditions that sat at the end of the list.
   const diagnoses = (sortDiagnoses(activeDx) || [])
     .filter((d) => d && d.is_active !== false)
     .map((d) => ({

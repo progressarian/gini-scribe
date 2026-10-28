@@ -1,5 +1,3 @@
-// ── HealthRay Sync DB operations ────────────────────────────────────────────
-
 import pool from "../../config/db.js";
 import { noteSyncedWhileBlocked } from "../patientBlockGuard.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
@@ -2195,8 +2193,6 @@ export async function syncDocuments(patientId, records, fallbackDate, healthrayA
   log("DB", `${records.length} documents synced`);
 }
 
-// ── Auto-mark a HealthRay appointment as "checkedin" ────────────────────────
-// Patient appears in HealthRay but no prescription yet — mark as checked in.
 export async function markAppointmentAsCheckedIn(appointmentId) {
   try {
     const { rowCount } = await pool.query(

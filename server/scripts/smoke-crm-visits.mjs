@@ -19,6 +19,7 @@ if (!/localhost|127\.0\.0\.1|host\.docker\.internal/.test(dsn)) {
 const { logVisit, fillDoctorGap, repHome, suggestedNextVisit, doctor360, setPriority } =
   await import("../crm/visits.js");
 const pool = (await import("../config/db.js")).default;
+const { addDays, istDate } = await import("../crm/istPeriods.js");
 
 const EXEC = {
   id: "44444444-4444-4444-4444-444444444444",
@@ -49,7 +50,7 @@ const payload = {
   discussion_notes: "Interested in ICU tie-up",
   outcome: "positive",
   follow_up_required: true,
-  next_visit_date: "2026-10-01",
+  next_visit_date: addDays(istDate(new Date(RECORDED)), 14),
   client_created_at: RECORDED,
 };
 const first = await logVisit(EXEC, payload);

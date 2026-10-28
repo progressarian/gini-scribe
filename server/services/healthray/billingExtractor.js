@@ -52,8 +52,6 @@ Return ONLY the fields in the schema. Rules:
 - IGNORE footer / boilerplate (hospital address, GST no, operator signature, page numbers, amount-in-words).
 - If a field is genuinely absent, use an empty string for text or 0 for numbers — never invent values.`;
 
-// Read a billing PDF (Buffer / Uint8Array) and return the structured object, or
-// null if extraction is unavailable/fails. Nothing is persisted.
 export async function parseBillingPdfWithAi(
   pdfBuffer,
   mimeType = "application/pdf",
@@ -193,8 +191,6 @@ export function transactionsToBilling(rows, { appointmentId, date, wholeDay = fa
   if (labs.length) {
     steps.push({ step_catalog_id: "blood_sample", step_name: "Blood Sample", tests: labs });
   }
-  // Imaging (RADIOLOGY) and machine tests (ABI/VPT/ECG-type) each get their own
-  // step so they're not silently dropped.
   for (const i of live.filter((i) => i.category === "imaging" || i.category === "machine")) {
     steps.push({ step_catalog_id: null, step_name: i.desc });
   }

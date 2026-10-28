@@ -1,10 +1,3 @@
-// ── Lab HealthRay result parser ──────────────────────────────────────────────
-// Extracts flat result rows from case_detail response.
-// case_detail has three structures inside case_reports:
-//   1. case_reports[].tests[].parameters[]                        (e.g. Haematology sub-params)
-//   2. case_reports[].reports[].report_tests[].test.parameters[]  (e.g. Microalbumin sub-params)
-//   3. case_reports[].reports[].report_tests[].test (direct)      (e.g. HbA1c, FBS, Lipids — has_sub_tests=false)
-
 import { getCanonical } from "../../utils/labCanonical.js";
 import { flagFor } from "../../utils/labFlag.js";
 
@@ -29,10 +22,6 @@ function mapParam(param, categoryName) {
 
   return {
     name: param.name,
-    // Map "S. Ferritin" / "Serum Creatinine" etc. onto the shared canonical
-    // key (e.g. "Ferritin") so HealthRay rows dedup against OPD / report_extract
-    // rows that were already canonicalised. Falls back to the old lowercase
-    // underscore form for test names with no canonical mapping yet.
     canonicalName:
       getCanonical(param.name) || (param.name || "").toLowerCase().replace(/\s+/g, "_"),
     rawValue: rawVal,
@@ -89,9 +78,6 @@ export function parseLabCaseResults(caseDetail) {
 export function extractTestNames(listRow) {
   return (listRow.investigations || []).filter(Boolean).map(String);
 }
-
-// Extract investigation summary (Reports vs Tests) from a case detail object
-// Returns { reports: ["LIPID PROFILE", "HBA1C", ...], tests: ["Creatinine, Serum", ...] }
 export function extractInvestigationSummary(caseDetail) {
   const reports = [];
   const tests = [];
@@ -109,11 +95,6 @@ export function extractInvestigationSummary(caseDetail) {
 
   return { reports, tests };
 }
-
-// ── Outsource classification ────────────────────────────────────────────────
-// HealthRay marks each test inside case_reports[].tests[] with
-// investigation_type: "lab" (in-house) or "outsource_lab" (sent out).
-// Cases sometimes also expose outsource_lab_id / outsource_lab.
 function isOutsourceTest(test) {
   if (!test) return false;
   if (test.investigation_type === "outsource_lab") return true;
@@ -146,20 +127,11 @@ export function classifyCaseSource(listRowOrDetail) {
   if (inhouse === 0) return "outsource";
   return "mixed";
 }
-
-// "Writable" === would yield a numeric value in mapParam → syncLabCaseResults.
-// Text-only results ("Positive", "2-3/HPF", remarks) are intentionally not
-// considered ready: lab_results only stores numeric values, so a text-only
-// case has nothing to display and must stay in pending.
 function isWritableResult(testResult) {
   if (testResult == null || testResult === "") return false;
   return !isNaN(parseFloat(testResult));
 }
 
-// Counts of in-house tests expected vs in-house tests with a usable result,
-// from a case detail object. Used by the retry loop to decide if results are
-// still pending. "ready" mirrors what syncLabCaseResults would actually write
-// (numeric only), so inhouseComplete cannot fire on a text-only payload.
 export function countInhouseProgress(caseDetail) {
   let expected = 0;
   let ready = 0;
@@ -178,13 +150,6 @@ export function countInhouseProgress(caseDetail) {
   return { expected, ready };
 }
 
-// Counts of in-house tests expected vs tests with ANY result (numeric OR text).
-// Stricter than countInhouseProgress for PDF gating: HealthRay only generates
-// the report PDF after every test in the case has been entered. Numeric and
-// text results both count here because both signal "the lab tech has finalised
-// this test." Used to avoid attempting a PDF download for partially-reported
-// cases — those return "No Report Found" from HealthRay and would otherwise
-// be marked pdf_unavailable=TRUE permanently.
 export function countAllInhouseResults(caseDetail) {
   let expected = 0;
   let reported = 0;
@@ -212,10 +177,6 @@ export function extractCaseDate(listRow) {
   return raw.slice(0, 10); // YYYY-MM-DD
 }
 
-// ── Case status normalization ───────────────────────────────────────────────
-// HealthRay sends case_status with inconsistent casing/spacing
-// (e.g. "In Process", "in_process", "PRINTABLE"). Collapse to lowercase with
-// no whitespace/underscores so all downstream checks compare a single shape.
 export function normalizeCaseStatus(status) {
   if (status == null) return "";
   return String(status)
@@ -229,28 +190,12 @@ export const LAB_CASE_STATUS = {
   IN_PROCESS: "inprocess",
   CANCELLED: "cancelled",
 };
-
-// Decide whether the lab report PDF is safe to download for this case.
-// Returns { ready: boolean, reason: string }. Default-skip when no signal:
-// a missed download is recovered on the next sync tick, but a blank PDF gets
-// stored permanently and prevents future re-download (pdf_storage_path set).
-//
-// Why we require live `caseDetail`: results trickle in from HealthRay over
-// hours — one panel finalises, others stay pending. The DB-side
-// `results_synced` flag flips to TRUE as soon as a single numeric panel is
-// written, so trusting it for PDF gating triggers downloads on partially-
-// reported cases. HealthRay then returns "No Report Found" for those, and
-// we mark pdf_unavailable=TRUE permanently. The fix is to gate on the
-// detail payload: every in-house test must carry a result (numeric or text)
-// before we attempt the PDF.
 export function isLabCasePrintable(caseStatus, caseDetail = null, _opts = {}) {
   const norm = normalizeCaseStatus(caseStatus);
 
   if (norm === LAB_CASE_STATUS.CANCELLED) return { ready: false, reason: "cancelled" };
   if (norm === LAB_CASE_STATUS.IN_PROCESS) return { ready: false, reason: "in-process" };
 
-  // Authoritative signal when we have live detail: every in-house test must
-  // have a result before HealthRay will generate the report PDF.
   if (caseDetail) {
     const { expected, reported } = countAllInhouseResults(caseDetail);
     if (expected > 0 && reported < expected) {
@@ -259,11 +204,8 @@ export function isLabCasePrintable(caseStatus, caseDetail = null, _opts = {}) {
     if (expected > 0 && reported === expected) {
       return { ready: true, reason: "all-tests-reported" };
     }
-    // expected === 0 → no in-house tests visible; fall through to status.
   }
 
-  // No detail in hand: rely on HealthRay's case_status alone. We deliberately
-  // do NOT trust results_synced here — see header comment.
   if (norm === LAB_CASE_STATUS.PRINTABLE) return { ready: true, reason: "printable" };
 
   return { ready: false, reason: norm ? "unknown-status" : "no-detail" };

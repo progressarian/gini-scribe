@@ -4,7 +4,6 @@ const { error } = createLogger("PrescriptionExtract");
 
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
 
-// Detect actual file format from magic bytes — S3 Content-Type is unreliable
 function detectMediaType(buffer) {
   const b = new Uint8Array(buffer.slice(0, 8));
 

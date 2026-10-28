@@ -82,50 +82,17 @@ import {
 } from "./cancelHold.js";
 import { orderCancelStage } from "../../../shared/testCancelStages.js";
 
-// The COLUMN, not the raw status. `vitals_done` is the last event the sync
-// observed, but the board files it under "With SD / MO" — HealthRay has no
-// status for the workup, so a patient sitting with the MO still reads
-// `vitals_done` in the table. Printing the status made the card claim eight
-// patients were at vitals when they were with the SD.
 const COLUMN_NAME = Object.fromEntries(BOARD_COLUMNS.map((c) => [c.key, c.name]));
 
-// The visit is over — the lab is holding a result nobody on the floor is waiting
-// for any more, which is a different problem from a slow sample.
 const FINISHED = ["dispensed", "exited", "no_show", "cancelled"];
 const NEVER_CAME = ["no_show", "cancelled"];
 
-// A patient cannot be in two places. These three statuses mean somebody else has
-// them in a room right now, so the lab cannot draw a sample however overdue it
-// is — the card must not offer it. Every other on-floor status is a QUEUE: the
-// patient is sitting waiting and can be called.
-//
-// `vitals_done` is the one that matters most here. The board files it under
-// "With SD / MO" because that is the column it belongs to, but the status itself
-// means vitals are finished and the MO has not started — the patient is idle,
-// and collectable.
 const IN_A_ROOM = ["with_vitals", "with_sd", "with_doctor"];
 
 const inStationRoom = (r) => IN_A_ROOM.includes(r.current_status) && r.room_source !== "healthray";
 
-// The lab station. Five buckets along one track:
-//
-//   sample pending → collecting → processing → ready to upload → uploaded
-//
-// Two rules the screen cannot be trusted to enforce, so the service does:
-//
-//   1. No sample may be collected until reception has cleared payment or an
-//      insurance claim (brief §2.2). A lab technician looking at a card has no
-//      way to know that; the button is hidden, but hiding is not enforcing.
-//   2. `uploaded` sets results_status = 'ready' on the visit, which is what turns
-//      the patient green on the MO and doctor queues (trigger 1). It happens in
-//      the same transaction as the upload, so the two can never disagree.
-
 export { LAB_SAMPLE_FLOW as SAMPLE_FLOW };
 
-// An action is only offered by the room that owns the rung it lands on. Both
-// rooms can SEE the handoff rungs — that is what makes the inbox work — so
-// without this each would offer the other's next step and the service would
-// refuse it on tap.
 const roomAction = (sampleStatus, room) => {
   const rung = nextOfferedFor(SAMPLE_STATUS_TO_STAGE[sampleStatus], room);
   return rung ? { to: rung.advanceTo, label: rung.advanceLabel } : null;
@@ -156,20 +123,6 @@ const stepsFor = (sampleStatus, paid, moving = paid) => {
   ];
 };
 
-// Lab work the floor is waiting on that Gini Flow did not order.
-//
-// The MO and consultant boards counted `giniflow_lab_orders` alone, so a patient
-// whose bloods were ordered on HealthRay — which is all of them — never showed as
-// awaiting results. On a day with 46 lab cases and 5 outstanding, both boards
-// read zero, and an MO could close a patient without knowing today's results
-// were still out.
-//
-// Outstanding means the lab has neither signed the case out nor produced a file.
-// Matched by UHID as well as `patient_id`, because a case the lab is still
-// running is exactly the one with no `patient_id` yet.
-//
-// A correlated fragment rather than a helper: both boards select it inside one
-// large query each, and two copies of this rule would drift.
 export const OPEN_LAB_CASES_SQL = `
   (SELECT count(*)::int FROM lab_cases lc
     WHERE lc.case_date = v.visit_date
@@ -238,26 +191,8 @@ const unifiedFromCase = (r) => ({
   collectedAt: r.collectedAt,
 });
 
-// The page's filter groups → the Gini bucket and the HealthRay stage that make
-// up each one. The two vocabularies differ, so the mapping lives here rather
-// than being reconstructed on the client.
 export const LAB_GROUPS = FILTER_TO_TARGETS;
 
-// A samples-only patient the lab has no record of.
-//
-// The board draws these from the appointment alone, so it can say "Registered ·
-// no case yet"; both lab rooms are built from work items — a giniflow_lab_order
-// or a HealthRay case — and a patient with neither has no row to draw. The
-// result was the one screen that could act on it being the one screen that could
-// not see it: 11 of 34 samples-only patients over eight days ended the day with
-// no case and no order, four of them on a single day, and nothing on the floor
-// ever said so.
-//
-// They are deliberately NOT folded into the `pending` rung. That bucket means
-// "an order exists, go and collect it", and the sample→upload SLA and the "To
-// call" chip both count it — an order-less patient would corrupt both. This is
-// its own list, the way the vitals station keeps its held patients beside the
-// queue rather than in it.
 async function awaitingRegistration(visitDate, search, db) {
   const { rows } = await db.query(
     `SELECT v.id AS visit_id, v.current_status,
@@ -311,12 +246,6 @@ async function awaitingRegistration(visitDate, search, db) {
   }));
 }
 
-// What this bench has already finished with today.
-//
-// A room's own rungs are its work in PROGRESS: the moment the next room takes a
-// sample over, the patient leaves the screen entirely, so the collection room
-// ends the day with no record of the tubes it drew and no way back to one it
-// got wrong. Everything past the room's last rung is its output.
 const doneHereFor = (unified, room) => {
   if (!room) return [];
   const own = LAB_RUNGS.filter((r) => r.room === room);
@@ -353,15 +282,9 @@ export async function getLabQueue(
   { group = "all", room = null } = {},
 ) {
   const search = q && String(q).trim().length >= 2 ? String(q).trim() : null;
-  // A fully manual lab works only what Scribe was asked for. With the case list
-  // off, showing the hospital's own cases would put work on the bench's screen
-  // that nobody here ordered and the bench cannot bill, collect against or
-  // close — so the two switch together (39-HYBRID-FLOOR-PLAN.md §15).
   const healthray = labShowsHealthrayCases()
     ? await getHealthrayCases(visitDate, search, db, room)
     : [];
-  // Only the collection room can do anything about an unregistered patient —
-  // there is no sample for the analyzer bench to be missing.
   const awaiting =
     !room || room === LAB_ROOMS.COLLECTION ? await awaitingRegistration(visitDate, search, db) : [];
   const { rows: queued } = await db.query(
@@ -513,10 +436,6 @@ export async function getLabQueue(
       paid,
       bucket: SAMPLE_STATUS_TO_BUCKET[r.sample_status] || "pending",
       steps: stepsFor(r.sample_status, paid, moving),
-      // Only offered once payment is cleared — and refused by the service too.
-      // Room-scoped as well: the collection room sees a sample it has sent, and
-      // its next step belongs to the analyzer bench. Offering a button that
-      // answers 403 is worse than offering none.
       nextAction: startHeld ? null : next,
       blockedReason: !paid
         ? homeCollected
@@ -571,10 +490,6 @@ export async function getLabQueue(
     (acc, s) => ({ ...acc, [s.key]: unified.filter((u) => u.stage === s.key).length }),
     {},
   );
-
-  // Whole-day totals, computed before any filtering. The stats strip and the
-  // filter chips both read these: derived from the returned array lengths they
-  // would collapse to one non-zero group the moment a filter was applied.
   const rungs = visibleRungs(room);
   const inRoom = (stageKey) => rungs.some((r) => r.key === stageKey);
   const roomHealthray = room ? floorHealthray.filter((r) => inRoom(r.stage.key)) : floorHealthray;
@@ -608,10 +523,6 @@ export async function getLabQueue(
     unifiedCounts,
     stages: rungs.map((r) => ({ key: r.key, label: r.stageLabel })),
     homeCounts: homeCountsOf(orders, healthray),
-    // The five counters at the top of the screen. They read 0 all day because
-    // they only ever counted `giniflow_lab_orders`; the hospital's own cases
-    // move through the same five stages and are simply added in, so the strip
-    // describes the lab rather than one unused table.
     stageCounts: roomHealthray.reduce(
       (acc, r) => {
         r.caseList.forEach((c) => {
@@ -625,30 +536,6 @@ export async function getLabQueue(
   };
 }
 
-// The hospital's own lab, read-only.
-//
-// The five buckets above queue `giniflow_lab_orders`, which only an MO ordering
-// on this floor writes — one row in the table's whole history. Meanwhile the lab
-// itself runs 40-odd cases a day, ordered on HealthRay and landing here through
-// the lab-API sync. The station was therefore empty on a busy day, which reads
-// as a broken screen rather than as two systems that never meet.
-//
-// Grouped by PATIENT, not by case: a patient with four samples is one person the
-// floor is waiting on, and the technician's question is "whose bloods are we
-// still holding up", not "how many tubes exist". So each row carries where that
-// patient is standing right now, which is the only thing that makes an unowned
-// queue actionable — a result that is late matters when the doctor is waiting
-// for it and does not when the patient has gone home.
-
-// `results_synced` is the trap: it flips TRUE the moment ONE numeric panel
-// lands, not when the case is done. A synced case with no `reported_on` is the
-// "Gini Lab Partial" bucket — lab staff are still entering the rest of it. The
-// definition is copied in meaning from `routes/opd.js`, so this screen and the
-// OPD chips can never disagree.
-// HealthRay stamps a clock at each stage, so the hospital lab has the same five
-// buckets the Gini queue does — they were simply never read. `result_saved_on`
-// before `reported_on` is the "results done, not signed out" window, which is
-// what the queue calls Ready to upload.
 const CASE_STAGE = LAB_RUNGS.map((r) => ({
   key: r.key,
   label: r.stageLabel,
@@ -658,25 +545,6 @@ const CASE_STAGE = LAB_RUNGS.map((r) => ({
 }));
 
 export { LAB_STAGES };
-
-// `phlebotomy_status` before `collected_on`, deliberately.
-//
-// `collected_on` only arrives with the DETAIL fetch, which is the same call that
-// carries the results — so while that call is failing (and it retries roughly
-// once every 10 minutes for up to 14 days) a sample drawn hours ago still looks
-// uncollected. One case today sat on "Collect now" for three and a half hours
-// after the phlebotomist had finished with it, which is the screen sending a
-// technician to draw blood twice.
-//
-// The LIST payload carries `phlebotomy_status` on every pass and needs no detail
-// call. Across the last week it takes exactly two values and never contradicts
-// `collected_on` where both are present, so it is the earlier, safer signal.
-// ...and any stage BEYOND collection is proof too. HealthRay leaves
-// phlebotomy_status at "In progress" on cases whose tube is demonstrably in the
-// lab — case 19609 was received at 08:07 with the field never updated — so a
-// case sitting in Processing was still being offered "✓ Mark sample collected".
-// A tube cannot be run before it is drawn, and offering an action that cannot
-// apply is how a technician is sent to draw blood twice.
 const pastCollection = (c) => !!c.receivedOn || !!c.resultSavedOn || !!c.reportedOn;
 
 // HealthRay's own evidence, and the only evidence this screen used to have.
@@ -689,30 +557,12 @@ const healthrayStage = (c) => {
   return 0;
 };
 
-// What the floor recorded here. HealthRay learns a sample was drawn only when
-// the RESULTS come back — `collected_on` rides in on `raw_detail_json`, hours
-// later — and `phlebotomy_status`, the one live field, is left at "Pending" by
-// the hospital's phlebotomists on most days. So a technician who has drawn every
-// tube on the floor has no way to say so, and the queue keeps sending them back.
-//
-// These are the same three steps the Gini-ordered queue has in `SAMPLE_FLOW`.
-// They are the floor's own account of the sample, never HealthRay's.
-
 const floorStage = (c) =>
   (c.actions || []).reduce((max, a) => Math.max(max, FLOOR_ACTION_STAGE[a.action] ?? 0), 0);
 
-// HealthRay wins wherever it is further along: it is authoritative about its own
-// lab, and a case it has already received cannot be un-received by this screen.
-// It simply has nothing to say for the first few hours, and that silence is what
-// the floor's own record fills.
 const STAGE_FOR_ACTION = Object.fromEntries(
   LAB_RUNGS.filter((r) => r.action).map((r) => [r.action, r.key]),
 );
-
-// R2 (35-LAB-TWO-ROOM-SPLIT-PLAN §3.3). The collection bench and the analyzer
-// bench each own their own rungs, and hiding a button is not a rule — a screen
-// left open in the wrong room, or a stale tab after a role change, must be
-// refused here rather than silently recording one room's work against the other.
 const assertRoomOwns = (room, stageKey) => {
   if (!room || !stageKey) return;
   if (!roomOwns(room, stageKey)) {
@@ -722,56 +572,14 @@ const assertRoomOwns = (room, stageKey) => {
     );
   }
 };
-
-// Something to show for the case: a report file, or values typed against it.
-// The lab may finish either way — a scan of a printout, or numbers the doctor
-// can trend — and one of the two is what "done" is allowed to mean.
 const hasEvidence = (c) => !!c.hasReport || !!c.hasValues;
-
-// The ladder. HealthRay wins wherever it is further along — it is authoritative
-// about its own lab, and a case it has already received cannot be un-received.
-//
-// Except on a manual floor, where every step is the bench's own tap
-// (39-HYBRID-FLOOR-PLAN.md §15). The case list still arrives so the patient is
-// visible, but its `phlebotomy_status` would otherwise lift a tube to
-// "collected" that nobody here has drawn — a step from the hospital's record by
-// the back door, and the exact thing the floor asked to stop.
 const stageIndex = (c) =>
   labStepsAreManual() ? floorStage(c) : Math.max(healthrayStage(c), floorStage(c));
 
 export const isCollected = (c) => stageIndex(c) >= stageIndexOf("collected");
 
-// Whether a result exists yet — which gates BOTH the report drop zone and the
-// typed-values form, because they are the same claim: the numbers are out.
-//
-// The bar is `results`, not the analyzer. A sample on the machine has no values
-// yet, so offering either control at `processing` asks a technician to produce a
-// result that does not exist — which is what the floor said when the form opened
-// on a tube that had only just gone on. Somebody has to say the values are out,
-// and that is what the `results` rung is for.
-//
-// HealthRay clears the bar on its own account: `result_saved_on` and
-// `reported_on` both land past this rung, so a synced case opens the form
-// without anybody on the floor tapping anything.
 const canHaveReport = (c) => stageIndex(c) >= stageIndexOf("results");
-
-// What the technician does next on a case Gini Flow does not own — the same
-// question `NEXT_SAMPLE_ACTION` answers for a Gini order, so the two halves of this
-// screen stop describing one physical act in two different vocabularies.
-// Upload is deliberately absent: it is a file, handled by its own drop zone.
 const CASE_NEXT_ACTION = markableRungs().map((r) => ({ action: r.action, label: r.actionLabel }));
-
-// The rail and the pill are the SAME fact and must be computed from the same
-// thing. Driving the rail off `results_synced` while the pill read HealthRay's
-// timestamps let one card say "Sample at lab" beside a pill saying "Processing"
-// — two names for one state, disagreeing on the same row. Both now come from
-// the stage, so the rail simply marks how far along `CASE_STAGE` the case is.
-
-// `CASE_STAGE` has five entries and the rail four, so the map is explicit: the
-// index here is the rail step currently in progress. A case AT the analyzer has
-// "Processing" as its live step, not as a finished one — and "Results done" and
-// "Reported" collapse into one rail step, the first being the lab not having
-// signed the case out yet.
 
 const labSteps = (stage) => {
   const reached = railForStage[stage];
@@ -970,15 +778,8 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
   return rows.map((r) => {
     const counts = { pending: r.pending, partial: r.partial, reported: r.reported };
     const elsewhere = r.on_floor ? busyElsewhere(busy, r.visit_id, LAB_STATION) : null;
-    // The LEAST advanced case is the patient's stage: with three samples out, the
-    // one nobody has collected is what the floor is waiting on, not the one that
-    // has already reported.
     const cases = (r.case_list || []).map((c) => {
       const idx = stageIndex(c);
-      // Whose account this is. The lab must never read a tube the floor says it
-      // drew as one HealthRay has confirmed, so the label carries its source —
-      // but the case still leaves the "collect now" bucket, because it has been
-      // drawn and sending somebody to draw it again is the actual harm.
       const onFloor = idx > healthrayStage(c);
       const at = (c.actions || []).find((a) => FLOOR_ACTION_STAGE[a.action] === idx);
       return {
@@ -987,12 +788,7 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
           ? { ...CASE_STAGE[idx], label: `${CASE_STAGE[idx].label} · floor` }
           : CASE_STAGE[idx],
         stageAt: (onFloor ? at?.at : c[CASE_STAGE[idx].at]) || null,
-        // The screen's collect button keys off this, so it has to be the same
-        // rule the stage uses: an absent `collected_on` is not evidence the sample
-        // is still in the patient.
         collected: isCollected(c),
-        // Only the floor's own steps are offerable, and only the next one. A case
-        // HealthRay has already carried past this point needs nothing recorded.
         nextAction: (() => {
           const rung = nextOfferedFor(CASE_STAGE[idx].key, room, "actionLabel");
           if (!rung) return null;
@@ -1040,13 +836,6 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
       ...counts,
       outstanding: r.pending + r.partial,
       steps: labSteps(lowest ? stageIndex(lowest) : 0),
-      // Where the patient is standing while the lab holds their sample. A visit
-      // row is the only evidence they are in the building at all, so its absence
-      // is stated rather than guessed at.
-      // Samples-only patients carry a pre-consultation status but are not in
-      // that queue — the manager board takes them out of it. Naming their
-      // column here anyway is what had this screen calling a patient
-      // "With SD / MO" while the board showed that column empty.
       labOnly: !!r.lab_only,
       station: r.on_floor
         ? FINISHED.includes(r.current_status)
@@ -1057,31 +846,18 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
               STATUS_LABEL[r.current_status] ||
               r.current_status
         : null,
-      // The underlying status, for the pane: the column says where they are, this
-      // says what was last actually observed about them.
       statusLabel: r.on_floor ? STATUS_LABEL[r.current_status] || r.current_status : null,
       lastSeenOn: r.on_floor ? null : r.prev_visit || r.prev_appt || null,
-      // "In a queue" is the useful sense of waiting here, not the board's SLA
-      // sense: a patient at `vitals_done` has nobody with them either.
       waiting: r.on_floor
         ? WAIT_STATUSES.includes(r.current_status) ||
           (!inStationRoom(r) && !FINISHED.includes(r.current_status))
         : false,
       inARoom: r.on_floor ? inStationRoom(r) : false,
       finished: r.on_floor ? FINISHED.includes(r.current_status) : false,
-      // Can the lab physically get to this patient now? Not while another
-      // station has them, and not once they have gone home.
       collectable: r.on_floor
         ? !inStationRoom(r) && !NEVER_CAME.includes(r.current_status) && !elsewhere
         : true,
       busyAt: elsewhere ? busyReason(elsewhere) : null,
-      // The floor is stopped on this sample. `moStation`'s `awaitingResults` and
-      // `doctorStation`'s `waitingOnLab` already say so — same rule, same two
-      // facts — and this screen was the only one that did not, so one patient
-      // read "awaiting results" on the MO board and "Waiting for Chief
-      // Endocrinologist" here. The board column is where they are queued; it is
-      // not what they are queued ON. Same-day bloods are what the MO cannot
-      // proceed without, so the sample IS the wait.
       awaitingResults:
         r.on_floor &&
         !FINISHED.includes(r.current_status) &&
@@ -1097,12 +873,6 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
   });
 }
 
-// The patient cannot be in two places at once, and the read side already says
-// so: `collectable` is false while another station has them. That hid the
-// button and stopped there, so a sample could still be recorded as drawn from a
-// patient sitting in the MO's room — by a direct call, a stale tab, or a second
-// technician on an older render. The payment gate below states the principle
-// this now follows: a hidden button is not a rule.
 async function assertPatientIsFree(db, visitId, what) {
   if (!visitId) return;
   const { rows } = await db.query(
@@ -1151,20 +921,6 @@ export function assertSampleDrawn({ kind, sample_status: status }) {
   );
 }
 
-// No sample is drawn before payment, whoever ordered the test. A Scribe order
-// is already gated in advanceSample() below via opensLabGate(); a HealthRay
-// case has no such gate because HealthRay never sends payment data through
-// the sync — case 19918 (15 Sep) proved every payment field lab_cases carries
-// is null, always, not just when unpaid. So a HealthRay case is billed only
-// once reception ticks the Lab Billing stop on the journey by hand; nothing
-// here may take their word for it and nothing may auto-tick it from HealthRay
-// evidence (see journey.js — auto-ticking on hr_cases alone was the hole this
-// closes).
-// Only lc.patient_id. The fallback matches patients.file_no against
-// HealthRay's UHID, and HealthRay REASSIGNS a UHID to a different person over
-// time — so on a case whose patient was never linked, matching by UHID alone
-// could find somebody else's visit. A caller that cannot identify the patient
-// does not guess at one: it gets null and steps aside.
 async function resolveVisitForCase(db, caseNo) {
   const { rows: visit } = await db.query(
     `SELECT v.id FROM lab_cases lc
@@ -1324,10 +1080,6 @@ export async function advanceSample(
     } = rows[0];
     const visit = await homeVisit(client, visitId);
     refuseSiteForNonHome(site, visit);
-    // The mirror of the check the machine room makes. Both endpoints are reached
-    // by a capability, and a capability says which ROOM somebody works — not
-    // which orders exist. Without this, a lab role could walk a machine test up
-    // the lab ladder and record a sample nobody drew.
     if (rows[0].kind !== "lab") {
       throw Object.assign(new Error("That order belongs to the machine room, not the lab"), {
         status: 409,
@@ -1345,10 +1097,6 @@ export async function advanceSample(
         status: 409,
       });
     }
-
-    // The payment gate. Enforced here, not in the UI: a hidden button is not a
-    // rule, and this one decides whether a patient is charged for a test.
-    // Brief §2.2 — "paid (or claim approved)": a submitted claim is not enough.
     if (!opensLabGateFor(payment, { homeCollected, to })) {
       throw Object.assign(
         new Error(
@@ -1371,8 +1119,6 @@ export async function advanceSample(
       return { orderId, sampleStatus: from, unchanged: true };
     }
 
-    // After the no-op check, so re-tapping a sample already collected stays a
-    // no-op rather than becoming an error about where the patient is now.
     if (to === "drawing") {
       await assertPatientIsFree(client, visitId, "start the collection");
       await assertStationFree(client, visitId, LAB_STATION, "start the collection");
@@ -1407,17 +1153,11 @@ export async function advanceSample(
        VALUES ($1, 'sample', $2, 'lab', $3, $4)`,
       [orderId, to, actorId, to === "sample_collected" && visit?.home ? { site: "ghm" } : {}],
     );
-    // Every test moves with its order. Per-test divergence (one result back
-    // before another) is a later refinement; this at least makes the pane's
-    // badges truthful rather than decorative.
     await client.query(`UPDATE giniflow_lab_order_tests SET status = $2 WHERE lab_order_id = $1`, [
       orderId,
       to,
     ]);
 
-    // Trigger 1: uploading is what turns the patient green for the MO and the
-    // doctor. Same transaction, so the queue can never show a result the visit
-    // does not know about.
     if (to === "uploaded") {
       await client.query(
         `UPDATE giniflow_visits v
@@ -1432,11 +1172,6 @@ export async function advanceSample(
           WHERE v.id = $1`,
         [visitId, orderId],
       );
-      // "Reports arrived" is a fact about the patient, not a place they moved
-      // to. This used to go through advanceStatus, which sets current_status —
-      // and `results_received` is in no chain, so every call threw into a bare
-      // catch and the log gained nothing. Written directly, the event exists
-      // and the patient stays exactly where they are.
       await client.query(
         `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, actor_id, meta)
          VALUES ($1, 'results_received', 'lab', $2, $3)`,
@@ -1444,13 +1179,6 @@ export async function advanceSample(
       );
     }
 
-    // The journey's own stops, re-read from what the lab just did — the same
-    // catch-up markLabCaseAction does for a HealthRay case. Without it only the
-    // HealthRay path and the payment desk ever ticked them, so a Scribe order
-    // drawn, run and reported here left Blood Sample pending and the card read
-    // "next: Blood Sample" to a floor whose sample was already in the machine
-    // (P_179439 and P_181741, 16 Sep 2026). Inside the transaction, so the tick
-    // and the rung it is drawn from can never disagree.
     if (visitId) await syncLabStepsFromLab(client, visitId);
 
     const onBreak =
@@ -1473,15 +1201,6 @@ export async function advanceSample(
   }
 }
 
-// Uploading the report is the lab's real work — everything before it is bookkeeping.
-//
-// The file goes to the same storage bucket the rest of the app uses, under a
-// giniflow/ prefix, and the resulting URL is recorded on the order. It is
-// deliberately NOT written into the shared `documents` table: that is the
-// patient's clinical record, and while Gini Flow runs alongside the old module a
-// second writer there would duplicate reports in the doctor's Labs tab. Promoting
-// a Gini Flow report into `documents` belongs with the same decision as vitals —
-// see 06-PHASE-2-PLAN.md question 12.
 const EXT_BY_TYPE = {
   "application/pdf": "pdf",
   "image/png": "png",
@@ -1491,12 +1210,6 @@ const EXT_BY_TYPE = {
   "image/heic": "heic",
 };
 
-// The stored report's BYTES, fetched with the service key.
-//
-// Not a redirect to the stored URL: `patient-files` is private, so the object is
-// only reachable with a key the browser must never hold. The auth middleware has
-// already checked the caller by the time this runs — the same shape as
-// `GET /documents/:id/stream` and the referral letter.
 export async function fetchStoredReport(orderId, db = pool) {
   const { rows } = await db.query(
     `SELECT o.report_file_url, o.visit_id, v.patient_id, p.name, p.file_no
@@ -1513,9 +1226,6 @@ export async function fetchStoredReport(orderId, db = pool) {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
     throw Object.assign(new Error("Storage is not configured"), { status: 503 });
   }
-
-  // Accepts either shape, because rows written before this fix hold the public
-  // form: .../object/public/<bucket>/<path> and .../object/<bucket>/<path>.
   const marker = "/storage/v1/object/";
   const at = url.indexOf(marker);
   if (at < 0) throw Object.assign(new Error("That report cannot be read"), { status: 409 });
@@ -1524,18 +1234,12 @@ export async function fetchStoredReport(orderId, db = pool) {
   const resp = await fetch(`${SUPABASE_URL}/storage/v1/object/${objectPath}`, {
     headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
   });
-  // A missing object is a 404 the technician can act on — re-upload — and not a
-  // 502 that reads as the server being broken.
   if (!resp.ok) {
     throw Object.assign(new Error("The stored report could not be read — re-upload it"), {
       status: resp.status === 404 ? 404 : 502,
     });
   }
 
-  // The technician uploads whatever the machine printed — the form accepts an
-  // image as readily as a PDF, and the one report on file is a PNG. Serving it
-  // as application/pdf would hand the browser a picture inside a PDF viewer and
-  // fail. The stored object's own type is the truth.
   const contentType = resp.headers.get("content-type") || "application/octet-stream";
   const ext = (EXT_BY_TYPE[contentType.split(";")[0].trim()] || "bin").toLowerCase();
   const who = String(rows[0].name || "patient").replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -1556,9 +1260,6 @@ export async function storeReportObject({
   folder = `giniflow/${kind === "machine" ? "machine" : "lab"}`,
 }) {
   const buffer = Buffer.from(base64, "base64");
-  // The screen tells the technician 5 MB, so 5 MB is the limit. A service that
-  // quietly allows more than the interface promises is a service nobody can
-  // predict.
   const MAX_BYTES = 5 * 1024 * 1024;
   if (buffer.length > MAX_BYTES) {
     throw Object.assign(new Error("Report is larger than 5 MB"), { status: 413 });
@@ -1580,17 +1281,6 @@ export async function storeReportObject({
     throw Object.assign(new Error(`Upload failed: ${await resp.text()}`), { status: 502 });
   }
 
-  // The OBJECT path, not a public URL.
-  //
-  // This used to store `/object/public/<bucket>/<path>`, which is the form
-  // Supabase composes for a public bucket. `patient-files` is PRIVATE — it holds
-  // every patient's prescriptions and lab reports — so that URL resolves to
-  // "Bucket not found" and every "View uploaded report" button 404'd. The bucket
-  // cannot be made public to fix it.
-  //
-  // So the row stores the authenticated form and the route proxies the bytes,
-  // exactly as the referral letter does. Rows written before this fix hold the
-  // public form; `fetchStoredReport` accepts both.
   const url = `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`;
   return { url, storagePath, safeName, bytes: buffer.length };
 }
@@ -1634,18 +1324,12 @@ export async function uploadReport(
     patientId: rows[0].patient_id,
   });
 
-  // The file is stored, so now mark it uploaded — which is what notifies the MO.
-  // Done through advanceSample so trigger 1 and the event log are the same code
-  // path whether or not a file was attached.
   if (rows[0].kind === "machine") {
     await advanceMachineTest(orderId, { to: "reported", actorId, reportUrl: url }, db);
   } else {
     await advanceSample(orderId, { to: "uploaded", actorId, reportUrl: url }, db);
   }
 
-  // Onto the patient's record. `documents` is what the doctor's Labs tab reads
-  // and what the patient app reads — a report that stays on the lab order is a
-  // report only the lab station can see.
   promoteQuietly(promoteLabReport, orderId);
 
   return { orderId, reportUrl: url, fileName: safeName, bytes };
@@ -1696,12 +1380,6 @@ export async function uploadOutsideReport(orderId, { replace = false, ...input }
   return uploadReport(orderId, input, db);
 }
 
-// Confirm-and-attribute (06-PHASE-2-PLAN §0.4). Records that a technician acted
-// on a case Gini Flow does not own — who chased the lab, who took the sample. It
-// changes nothing at HealthRay and deliberately does not pretend to: the sample's
-// real state still arrives through `labSync`.
-// One action. "chased" was dropped: it is not in the reference design, and the
-// screen should not invent vocabulary the rest of the floor does not use.
 export const CASE_ACTIONS = CASE_ACTION_VERBS;
 
 async function caseLadderState(db, caseNo) {
@@ -1939,36 +1617,15 @@ export async function markLabCaseAction(
   }
 
   if (!undo) {
-    // Where HealthRay and the floor each think this case is. A screen open since
-    // before the lab received the tube would otherwise write "collected by"
-    // against a sample somebody else drew, and that name is the only record of
-    // who drew it.
     const c = await caseLadderState(db, caseNo);
-    // The rung this action lands on, asked of the ladder rather than inferred
-    // from a position in CASE_ACTIONS — the two agree today only because both
-    // are built from the same rungs, and an ordering bug here would let a case
-    // claim a stage the lab never reached.
     const want = stageIndexOf(STAGE_FOR_ACTION[action]);
 
-    // HealthRay has already carried the case past this point, so recording it
-    // here would only add a name to work somebody else did. Not on a manual
-    // floor: there, the bench's tap IS the record, and refusing it on the
-    // strength of a clock nobody here set would leave the case unworkable.
     if (!labStepsAreManual() && healthrayStage(c) >= want) {
       throw Object.assign(
         new Error(`The lab has already taken this case past ${ACTION_NOUN[action]}`),
         { status: 409 },
       );
     }
-    // The steps are a sequence, not a set: a tube cannot be run before it is
-    // drawn. Without this a mis-tap on the last button silently skips the ones
-    // before it and the case reports a stage the lab never reached.
-    //
-    // One exception, at the handoff. `sample_received` is the analyzer room's
-    // FIRST act and the collection room's paperwork is not its to fix: if Lab 1
-    // drew the tube and walked it over without tapping "sent", Lab 2 is holding
-    // it and must still be able to say so. Receipt is its own proof of sending.
-    // Every other step still needs the one before it.
     const floor = action === "sample_received" ? stageIndexOf("collected") : want - 1;
     if (stageIndex(c) < floor) {
       throw Object.assign(
@@ -1977,11 +1634,6 @@ export async function markLabCaseAction(
       );
     }
   }
-
-  // "Done" is a claim that a result exists, so it is checked against the record
-  // rather than against which button the screen happened to show. Without this a
-  // stale tab, or a direct call, could close a case with no file and no values —
-  // and closing it tells the MO and the consultant that results are ready.
   if (action === "report_uploaded" && !undo) {
     const { rows: proof } = await db.query(
       `SELECT lc.pdf_storage_path IS NOT NULL AS has_report,
@@ -2020,9 +1672,6 @@ export async function markLabCaseAction(
   }
 
   if (undo) {
-    // Taking back a step takes back what was built on it. Deleting `sample_taken`
-    // alone would leave a case recorded as processing a tube nobody drew, which
-    // is a worse statement than either the technician made.
     await db.query(
       `DELETE FROM giniflow_lab_case_actions
         WHERE case_no = $1 AND action = ANY($2::text[])`,
@@ -2076,19 +1725,8 @@ export async function markLabCaseAction(
         : await recordAction(db);
   if (resolvedVisitId) publish({ kind: "lab_order", visitId: resolvedVisitId, status: action });
 
-  // The card and the lab track come from two different tables (the journey's
-  // own steps vs. this case's own action log) and nothing else kept them in
-  // step — the desk was reading "next: Lab Billing" on a patient whose sample
-  // was already reported (P_161750, 15 Sep 2026) because only the action log
-  // got written. Every action re-reads the lab's evidence onto the journey so
-  // the card never lags behind what the lab just did.
   if (resolvedVisitId) await syncLabStepsFromLab(db, resolvedVisitId);
 
-  // Closing the case is what tells the floor. Recording "done" and leaving the
-  // visit alone would clear the lab's own board while the MO and the consultant
-  // went on waiting — the same two-screens-one-case disagreement that closing
-  // exists to end. Guarded inside `markCaseResultsReady`, so a patient with a
-  // second sample still out stays amber.
   let markedResultsReady = false;
   if (action === "report_uploaded" && !undo) {
     const { rows: ctx } = await db.query(
@@ -2111,13 +1749,6 @@ export async function markLabCaseAction(
   return { caseNo, ...rows[0], markedResultsReady, onBreak: breakAfter };
 }
 
-// Taking a wrongly-attached report back off a case.
-//
-// Only while the case is still open: once it is marked done the report is what
-// the MO and the consultant were told about, and pulling it out from under them
-// silently is not this screen's to do. The file, the chart row and the case's
-// pointer to it go together — leaving any one behind is how a case ends up
-// claiming a report nobody can open.
 export async function deleteLabCaseReport(caseNo, db = pool) {
   const { rows } = await db.query(
     `SELECT lc.pdf_storage_path,
@@ -2147,37 +1778,6 @@ export async function deleteLabCaseReport(caseNo, db = pool) {
 
   return { caseNo, removed: storagePath };
 }
-
-// Uploading a report against a HealthRay-run case.
-//
-// The sync normally fetches the PDF itself (`downloadAndStoreLabPdf`), but it
-// only can once HealthRay has produced one — today 41 of 46 reported cases have
-// no file. This is the manual path for the rest, authorised deliberately: an
-// admin may attach the report they were handed on paper.
-//
-// It writes exactly what the automatic path writes — the same
-// `patients/<id>/lab/<name>` storage path, the same `documents` row keyed on
-// `lab_case:<caseNo>`, the same `pdf_storage_path` — so the two can never
-// produce two copies of one report, and a later automatic fetch upserts over it
-// rather than duplicating.
-//
-// It does NOT touch `reported_on` or `results_synced`. Attaching a file is not
-// the lab signing a case out, and claiming otherwise would put a case into
-// "Reported" that the lab has not reported.
-// Brief §2.3: a result landing sets `results_status = 'ready'`, which is what
-// turns the patient green on the MO and consultant queues. The Gini queue does
-// this through `advanceSample`; a hospital case has no order to advance, so it is
-// written here — the same flag, for the same reason.
-//
-// Guarded, because "ready" is a claim about the WHOLE visit and one case is one
-// panel. It is set only when nothing else for that patient that day is still
-// outstanding, or the MO is told the results are in while a second panel is still
-// running — the exact failure the partial state exists to prevent.
-//
-// A case counts as finished when HealthRay has reported it, when a file is
-// stored, when the lab typed its values, or when the floor marked it results-done.
-// The first two were the whole test until typed values existed for hospital cases,
-// which left a patient whose numbers were all typed waiting on themselves.
 export async function markCaseResultsReady(db, { patientId, caseDate, caseNo, uhid }) {
   const { rowCount } = await db.query(
     `UPDATE giniflow_visits v
@@ -2346,8 +1946,6 @@ export async function uploadLabCaseReport(
   if (!rows.length) throw Object.assign(new Error("Lab case not found"), { status: 404 });
   await assertNotHeld(db, { caseNo });
   const c = rows[0];
-  // Without a patient the file has no chart to land on, and `documents` is keyed
-  // on one. Refuse rather than store an orphan nobody will ever see.
   if (!c.patient_id) {
     throw Object.assign(new Error("This case is not linked to a patient yet"), { status: 409 });
   }
@@ -2402,35 +2000,12 @@ export async function uploadLabCaseReport(
     ],
   );
 
-  // pdf_unavailable cleared for the same reason the sync clears it: a file now
-  // exists, so any earlier "no report found" verdict is stale.
   await db.query(
     `UPDATE lab_cases
         SET pdf_storage_path = $2, pdf_unavailable = FALSE, pdf_next_attempt_at = NULL
       WHERE case_no = $1`,
     [caseNo, storagePath],
   );
-
-  // Deliberately NOT `report_uploaded`. That action is what CLOSES the case, and
-  // storing a file is not the same statement as being finished with it: the lab
-  // needs a window to open the report, see it is the right one, and replace or
-  // remove it before saying done. The file itself is the evidence that unlocks
-  // the "Mark done" button; the tap is what ends the case.
-
-  // Brief §2.3: uploading a report sets `results_status = 'ready'`, which is what
-  // turns the patient green on the MO and consultant queues. The Gini queue does
-  // this through `advanceSample`; a hospital case has no order to advance, so it
-  // is written here — the same flag, for the same reason.
-  //
-  // Guarded, because "ready" is a claim about the WHOLE visit and this upload is
-  // one case. It is only set when nothing else for that patient is still
-  // outstanding:
-  //
-  //   · no other lab_case that day without a `reported_on` and without a file,
-  //   · no Gini lab order that day still short of `uploaded`.
-  //
-  // Otherwise the MO would be told the results are in while a second panel is
-  // still running — the exact failure the partial state exists to prevent.
   const ready = await markCaseResultsReady(db, {
     patientId: c.patient_id,
     caseDate: c.case_date,
@@ -2443,9 +2018,6 @@ export async function uploadLabCaseReport(
     storagePath,
     fileName: safeName,
     bytes: buffer.length,
-    // The screen says which happened: a report filed, or a report filed AND the
-    // next station told. Reporting "results ready" when the guard declined would
-    // be the toast lying about the board.
     markedResultsReady: ready.rowCount > 0,
   };
 }

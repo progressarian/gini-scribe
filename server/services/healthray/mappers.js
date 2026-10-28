@@ -1,5 +1,3 @@
-// ── Data mapping helpers — HealthRay → Gini Scribe ──────────────────────────
-
 export function calcAge(birthDateStr) {
   if (!birthDateStr) return null;
   const [dd, mm, yyyy] = birthDateStr.split("-").map(Number);

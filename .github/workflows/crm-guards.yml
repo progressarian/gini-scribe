@@ -61,6 +61,20 @@ jobs:
     env:
       CRM_DSN: postgresql://postgres:postgres@localhost:5432/crmtest
       PGPASSWORD: postgres
+      CRM_MIGRATIONS: >-
+        2026-09-16_crm_phase1.sql
+        2026-09-16_crm_phase1_rls.sql
+        2026-09-30_crm_enums_to_text.sql
+        2026-10-01_crm_registration.sql
+        2026-10-03_crm_registration_record_fn.sql
+        2026-10-02_crm_inbound_attribution_comments.sql
+        2026-10-04_crm_doctor_skeleton_records.sql
+        2026-10-05_crm_referral_capture.sql
+        2026-10-17_crm_import_assign.sql
+        2026-10-26_crm_visit_sheet.sql
+        2026-10-27_crm_doctor_manage.sql
+        2026-10-28_crm_tasks_kinds.sql
+        2026-10-28_crm_rls_speed.sql
 
     steps:
       - uses: actions/checkout@v4
@@ -85,30 +99,32 @@ jobs:
         run: |
           set -e
           psql "$CRM_DSN" -v ON_ERROR_STOP=1 -q -f crm/_scratch_scribe_stub.sql
-          for f in 2026-09-16_crm_phase1.sql 2026-09-16_crm_phase1_rls.sql \
-                   2026-10-01_crm_registration.sql \
-                   2026-10-03_crm_registration_record_fn.sql \
-                   2026-10-02_crm_inbound_attribution_comments.sql \
-                   2026-10-04_crm_doctor_skeleton_records.sql \
-                   2026-10-05_crm_referral_capture.sql; do
+          for f in $CRM_MIGRATIONS; do
             echo "== $f"
             psql "$CRM_DSN" -v ON_ERROR_STOP=1 -q -f "$f"
           done
+
+      - name: Every CRM migration is in the chain
+        working-directory: server/migrations
+        run: |
+          set -e
+          missing=0
+          for f in *crm*.sql; do
+            case " $CRM_MIGRATIONS " in
+              *" $f "*) ;;
+              *) echo "::error::$f is not in CRM_MIGRATIONS in crm-guards.yml"; missing=1 ;;
+            esac
+          done
+          exit $missing
 
       - name: Migrations are idempotent
         working-directory: server/migrations
         run: |
           set -e
-          for f in 2026-09-16_crm_phase1.sql 2026-09-16_crm_phase1_rls.sql \
-                   2026-09-30_crm_enums_to_text.sql \
-                   2026-10-01_crm_registration.sql \
-                   2026-10-03_crm_registration_record_fn.sql \
-                   2026-10-02_crm_inbound_attribution_comments.sql \
-                   2026-10-04_crm_doctor_skeleton_records.sql \
-                   2026-10-05_crm_referral_capture.sql; do
+          for f in $CRM_MIGRATIONS; do
             psql "$CRM_DSN" -v ON_ERROR_STOP=1 -q -f "$f"
           done
-          echo "every migration re-ran cleanly" 
+          echo "every migration re-ran cleanly"
 
       - name: NMC compliance check
         working-directory: server/migrations/crm

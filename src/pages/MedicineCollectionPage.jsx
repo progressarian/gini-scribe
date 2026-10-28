@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import api from "../services/api";
 import { toast } from "../stores/uiStore";
 import FlowPanel from "../components/flow/FlowPanel";
+import Pagination from "../components/ui/Pagination";
 import "./MedicineCollectionPage.css";
+
+const LIST_PAGE_SIZE = 25;
 
 const todayISO = () => new Date().toISOString().split("T")[0];
 
@@ -31,27 +34,48 @@ export default function MedicineCollectionPage() {
   const [tab, setTab] = useState("mark"); // mark | report
   const [date, setDate] = useState(todayISO());
   const [filter, setFilter] = useState("");
+  const [search, setSearch] = useState("");
   const [patients, setPatients] = useState([]);
+  const [listTotal, setListTotal] = useState(0);
+  const [listPage, setListPage] = useState(1);
   const [loadingList, setLoadingList] = useState(false);
   const [selected, setSelected] = useState(null); // patient_id
+  const [selPatient, setSelPatient] = useState(null);
   const [meds, setMeds] = useState([]);
   const [blockedReason, setBlockedReason] = useState(null);
   const [marks, setMarks] = useState({}); // medication_id -> {status, reason, qty_note}
   const [loadingMeds, setLoadingMeds] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(filter.trim()), 300);
+    return () => clearTimeout(t);
+  }, [filter]);
+
+  useEffect(() => setListPage(1), [date, search]);
+
   const loadList = useCallback(() => {
     setLoadingList(true);
+    const qs = new URLSearchParams({ date, page: listPage, limit: LIST_PAGE_SIZE });
+    if (search) qs.set("q", search);
     api
-      .get(`/api/pharmacy/collection/today?date=${date}`)
-      .then((r) => setPatients(r.data?.patients || []))
-      .catch(() => setPatients([]))
+      .get(`/api/pharmacy/collection/today?${qs}`)
+      .then((r) => {
+        setPatients(r.data?.patients || []);
+        setListTotal(r.data?.total || 0);
+      })
+      .catch(() => {
+        setPatients([]);
+        setListTotal(0);
+      })
       .finally(() => setLoadingList(false));
-  }, [date]);
+  }, [date, search, listPage]);
   useEffect(loadList, [loadList]);
 
-  const openPatient = (pid) => {
+  const openPatient = (patient) => {
+    const pid = patient.patient_id;
     setSelected(pid);
+    setSelPatient(patient);
     setLoadingMeds(true);
     api
       .get(`/api/patients/${pid}/collection?date=${date}`)
@@ -114,17 +138,6 @@ export default function MedicineCollectionPage() {
     }
   };
 
-  const shown = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return patients;
-    return patients.filter(
-      (p) =>
-        p.patient_name?.toLowerCase().includes(q) || (p.file_no || "").toLowerCase().includes(q),
-    );
-  }, [patients, filter]);
-
-  const selPatient = patients.find((p) => p.patient_id === selected);
-
   return (
     <div className="medcoll">
       <div className="medcoll-head">
@@ -165,16 +178,20 @@ export default function MedicineCollectionPage() {
               />
               {loadingList ? (
                 <p className="medcoll-empty">Loading…</p>
-              ) : shown.length === 0 ? (
-                <p className="medcoll-empty">No patients prescribed on {date}.</p>
+              ) : patients.length === 0 ? (
+                <p className="medcoll-empty">
+                  {search
+                    ? `No patients match "${search}" on ${date}.`
+                    : `No patients prescribed on ${date}.`}
+                </p>
               ) : (
-                shown.map((p) => {
+                patients.map((p) => {
                   const r = ROLLUP[p.status] || ROLLUP.pending;
                   return (
                     <button
                       key={p.patient_id}
                       className={`medcoll-row ${selected === p.patient_id ? "active" : ""}`}
-                      onClick={() => openPatient(p.patient_id)}
+                      onClick={() => openPatient(p)}
                     >
                       <div className="medcoll-row-main">
                         <span className="medcoll-name">{p.patient_name}</span>
@@ -190,6 +207,14 @@ export default function MedicineCollectionPage() {
                   );
                 })
               )}
+              <Pagination
+                page={listPage}
+                pageSize={LIST_PAGE_SIZE}
+                total={listTotal}
+                onChange={setListPage}
+                disabled={loadingList}
+                unit="patients"
+              />
             </div>
 
             {/* ── Patient medicines ── */}
@@ -336,22 +361,33 @@ function ReportView() {
   const [doctor, setDoctor] = useState("");
   const [status, setStatus] = useState(""); // "" | all | partial | none
   const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState(null); // { patient, rows }
 
+  useEffect(() => setPage(1), [sub, from, to, doctor, status, pageSize]);
+
   const load = useCallback(() => {
     setLoading(true);
-    const qs = `from=${from}&to=${to}`;
+    const qs = `from=${from}&to=${to}&page=${page}&limit=${pageSize}`;
     const url =
       sub === "summary"
         ? `/api/pharmacy/collection/report?${qs}${doctor ? `&doctor=${encodeURIComponent(doctor)}` : ""}${status ? `&status=${status}` : ""}`
         : `/api/pharmacy/collection/not-collected?${qs}`;
     api
       .get(url)
-      .then((r) => setRows(r.data?.rows || []))
-      .catch(() => setRows([]))
+      .then((r) => {
+        setRows(r.data?.rows || []);
+        setTotal(r.data?.total || 0);
+      })
+      .catch(() => {
+        setRows([]);
+        setTotal(0);
+      })
       .finally(() => setLoading(false));
-  }, [sub, from, to, doctor, status]);
+  }, [sub, from, to, doctor, status, page, pageSize]);
   useEffect(load, [load]);
 
   const openHistory = (patient_id, patient_name) => {
@@ -478,6 +514,16 @@ function ReportView() {
           </tbody>
         </table>
       )}
+
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onChange={setPage}
+        onPageSizeChange={setPageSize}
+        disabled={loading}
+        unit={sub === "summary" ? "patient-days" : "medicines"}
+      />
 
       {history && (
         <div className="medcoll-modal-bg" onClick={() => setHistory(null)}>

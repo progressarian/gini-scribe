@@ -10,7 +10,6 @@ import { createLogger } from "../logger.js";
 
 const { log: labLog } = createLogger("Lab PDF");
 
-// Source priority — lower number wins (lab_healthray = 3, between report_extract and vitals_sheet)
 const SOURCE_PRIORITY = {
   opd: 1,
   report_extract: 2,
@@ -20,7 +19,6 @@ const SOURCE_PRIORITY = {
   healthray: 6,
 };
 
-// ── Ensure lab_cases table exists ───────────────────────────────────────────
 let tableReady = false;
 export async function ensureLabCasesTable() {
   if (tableReady) return;
@@ -74,8 +72,6 @@ export async function ensureLabCasesTable() {
   `);
   tableReady = true;
 }
-
-// ── Get highest case_no already processed ───────────────────────────────────
 export async function getMaxCaseNo() {
   const { rows } = await pool.query(
     `SELECT MAX(case_no::integer) AS max_no FROM lab_cases WHERE case_no ~ '^[0-9]+$'`,
@@ -83,8 +79,6 @@ export async function getMaxCaseNo() {
   return rows[0]?.max_no || 0;
 }
 
-// ── Insert new case row (crash-safe anchor before fetching detail) ───────────
-// Returns inserted id, or null if case_no already exists (UNIQUE conflict)
 export async function insertLabCase({
   caseNo,
   patientCaseNo,
@@ -147,12 +141,6 @@ export async function markLabCaseSynced(caseNo, { patientId, appointmentId, rawD
     ],
   );
 }
-
-// The case-to-patient link, on its own. LIST ONLY never reaches
-// markLabCaseSynced (39-HYBRID-FLOOR-PLAN.md §15), so without this the match
-// made in labSync is computed and discarded, and every screen falls back to
-// matching HealthRay's UHID against patients.file_no — a UHID HealthRay
-// reassigns to other people over time.
 export async function linkLabCasePatient(caseNo, patientId) {
   if (!patientId) return;
   await pool.query(
@@ -161,34 +149,11 @@ export async function linkLabCasePatient(caseNo, patientId) {
     [caseNo, patientId],
   );
 }
-
-// ── Download lab report PDF and store in Supabase ──────────────────────────
-// `caseDetail` (optional) is the live HealthRay detail payload — when
-// provided, the printable check verifies every in-house test has a result.
-// If omitted, we fetch detail ourselves so we always check against fresh
-// state rather than the stored (often stale) case_status column.
-// PDF retry backoff. Some Healthray cases briefly return an error while a
-// pending test result is still trickling in; the PDF becomes available later.
-// Schedule:
-//   attempt 1 (sync time) → fail → next in 30–40 min
-//   attempt 2 onwards     → fail → next in 4 h
-//   total budget          → 3 days from first attempt; after that mark
-//                            pdf_unavailable=TRUE so we stop trying.
 const PDF_RETRY_BUDGET_MS = 3 * 24 * 60 * 60 * 1000;
 const PDF_FIRST_BACKOFF_MIN_MS = 30 * 60 * 1000;
 const PDF_FIRST_BACKOFF_JITTER_MS = 10 * 60 * 1000; // → 30–40 min
 const PDF_LATER_BACKOFF_MS = 4 * 60 * 60 * 1000;
 
-// Detects Healthray's "In Process" placeholder lab report. The placeholder
-// is a fixed template (hospital header + technician/doctor signatures only)
-// served while a case is still pending. It is structurally a valid PDF, so
-// the existing %PDF- + %%EOF gate accepts it — but it has no rendered results.
-//
-// Discriminators (measured against historical cases on 2026-05-01):
-//   - placeholder bytes: 59,941–59,957 (template is virtually identical)
-//   - placeholder Tj/TJ ops (after stream inflate): ~30 (logo + signature glyphs)
-//   - smallest real single-test report: 63,410 bytes, 79+ Tj/TJ ops
-// Threshold (bytes < 61_000 AND Tj < 60) gives ~3 KB / 19-op safety margin.
 function looksLikeBlankLabPdf(buffer) {
   if (buffer.length >= 61_000) return false;
   const ascii = buffer.toString("latin1");
@@ -203,10 +168,7 @@ function looksLikeBlankLabPdf(buffer) {
     let decoded = buffer.subarray(dataStart, sEnd);
     try {
       decoded = inflateSync(decoded);
-    } catch {
-      // Stream is not Flate-compressed (or corrupted) — count operators in
-      // the raw bytes so we still see uncompressed content streams.
-    }
+    } catch {}
     const text = decoded.toString("latin1");
     totalTj += (text.match(/\bTj\b/g) || []).length + (text.match(/\bTJ\b/g) || []).length;
     if (totalTj >= 60) return false; // early exit — clearly a real report
@@ -282,9 +244,6 @@ export async function downloadAndStoreLabPdf(
     return null;
   }
 
-  // Skip if already stored, abandoned, or scheduled for a later retry.
-  // The retry scheduler honours the user-defined backoff (30–40 min, then 4 h
-  // for up to 3 days) instead of hammering Healthray on every cron tick.
   const { rows: pre } = await pool.query(
     `SELECT pdf_storage_path, pdf_unavailable, pdf_next_attempt_at, case_status
        FROM lab_cases WHERE case_no = $1`,
@@ -302,14 +261,6 @@ export async function downloadAndStoreLabPdf(
     labLog("Skip", `case ${caseNo}: next retry in ${minLeft} min`);
     return null;
   }
-
-  // Pre-gate: skip the (expensive, puppeteer-driven) download entirely when
-  // the case is still "In Process" / not every in-house test has reported.
-  // Healthray serves a placeholder PDF (header + signatures only) for those
-  // cases — capturing it would set pdf_storage_path and lock the case out of
-  // every retry path (they all guard on pdf_storage_path IS NULL). We fetch
-  // live detail when the caller didn't supply it so the gate works for both
-  // the auto-sync path (passes detail) and the retry-cron path (passes null).
   let detailForGate = caseDetail;
   if (!detailForGate) {
     try {
@@ -322,17 +273,12 @@ export async function downloadAndStoreLabPdf(
   }
   const printable = isLabCasePrintable(pre[0]?.case_status, detailForGate);
   if (!printable.ready) {
-    // Defer; do NOT mark pdf_unavailable — the case will be ready later. We
-    // still record the attempt + schedule the next try via the existing
-    // backoff (30–40 min, then 4 h, 3-day budget).
     const attempt = await recordPdfAttemptStart(caseNo);
     await schedulePdfRetry(caseNo, attempt.pdf_attempt_count, attempt.pdf_first_attempt_at);
     labLog("Skip", `case ${caseNo}: ${printable.reason} — deferring PDF download`);
     return null;
   }
 
-  // Record this attempt up-front so backoff scheduling has accurate counters
-  // even if Healthray hangs / we crash mid-fetch.
   const attempt = await recordPdfAttemptStart(caseNo);
   const attemptCount = attempt.pdf_attempt_count;
   const firstAttemptAt = attempt.pdf_first_attempt_at;
@@ -346,10 +292,6 @@ export async function downloadAndStoreLabPdf(
     await schedulePdfRetry(caseNo, attemptCount, firstAttemptAt);
     return null;
   }
-  // Discriminated outcome from fetchLabReportPdf:
-  //   { buffer, contentType } → success
-  //   { unavailable: true }   → HealthRay says no report exists (definitive)
-  //   null / no buffer        → transient failure — schedule next retry
   if (result?.unavailable) {
     await pool.query(
       `UPDATE lab_cases
@@ -371,15 +313,12 @@ export async function downloadAndStoreLabPdf(
   }
   const { buffer, contentType } = result;
 
-  // Reject JSON error bodies — schedule retry, may resolve later.
   if (contentType === "application/json" || (buffer.length < 2000 && buffer[0] === 0x7b)) {
     labLog("Reject", `JSON response for case ${caseNo}`);
     await schedulePdfRetry(caseNo, attemptCount, firstAttemptAt);
     return null;
   }
 
-  // For PDFs, verify magic header + EOF marker so partial/garbage captures
-  // never get stored as openable lab reports. Image content types skip this.
   const isPdf = !contentType || contentType === "application/pdf";
   if (isPdf) {
     const head = buffer.subarray(0, 5).toString("ascii");
@@ -393,11 +332,6 @@ export async function downloadAndStoreLabPdf(
       return null;
     }
 
-    // Reject Healthray's "In Process" placeholder PDF — structurally valid
-    // (header + signatures only, no rendered results). Without this gate the
-    // first sync stores the placeholder, sets pdf_storage_path, and every
-    // subsequent retry path skips the case (they all guard on
-    // pdf_storage_path IS NULL), so the real PDF is never fetched.
     if (looksLikeBlankLabPdf(buffer)) {
       labLog(
         "Reject",
@@ -451,10 +385,6 @@ export async function downloadAndStoreLabPdf(
       ],
     );
 
-    // Update lab_cases with storage path
-    // Clear pdf_unavailable + pdf_next_attempt_at too — a successful download
-    // means whatever earlier "No Report Found" verdict is now stale (HealthRay
-    // can produce a PDF later for cases that had none before).
     await pool.query(
       `UPDATE lab_cases
           SET pdf_storage_path = $1,
@@ -473,22 +403,6 @@ export async function downloadAndStoreLabPdf(
     return null;
   }
 }
-
-// ── Blank-PDF safety-net sweep ─────────────────────────────────────────────
-// Re-validates each stored lab PDF once it is at least BLANK_RECHECK_AGE_MS
-// old. If the file is still the "In Process" placeholder, the row is reset
-// (pdf_storage_path NULL + retry counters cleared + Supabase object deleted)
-// so the existing PDF-retry cron will re-download the real report.
-//
-// The pre-gate (isLabCasePrintable) and post-gate (looksLikeBlankLabPdf in
-// downloadAndStoreLabPdf) should prevent placeholders from being stored in
-// the first place. This sweep is a backstop for edge cases — e.g. a PDF
-// that passed both gates because Healthray briefly reported every test as
-// "complete" but the rendered file still came out empty, or historic rows
-// stored before the gates existed.
-//
-// pdf_blank_checked_at is NULL until a sweep verifies the file. After
-// verification (file looks legit) we set it to NOW() and never re-check.
 const BLANK_RECHECK_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 async function fetchStoredPdfBuffer(storagePath) {
@@ -527,9 +441,6 @@ export async function sweepBlankStoredLabPdfs({ limit = 50 } = {}) {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
     return { scanned: 0, blanks: 0, verified: 0, errors: 0 };
   }
-  // Legacy rows may have pdf_storage_path set but no pdf_first_attempt_at
-  // (the column was added later) — fall back to fetched_at so they still get
-  // swept. Both columns are TIMESTAMPTZ; fetched_at has DEFAULT NOW().
   const { rows } = await pool.query(
     `SELECT lc.case_no, lc.patient_id, lc.pdf_storage_path,
             lc.pdf_attempt_count, lc.pdf_first_attempt_at
@@ -556,8 +467,6 @@ export async function sweepBlankStoredLabPdfs({ limit = 50 } = {}) {
         continue;
       }
       if (looksLikeBlankLabPdf(buf)) {
-        // Clear so the PDF-retry cron will re-download. Supabase object is
-        // deleted so the upsert on next download starts clean.
         await deleteSupabaseObject(row.pdf_storage_path);
         await pool.query(
           `DELETE FROM documents
@@ -599,9 +508,6 @@ export async function sweepBlankStoredLabPdfs({ limit = 50 } = {}) {
   return { scanned: rows.length, blanks, verified, errors };
 }
 
-// ── Cases due for a PDF retry ──────────────────────────────────────────────
-// Selects rows whose backoff window has elapsed (or never had a first
-// attempt). Used by the dedicated PDF-retry recovery cron.
 export async function getPdfPendingCases({ limit = 50 } = {}) {
   const { rows } = await pool.query(
     `SELECT case_no, patient_case_no, case_uid, lab_case_id, lab_user_id,
@@ -621,14 +527,6 @@ export async function getPdfPendingCases({ limit = 50 } = {}) {
   return rows;
 }
 
-// ── Cases that are partially reported (chip = "Gini Lab Partial") ──────────
-// Results have started landing (results_synced=TRUE) but HealthRay hasn't
-// stamped reported_on yet, meaning more panels are still trickling in. These
-// rows need a faster cadence than the normal 10-min retry: every 5 min we
-// re-pull detail so newly-finalised numeric panels appear in lab_results, and
-// the moment HealthRay marks reported_on the chip flips from "Partial" to
-// "Received". Mirrors the partial-chip definition in routes/opd.js so the
-// retry set matches exactly what the UI is showing as partial.
 export async function getPartialLabCases({ limit = 50 } = {}) {
   const { rows } = await pool.query(
     `SELECT * FROM lab_cases
@@ -647,27 +545,12 @@ export async function getPartialLabCases({ limit = 50 } = {}) {
   return rows;
 }
 
-// Clear the PDF-retry backoff so a follow-up downloadAndStoreLabPdf isn't
-// skipped by the "next retry in X min" guard. Used when the partial-results
-// recovery cron has just observed the case become complete — we want the PDF
-// fetched now, not on the stale 30-40 min schedule queued earlier.
 export async function clearLabCasePdfBackoff(caseNo) {
   await pool.query(`UPDATE lab_cases SET pdf_next_attempt_at = NULL WHERE case_no = $1`, [caseNo]);
 }
-
-// Touch last_retry_at without bumping retry_count. The partial-results loop
-// re-polls a case every few minutes, which would still burn through the shared
-// RETRY_CAP (used by the slow recovery path) and falsely mark the row abandoned.
-// Partial cases self-bound by the 7-day case_date filter in getPartialLabCases,
-// so we don't need a separate counter — just record when we last touched it.
 export async function touchLabCaseRetryAt(caseNo) {
   await pool.query(`UPDATE lab_cases SET last_retry_at = NOW() WHERE case_no = $1`, [caseNo]);
 }
-
-// ── Get cases pending retry ─────────────────────────────────────────────────
-// Skip outsource-only cases (results never come through this API) and rows
-// already abandoned after the retry cap. Throttle each row to one attempt per
-// 10 minutes to avoid hammering the API.
 export async function getPendingLabCases() {
   const { rows } = await pool.query(
     `SELECT lc.* FROM lab_cases lc
@@ -682,9 +565,6 @@ export async function getPendingLabCases() {
   );
   return rows;
 }
-
-// Retry budget: ~14 days at one effective attempt per hour (cron is 15 min,
-// gated by 10-min last_retry_at — so ~4/hour theoretical, ~1/hour practical).
 const RETRY_CAP = 336;
 
 export async function bumpLabCaseRetry(caseNo) {
@@ -751,11 +631,6 @@ function normalizeSex(g) {
   return null;
 }
 
-// ── Match patient — universal P_ file_no first, never phone-only ────────────
-// HealthRay's patient.healthray_uid is the authoritative per-patient ID
-// (e.g. "P_179589") and is mirrored as patients.file_no in our DB.
-// Phone matching is intentionally demoted: shared family/clinic numbers cause
-// wrong-patient links (e.g. one phone → many distinct P_XXXXX patients).
 export async function matchLabPatient(healthrayUid, patientCaseNo, patientObj) {
   // 1) Exact file_no = healthray_uid (the universal P_ ID)
   if (healthrayUid) {
@@ -764,7 +639,6 @@ export async function matchLabPatient(healthrayUid, patientCaseNo, patientObj) {
     if (r.rows[0]) return r.rows[0].id;
   }
 
-  // 2) Other identifier-ish fields → file_no exact / P_ prefixed / embedded P_\d+
   const tryIds = new Set();
   if (patientCaseNo) tryIds.add(String(patientCaseNo));
   if (patientObj && typeof patientObj === "object") {
@@ -820,14 +694,9 @@ export async function matchLabPatient(healthrayUid, patientCaseNo, patientObj) {
     if (r.rows[0]) return r.rows[0].id;
   }
 
-  // Phone is intentionally NOT used as a match key — family members often
-  // share a number, so matching on phone merges unrelated patients.
   return null;
 }
 
-// ── Auto-create a stub patient from the lab API patient object ──────────────
-// Only triggers when healthray_uid looks like a real "P_XXXXX" universal ID.
-// Avoids merging on phone (would re-create the shared-phone collision).
 export async function ensureLabPatient(patientObj) {
   const uid = patientObj?.healthray_uid ? String(patientObj.healthray_uid).trim() : null;
   if (!uid || !/^P_\d+$/i.test(uid)) return null;
@@ -848,9 +717,6 @@ export async function ensureLabPatient(patientObj) {
   const age = ageFromDob(dob);
   const sex = normalizeSex(patientObj?.gender);
 
-  // Two unique constraints on patients: file_no and phone. The phone is shared
-  // across families/patients in HealthRay, so on phone conflict we INSERT
-  // without phone — keeping a distinct row per P_XXXXX, never merging by phone.
   const tryInsert = async (withPhone) => {
     const cols = withPhone
       ? `(name, phone, file_no, age, sex, dob)`
@@ -884,7 +750,6 @@ export async function ensureLabPatient(patientObj) {
   }
 }
 
-// ── Link appointment via healthray_order_id ──────────────────────────────────
 export async function linkLabAppointment(healthrayOrderId) {
   if (!healthrayOrderId) return null;
   const { rows } = await pool.query(`SELECT id FROM appointments WHERE healthray_id = $1 LIMIT 1`, [
@@ -892,9 +757,6 @@ export async function linkLabAppointment(healthrayOrderId) {
   ]);
   return rows[0]?.id || null;
 }
-
-// ── Write lab results from parsed case ──────────────────────────────────────
-// Patch ref_range + flag onto existing lab_healthray rows — no deletes/inserts
 export async function patchLabRanges(patientId, caseDate, results) {
   if (!patientId || !results.length) return 0;
   let updated = 0;
@@ -928,20 +790,15 @@ export async function syncLabCaseResults(patientId, appointmentId, caseDate, res
 
   let written = 0;
   for (const r of results) {
-    if (r.value === null) continue; // skip non-numeric results (e.g. "Positive", "Negative")
-    // The report header is not a result. Without this every synced report filed
-    // the patient's age as a test.
+    if (r.value === null) continue;
     if (isNonTest(r.canonicalName) || isNonTest(r.testName)) continue;
 
-    // Always remove any existing lab_healthray row for same patient+test+date
-    // Handles re-sync when appointmentId is null (no matching appointment)
     await pool.query(
       `DELETE FROM lab_results
        WHERE patient_id = $1 AND canonical_name = $2 AND test_date::date = $3::date AND source = 'lab_healthray'`,
       [patientId, r.canonicalName, caseDate],
     );
 
-    // Skip if a better-or-equal source already exists for same patient + test + date
     const existing = await pool.query(
       `SELECT source FROM lab_results
        WHERE patient_id = $1 AND canonical_name = $2 AND test_date::date = $3::date

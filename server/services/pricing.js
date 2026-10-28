@@ -6,28 +6,8 @@ import { isHomeCollectionVisit } from "./giniflow/homeCollection.js";
 import { HOME_COLLECTION_CODE } from "../../shared/billingVocab.js";
 import { paise } from "../../shared/labPayment.js";
 
-// ============================================================================
-// Scheme pricing (33-PATIENT-SCHEME-PLAN.md §4, rule R3).
-//
-// One rule: OVERRIDE IF PRESENT, ELSE THE BASE PRICE. The base price of a test
-// is its billing service item's price (52-BILLING-PLAN.md §5.1) and, until the
-// test has an item, the catalogue price; the override is the category's rate in
-// category_item_rates, else its parent category's.
-//
-// Until the hospital's items and rate card are loaded every call falls through
-// to the catalogue price, so prices are exactly what they were before.
-//
-// Money is NUMERIC in the database and arrives from pg as a string. Nothing
-// here does floating-point arithmetic on it: prices are passed through as
-// numbers only at the boundary, and the caller sums them with the integer-paise
-// helpers in shared/labPayment.js.
-// ============================================================================
-
 const num = (v) => (v === null || v === undefined ? null : Number(v));
 
-// Base catalogue price per test, then the scheme's override where it has one.
-// Returns a plain { [test_name]: price } the caller can index, because that is
-// the shape moStation.js's priceOf already is.
 export const catalogBasePriceSql = (alias) =>
   `COALESCE((SELECT i.base_price FROM service_items i
               WHERE i.test_catalog_id = ${alias}.id AND i.is_active), ${alias}.price)`;
@@ -77,14 +57,6 @@ export const consultationRateJoinSql = ({ scheme, doctor, visitType, date }) => 
       SELECT ${categoryRateSql("opd_item.id", scheme, date)} AS rate
     ) opd_fee ON TRUE`;
 
-// Which station each catalogued test belongs to. Separate from the price so the
-// caller asks for what it needs — but read from the same row, because a test's
-// station and its price are one decision the admin makes in one place
-// (36-MACHINE-TEST-STATION-PLAN.md §7 Phase 0).
-//
-// A name the catalogue does not have is `lab`: that is what a one-off test typed
-// in for a single patient is, and it is what every order was before this column
-// existed.
 export async function testCategoriesFor(testNames, db = pool) {
   const names = [...new Set((testNames || []).filter(Boolean))];
   if (!names.length) return {};
@@ -94,10 +66,6 @@ export async function testCategoriesFor(testNames, db = pool) {
   );
   return Object.fromEntries(rows.map((r) => [r.test_name, r.category || "lab"]));
 }
-
-// The scheme an order should be priced at: the appointment's tag, snapshotted
-// onto the order at creation. Never a live join back to the patient — a card
-// corrected next week must not re-price a settled order (plan §4a).
 export async function schemeForVisit(visitId, db = pool) {
   if (!visitId) return null;
   const { rows } = await db.query(

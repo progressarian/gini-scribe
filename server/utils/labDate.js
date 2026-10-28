@@ -1,22 +1,13 @@
-// Today's date as YYYY-MM-DD (local clinic time).
 export function todayISO() {
   return new Date().toISOString().split("T")[0];
 }
-
-// True when an ISO date string is strictly AFTER today. Lab results can never be
-// dated in the future — a future date means the extractor (Claude vision)
-// misread / hallucinated the year, so we must not anchor a row to it.
 export function isFutureISO(iso, today = todayISO()) {
   return !!iso && /^\d{4}-\d{2}-\d{2}$/.test(iso) && iso > today;
 }
-
-// Resolve a raw date string to YYYY-MM-DD, or null if unparseable. Pure parsing,
-// no future-date guard (that is applied by parseLabDate).
 function resolveISO(raw) {
   if (raw == null) return null;
   let s = String(raw).trim();
   if (!s) return null;
-  // Strip wrapping parentheses (the AI sometimes returns "(18/06/2024)")
   if (s.startsWith("(") && s.endsWith(")")) s = s.slice(1, -1).trim();
   const lower = s.toLowerCase();
   if (lower === "today" || lower === "date today" || lower === "observation today") return null;
@@ -43,14 +34,6 @@ function resolveISO(raw) {
   return null;
 }
 
-// Collect every FULL calendar date that literally appears in a clinical note,
-// as a Set of ISO strings. Used to verify that a lab date the extractor emitted
-// was actually read out of the note rather than assembled from prose.
-//
-// Deliberately requires a day AND month AND year. A month-year fragment like
-// "TYPE 2 DM ( SINCE JULY 2025 )" is NOT a date header, and treating it as one
-// is how P_177621 acquired a dozen labs dated 2025-07-03 — the extractor took
-// the day from the visit date (2026-07-03) and the year from that prose.
 export function collectNoteDates(rawText) {
   const found = new Set();
   if (!rawText) return found;
@@ -75,29 +58,10 @@ export function collectNoteDates(rawText) {
   return found;
 }
 
-// Normalises lab-result date strings (whatever the AI emits, or whatever the
-// upstream extractor wrote) into a YYYY-MM-DD ISO date. Falls back to a
-// caller-supplied date for "today" / blank / future inputs so every lab row ends
-// up anchored to a real, non-future visit date.
-//
-// FUTURE-DATE GUARD: a parsed date later than today is rejected (the report was
-// misread) and we fall back to fallbackISO; the fallback itself is also rejected
-// if it is in the future, in which case this returns null and the caller skips
-// the row. Use parseLabDateChecked() when you need to know a future date was
-// dropped (to warn the user).
-//
-// Accepted inputs:
-//   YYYY-MM-DD           → passthrough
-//   DD/MM/YYYY DD-MM-YYYY DD/MM/YY DD-MM-YY  (Indian convention)
-//   "1 May 2026" / "5TH MARCH 2023" / "6th Nov 2023"
-//   "today" / "date today" / "" / null  → fallbackISO
 export function parseLabDate(raw, fallbackISO) {
   return parseLabDateChecked(raw, fallbackISO).date;
 }
 
-// Same as parseLabDate but returns { date, futureDropped }. futureDropped is true
-// when the raw input parsed to a real but future-dated value that we refused to
-// store — lets callers surface a warning.
 export function parseLabDateChecked(raw, fallbackISO, today = todayISO()) {
   const fb = fallbackISO && !isFutureISO(fallbackISO, today) ? fallbackISO : null;
   const resolved = resolveISO(raw);

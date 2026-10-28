@@ -1,17 +1,3 @@
-// Care phase derivation — only applies to diabetes patients. Four tiers:
-//
-//   Phase 1 · Uncontrolled → any parameter uncontrolled or borderline
-//   Phase 2 · Controlled   → all parameters controlled (first / single reading)
-//   Phase 3 · Sustain      → all controlled across last 2 consecutive readings
-//   Phase 4 · Maintain     → all controlled across last 3+ readings
-//
-// Non-diabetes patients get no phase.
-
-// Each parameter: thresholds are [controlled-upper, borderline-upper].
-// `lowerOk` means values below the controlled-upper bound are healthy (most
-// metrics). BMI uses a band — handled explicitly below.
-// HbA1c / FBS / LDL bands depend on the patient's category (diabetes vs.
-// prediabetes vs. neither) — see `resolveBands` below.
 const PARAM_DEFS = [
   {
     key: "HbA1c",
@@ -93,8 +79,6 @@ function classify(def, value, bands) {
   return "uncontrolled";
 }
 
-// Detect glycaemic category from the active diagnoses list. Diabetes wins
-// over prediabetes when both are present (stricter LDL target, looser HbA1c).
 function detectGlycaemicCategory(diagnoses) {
   const list = Array.isArray(diagnoses) ? diagnoses : [];
   let isDiabetes = false;
@@ -115,8 +99,6 @@ function detectGlycaemicCategory(diagnoses) {
   return "none";
 }
 
-// Per-patient bands. HbA1c / FBS / LDL targets depend on whether the patient
-// is diabetic, prediabetic, or neither. Everything else uses PARAM_DEFS bands.
 function resolveBands(def, category) {
   if (def.key === "HbA1c") {
     if (category === "diabetes") return { controlled: 7.01, borderline: 8.0 };
@@ -130,9 +112,6 @@ function resolveBands(def, category) {
   return def.bands;
 }
 
-// Human-readable target string (shown in the care-phase tooltip). Mirrors
-// the "controlled" cutoff in resolveBands; uses inclusive (≤) wording where
-// the threshold is bumped by ε (HbA1c-diabetes, FBS) and "<" otherwise.
 function targetForParam(def, category) {
   const unit = def.unit ? ` ${def.unit}` : "";
   if (def.key === "HbA1c") {
@@ -173,8 +152,6 @@ function seriesFromVitals(vitals, field) {
     .sort((a, b) => new Date(a.date) - new Date(b.date));
 }
 
-// Count how many recent readings were all controlled, working back from
-// newest. Stops at the first non-controlled reading.
 function consecutiveControlledStreak(def, series, bands) {
   let n = 0;
   for (let i = series.length - 1; i >= 0; i--) {
@@ -200,8 +177,6 @@ function trendForParam(def, latest, prev, bands) {
   }
   // Everything else: lower = better.
   const d = +(latest.val - prev.val).toFixed(2);
-  // Use a per-parameter "meaningful change" threshold so a 1 mg/dL LDL jiggle
-  // doesn't read as worsening, but a 0.3 HbA1c shift does.
   const b = bands || def.bands;
   const eps = b ? Math.max(0.3, b.controlled * 0.03) : 0.3;
   if (d <= -eps) return "improving";
@@ -209,12 +184,6 @@ function trendForParam(def, latest, prev, bands) {
   return "stable";
 }
 
-// Four-tier phase ladder (diabetes only), worst → best:
-//
-//   Phase 1 · Uncontrolled → ≥ 1 parameter uncontrolled or borderline
-//   Phase 2 · Controlled   → all parameters controlled (single reading)
-//   Phase 3 · Sustain      → all controlled across the last 2 consecutive readings
-//   Phase 4 · Maintain     → all controlled across the last 3+ readings (long-term)
 function computeCarePhase({ labHistory, vitals, totalVisits = 0, diagnoses } = {}) {
   const category = detectGlycaemicCategory(diagnoses);
 
@@ -295,20 +264,6 @@ function computeCarePhase({ labHistory, vitals, totalVisits = 0, diagnoses } = {
   };
 }
 
-// Biomarker-priority status — mirrors the client-side pill logic in
-// VisitPage.jsx so the visit pill, the post-visit narrative, and any other
-// consumer all agree on "what does this patient look like right now".
-//
-// Priority:
-//   1. HbA1c (any patient with a reading)
-//   2. TSH — non-diabetic patient with a thyroid condition
-//   3. Blood Pressure — non-diabetic, non-thyroid patient with hypertension
-//   4. FBS — everyone else
-//   5. Blood Pressure — final fallback when nothing else is on file
-//
-// Returns one of four labels: Uncontrolled / Stabilize / Controlled /
-// Continuous. "Continuous" = latest controlled AND ≥ 2 consecutive
-// controlled readings.
 function deriveBiomarkerPriorityStatus({ labHistory, vitals, diagnoses } = {}) {
   const dxText = (diagnoses || [])
     .filter((d) => d && d.is_active !== false)

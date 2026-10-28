@@ -1,8 +1,3 @@
-// Firebase Cloud Messaging wrapper — fans out a notification to every
-// registered device for a patient. Stays a no-op until FIREBASE_SERVICE_ACCOUNT
-// is set (JSON service account creds), so the rest of the app can call it
-// freely. Tokens that come back as unregistered are pruned from the table.
-
 import pool from "../config/db.js";
 import { isPatientBlocked } from "./patientBlockGuard.js";
 
@@ -46,8 +41,6 @@ async function pruneToken(token) {
 
 export async function sendToPatient(patientId, { title, body, data = {} }) {
   if (!patientId) return { sent: 0, skipped: true };
-  // A blocked patient receives nothing. Suppressing here covers every push in
-  // the app, including sendDoseDecisionNotification below.
   if (await isPatientBlocked(patientId)) return { sent: 0, skipped: true, reason: "blocked" };
   const admin = await getAdmin();
   const tokens = await fetchTokens(patientId);

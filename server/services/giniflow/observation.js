@@ -13,22 +13,6 @@ import {
 import { healthrayTarget } from "../../../shared/manualFloor.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 
-// What HealthRay says, recorded beside where the floor actually is
-// (docs/gini-flow/39-HYBRID-FLOOR-PLAN.md §5.3).
-//
-// The chain position belongs to the floor. This writes HealthRay's position
-// alongside it and names the first station whose step nobody recorded, so a
-// patient the hospital has already seen while Scribe still has them at vitals
-// reads as a desk that is behind rather than as a patient who vanished.
-//
-// Only an OBSERVATION. It moves nobody. Step 4 of the plan is what makes the
-// gap block an auto write; this exists first so that decision is made against a
-// week of real numbers rather than a guess at how big the gap is.
-
-// The stations that can be behind, in the order the patient meets them. Rx and
-// Pharmacy are absent deliberately: they come AFTER the steps HealthRay knows
-// about, so HealthRay can never be ahead of them — a slow counter is an SLA
-// question, which the board already times.
 export const BEHIND_STATIONS = [
   "reception",
   "vitals",
@@ -77,24 +61,15 @@ const quoted = (values) => values.map((v) => `'${v}'`).join(", ");
 const statusesBefore = (key) =>
   LAB_RUNGS.filter((r) => stageIndexOf(r.key) < stageIndexOf(key)).flatMap((r) => r.sampleStatuses);
 
-// A tube nobody has drawn yet — the collection bench's step. Shared with the
-// machine room, which will not start a test while blood is still owed.
 const UNDRAWN = UNDRAWN_SAMPLE_STATUSES;
 
-// Drawn, and no result filed — the analyzer bench's step.
 const UNREPORTED = statusesBefore("reported").filter(
   (s) => !UNDRAWN.includes(s) && s !== SENT_OUTSIDE,
 );
 
-// Where a status sits on the chain, as a number SQL can compare. Built from the
-// chain itself so a status added there cannot silently rank as unknown.
 const chainIdx = (col) =>
   `CASE ${col} ${CHAIN.map((s, i) => `WHEN '${s}' THEN ${i}`).join(" ")} ELSE -1 END`;
 
-// Where HealthRay's own status sits on that same chain, through the same
-// resolver the sync writes with — so "ahead" means ahead of what the sync would
-// have done, not ahead of a second opinion about it. `cancelled` and `no_show`
-// are not chain statuses and rank -1: an absence is never ahead of anybody.
 const healthrayIdx = (col) =>
   `CASE ${col} ${Object.keys(HEALTHRAY_STATUS_TO_CHAIN)
     .map(
@@ -102,21 +77,11 @@ const healthrayIdx = (col) =>
     )
     .join(" ")} ELSE -1 END`;
 
-// HealthRay's raw status as a position on our chain, for a screen that wants to
-// say "HealthRay: with consultant" rather than "HealthRay: in_visit". Same
-// resolver the sync writes with, so the card cannot claim a different reading
-// than the one the observation was computed from.
 export const healthrayChainStatus = (healthrayStatus) =>
   healthrayStatus ? healthrayTarget(healthrayStatus, HEALTHRAY_STATUS_TO_CHAIN) || null : null;
 
 const OFF_THE_DAY = [...EXCEPTION_STATUSES, ...TERMINAL_STATUSES];
 
-// The first station that owes a step for ONE visit — the enforcement half of
-// the same question the day-wide observation answers.
-//
-// Deliberately the same SQL predicates, in one place: if the gate and the panel
-// judged "recorded" differently, the floor would be held at a station the panel
-// says is up to date, which is the worst of both.
 export async function firstUnrecordedStation(db, visitId) {
   const { rows } = await db.query(
     `SELECT CASE
@@ -262,12 +227,6 @@ export async function recordHealthrayObservation(client, day) {
   return { observed: rows.length, behind };
 }
 
-// The patients behind each desk — the worklist half of the panel.
-//
-// Ordered by how long the gap has stood, worst first: the floor manager wants
-// the patient who has been waiting on a tick for an hour, not the one from two
-// minutes ago. Capped, because a panel is something you work through, and a
-// list of 300 is a report.
 export async function getBehindVisits(day, db, { station = null, limit = 60 } = {}) {
   const wanted = BEHIND_STATIONS.includes(station) ? station : null;
   const { rows } = await db.query(
@@ -295,18 +254,12 @@ export async function getBehindVisits(day, db, { station = null, limit = 60 } = 
     doctor: r.doctor,
     station: r.behind_station,
     stationLabel: BEHIND_STATION_LABEL[r.behind_station] || r.behind_station,
-    // Both readings, side by side — the whole point of the screen is that they
-    // disagree, so neither is presented as the truth.
     scribeStatus: r.current_status,
     healthrayStatus: healthrayChainStatus(r.healthray_status),
     healthrayRaw: r.healthray_status,
     minutes: r.minutes,
   }));
 }
-
-// The Behind panel's read (step 3 builds the screen on this). Grouped by the
-// station that owes the step, newest gap last, so the desk with the longest
-// queue of un-recorded work reads first.
 export async function getBehindTheFloor(day, db) {
   const { rows } = await db.query(
     `SELECT v.behind_station, count(*)::int AS visits,

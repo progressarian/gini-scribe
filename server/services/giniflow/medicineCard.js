@@ -6,22 +6,6 @@ import {
   WHEN_TO_TAKE_SLOT,
 } from "../../../shared/giniflowMedTiming.js";
 
-// The medicine card — gini-doctor-final.html `s-medcard`.
-//
-// NOT a table. A computed view over the patient's active medications, grouped by
-// timing and sorted by the clock, exactly as the brief insists.
-//
-// One query powers four surfaces: the consultant's card, the pharmacy's
-// detailed card, the printed card, and the patient's MHG card. Four
-// implementations of a dosing schedule is four chances to tell a patient the
-// wrong time, so there is one — this.
-
-// A medicine taken twice a day carries two values, and it stays ONE row: the
-// pharmacy dispenses a medicine once, and splitting it would put the same
-// medicationId under two dispense buttons. It is filed at the EARLIEST of its
-// slots, which is where a patient meets it first in the day; the row still
-// prints every value it has, and the frequency (BD, TDS) says how many doses
-// follow.
 const slotFor = (entry) => {
   if (SLOT_ORDER.has(entry.timingCategory)) return entry.timingCategory;
   const values = Array.isArray(entry.whenToTake)
@@ -75,9 +59,6 @@ export async function buildCard(patientId, db = pool) {
     frequency: m.frequency,
     form: m.form,
     route: m.route,
-    // What the medicine is for, and how the patient takes it. Both were already
-    // selected and dropped on the floor; the pharmacy card is the surface that
-    // reads them out to the patient (16 §5.3).
     forDiagnosis: m.for_diagnosis || [],
     medGroup: m.med_group,
     instruction: m.instructions,
@@ -85,18 +66,11 @@ export async function buildCard(patientId, db = pool) {
     timingCategory: m.timing_category,
     timeOfDay: m.time_of_day ? m.time_of_day.slice(0, 5) : null,
     timeLabel: timeLabel(m.time_of_day),
-    // External medicines render dashed with the prescriber's name and are shown
-    // for reference — the Gini pharmacy does not dispense them.
     external: !!m.external_doctor,
     prescriber: m.external_doctor,
-    // The context the brief asked for and the card had no way to show: a
-    // specialist's name alone does not tell a pharmacist which specialist, from
-    // where, or what for.
     prescriberSpecialty: m.external_specialty,
     prescriberHospital: m.external_hospital,
     condition: m.external_condition,
-    // A checked interaction, written by a human. Rendered as a warning, never
-    // inferred — the card must not imply a pair was checked when it was not.
     interactionFlag: m.interaction_flag,
     note: m.clinical_note,
     changeType: m.change_type || (m.is_new ? "new" : null),
@@ -128,8 +102,6 @@ export async function buildCard(patientId, db = pool) {
       return {
         key: slot.key,
         label: slot.label,
-        // The slot's time is the time its medicines are actually taken, not a
-        // fixed clock: a patient who eats lunch at 2 has a 2 o'clock card.
         timeLabel: meds.find((m) => m.timeLabel)?.timeLabel || null,
         medicines: meds,
       };

@@ -15,17 +15,6 @@ import { nonTestPredicate } from "../../utils/nonTests.js";
 import { skipSunday } from "../../../shared/followUp.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 
-// The consultant's station — the queue that forms in front of Dr. Bhansali, and
-// the consult screen itself.
-//
-// Design: docs/gini-flow/13-CONSULTANT-STATION-PLAN.md
-// Part 2 (prescription, tests, medicine card, Finalize): prescription.js,
-// medicineCard.js, finalize.js.
-//
-// The consultant is the floor's known bottleneck — `wait_doctor` is the column
-// the whole day backs up behind — so this queue leads with waiting time, and
-// the groups are ordered by what the consultant can act on next.
-
 const QUEUE_STATUSES = [
   "checked_in",
   "vitals_pending",
@@ -53,7 +42,6 @@ const DONE_STATUSES = [
   "exited",
 ];
 
-// The journey rail every card carries: Check-in › Vitals › MO › With Dr. › Pharmacy.
 const RAIL = [
   { key: "checkin", label: "Check-in", statuses: ["checked_in", "vitals_pending"] },
   { key: "vitals", label: "Vitals", statuses: ["with_vitals", "vitals_done"] },
@@ -79,25 +67,10 @@ const railFor = (status, reachedKeys) =>
 
 const minutesSince = (from, now) =>
   from ? Math.max(0, Math.round((now.getTime() - new Date(from).getTime()) / 60000)) : null;
-
-// Four groups (plan §4.2). A patient whose reports have not arrived stays in
-// "pipeline" however long they have waited — calling them in is exactly the
-// wasted consultation this system exists to prevent.
-//
-// But "waiting on results" and "has no tests" are not the same thing, and
-// reading `results_status` alone conflated them: `none` means *no lab work
-// exists for this visit*, not *the results have not come back*. Every patient
-// handed over on a day when nobody ordered a test was filed under "not ready
-// yet — can't proceed", which is the opposite of true. The question is whether
-// anything is actually outstanding, so that is what this asks.
 const waitingOnLab = (row) =>
   row.results_status === "partial" ||
   (row.results_status !== "ready" && row.open_orders + row.open_cases > 0);
 
-//
-// Ownership is part of the answer, not a filter applied afterwards. "With me
-// now" has to mean *me*: a patient in a colleague's room is real and worth
-// seeing on the All scope, but under its own heading.
 const groupOf = (row, isMine) => {
   if (row.current_status === "with_doctor") return isMine ? "withMe" : "withOtherDoctor";
   if (DONE_STATUSES.includes(row.current_status)) return "done";
@@ -180,9 +153,6 @@ const QUEUE_SQL = `
 
 const RAIL_STATUS_TO_KEY = new Map(RAIL.flatMap((step) => step.statuses.map((s) => [s, step.key])));
 
-// `dispensed` and `exited` are past the last rail step rather than on it, so
-// they mark Pharmacy done — otherwise a patient who has gone home shows a rail
-// with the last stop still empty.
 const REACHED_EXTRA = { dispensed: "pharmacy", exited: "pharmacy" };
 
 const reachedKeysFor = (reached) => {
@@ -194,9 +164,6 @@ const reachedKeysFor = (reached) => {
   return keys;
 };
 
-// The two numbers the prototype puts on every card. Taken from the appointment's
-// biomarkers, the same blob the MO station's chips read, and chosen by the
-// consult brief's ranking so the card and the consult agree about what matters.
 const keyNumbersFor = (biomarkers) => {
   if (!biomarkers) return [];
   const { tiles } = buildBrief(biomarkers, {});
@@ -264,9 +231,6 @@ export async function getDoctorQueue(
       };
     }),
     getSlaConfig(db),
-    // Time actually spent in the room today: the gap between entering
-    // `with_doctor` and whatever event followed it. Derived from the log rather
-    // than stored, like every other duration in Gini Flow.
     db.query(
       `SELECT v.assigned_doctor_id,
               EXTRACT(EPOCH FROM (next_ev.occurred_at - e.occurred_at)) / 60 AS minutes
@@ -286,24 +250,12 @@ export async function getDoctorQueue(
       : Promise.resolve({ rows: [] }),
   ]);
   const budgetFor = budgetLookup(sla);
-  // The two day-level figures below are averages over every category, so they
-  // read the base budgets — an override belongs to one patient, not to a mean.
   const budgets = budgetMap(sla);
-
-  // Gini runs one main consultant today, but a query that hard-codes that is a
-  // rewrite the day it stops being true. An unassigned visit belongs to whoever
-  // is looking — it has not been claimed by anyone else.
   const mine = (r) => !r.assigned_doctor_id || !doctorId || r.assigned_doctor_id === doctorId;
   const inScope = (r) => scope === "all" || mine(r);
   const countable = (r) => scope === "all" || !doctorId || r.assigned_doctor_id === doctorId;
 
   const groups = { withMe: [], withOtherDoctor: [], resultsReady: [], pipeline: [], done: [] };
-  // Patients in the pipeline who belong to ANOTHER consultant, kept by consultant
-  // rather than dropped. Without this the queue answered "who is coming to me"
-  // but not "who is on the floor at all" — and a consultant covering a colleague,
-  // or wondering why the doctor queue is empty while the floor is full, could not
-  // see it. An unassigned patient is not here: nobody has claimed them, so they
-  // stay in the signed-in consultant's own list where they can be picked up.
   const othersPipeline = new Map();
   const counters = {
     withMe: 0,
@@ -324,22 +276,12 @@ export async function getDoctorQueue(
     const group = groupOf(row, isMine);
     const belongsToOther = scope !== "all" && !isMine && group === "pipeline";
     const onScreen = inScope(row) || belongsToOther;
-    // A search is a lookup, not a filter on the day: asked for a file number,
-    // the station answers with the patient who has it. Searching "My patients"
-    // for a colleague's patient used to return an empty screen — the scope test
-    // ran before the search filter, and `belongsToOther` rescues only the
-    // pipeline, so anyone further along was invisible on the Mine tab however
-    // exactly you spelled their file number.
     const foundBySearch = term !== null && row.matches;
     if (!onScreen && !foundBySearch) continue;
 
-    // The stat tiles keep describing the scope, not the search. They are the
-    // day's numbers, and a typed query must not make "Today's patients" jump.
     if (onScreen && countable(row)) {
       counters.total++;
       if (!belongsToOther) counters[group]++;
-      // Same distinction: this counts patients the lab is still holding up, not
-      // every patient who happens to have no tests today.
       if (!DONE_STATUSES.includes(row.current_status) && waitingOnLab(row)) {
         counters.missingResults++;
       }
@@ -417,8 +359,6 @@ export async function getDoctorQueue(
     if (SECOND_CONSULT_DONE.includes(r.status)) counters.done++;
   }
 
-  // Priority first, then longest waiting — the board's rule, so a patient the
-  // coordinator marked urgent is at the top here too.
   const rank = { urgent: 0, high: 1, normal: 2 };
   const byPriorityThenWait = (a, b) =>
     (rank[a.priority] ?? 2) - (rank[b.priority] ?? 2) ||
@@ -528,9 +468,6 @@ export async function getConsult(visitId, db = pool) {
         ORDER BY appointment_date DESC NULLS LAST LIMIT 8`,
       [v.patient_id, visitId],
     ),
-    // Either table may hold today's reading — see visitVitals.js. Reading only
-    // `giniflow_vitals` told the consultant a patient had no vitals when the
-    // reading that moved them to this queue was sitting in the older one.
     todaysVitals(visitId, { patientId: v.patient_id, visitDate: v.visit_date }, db),
     previousVitals(v.patient_id, v.visit_date, db),
     db.query(
@@ -603,8 +540,6 @@ export async function getConsult(visitId, db = pool) {
     ),
   ]);
 
-  // Today's numbers are the appointment's biomarkers, topped up with the vitals
-  // the station took an hour ago — a BP recorded at the chair is today's BP.
   const current = { ...(v.biomarkers || {}) };
   if (vitals) {
     if (vitals.bp_sys != null) current.sbp = vitals.bp_sys;
@@ -658,9 +593,6 @@ export async function getConsult(visitId, db = pool) {
     markers: brief.markers,
     concerns: {
       reports: brief.reportConcerns,
-      // The patient's own words and the since-last-visit block have no
-      // structured source yet (plan §6.1); returning empty arrays rather than
-      // inventing rows, so the screen can say "nothing recorded".
       patient: [],
       sinceLast: [],
     },
@@ -697,12 +629,6 @@ export async function getTrend(patientId, marker, db = pool) {
     .filter((p) => Number.isFinite(p.value));
   return { marker, series };
 }
-
-// Whose patient is this? The queue's second column deliberately shows patients
-// assigned to OTHER consultants — "who is on the floor at all" — so a consultant
-// can open one. Opening is fine; writing is not. An unassigned patient stays
-// writable: nobody has claimed them, so the first consultant to open one is
-// picking them up, which is how the queue's "Mine" column already treats them.
 export async function visitConsultantId(visitId, db = pool) {
   const { rows } = await db.query(
     `SELECT COALESCE(v.assigned_doctor_id, a.doctor_id) AS consultant_id
@@ -732,10 +658,6 @@ export async function visitOwnership(visitId, doctorId, db = pool) {
   };
 }
 
-// The same question asked of a prescription item or a dose proposal. Those
-// endpoints are keyed on the row, not the visit, so the visit gate above cannot
-// see them — and a read-only page that still let an item be edited would be a
-// lock on the front door with the side gate open.
 export async function rowOwnership(table, rowId, doctorId, db = pool) {
   const { rows } = await db.query(
     `SELECT v.id AS visit_id, v.assigned_doctor_id, COALESCE(d.short_name, d.name) AS doctor_name,
@@ -754,10 +676,6 @@ export async function rowOwnership(table, rowId, doctorId, db = pool) {
     ownerName: rows[0].doctor_name,
   };
 }
-
-// Claiming the room. One patient with a consultant at a time: the older module
-// once showed four consultations at once for one doctor, and every duration it
-// reported after that was fiction.
 export async function startConsult(
   visitId,
   actorId = null,
@@ -777,11 +695,6 @@ export async function startConsult(
     );
     if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
 
-    // One patient, one room. The COALESCE below keeps the first consultant as
-    // the owner, but on its own it let a second one open the consult anyway —
-    // the status was already `with_doctor`, so nothing advanced and nothing
-    // objected — and two people wrote a care plan and a prescription against
-    // the same visit.
     if (
       roomId &&
       rows[0].current_status === "with_doctor" &&
@@ -819,9 +732,6 @@ export async function startConsult(
         toStatus: "with_doctor",
         actorRole: "doctor",
         actorId,
-        // The consultant may take a patient who is still queued at an earlier
-        // station — a walk-in, or a patient the floor moved by hand. HealthRay
-        // does the same thing when it observes `in_visit`.
         allowSkip: true,
       });
     }
@@ -830,16 +740,6 @@ export async function startConsult(
               updated_at = NOW() WHERE id = $1`,
       [visitId, roomId],
     );
-
-    // The prescription opens pre-seeded with last visit's regimen, every row
-    // `continued` — addendum v1.1 §1, docs/gini-flow/24-ADDENDUM-V11-PLAN.md §2.
-    // Copying is the default state, not a button: 400 of last week's 438 visits
-    // arrived on an average of 7.2 medicines, and the alternative to seeding is
-    // a consultant retyping them under time pressure, which is how a medicine
-    // gets dropped.
-    //
-    // In this transaction, so a claim that fails leaves no draft behind, and
-    // idempotent — a second claim finds the draft started and does nothing.
     const seeded = await seedDraftOn(client, visitId);
 
     await client.query("COMMIT");
@@ -852,8 +752,6 @@ export async function startConsult(
   }
 }
 
-// The consultant stepped out — the patient goes back to the queue rather than
-// occupying a room they are not in. Mirrors the MO station's releaseWorkup.
 export async function releaseConsult(visitId, actorId = null, db = pool) {
   const client = await db.connect();
   try {
@@ -960,8 +858,6 @@ export async function saveCarePlan(visitId, plan, actorId = null, db = pool) {
   return rows[0];
 }
 
-// The MO proposed; the consultant decides. These columns have existed since the
-// MO station shipped and nothing has ever written them — this is what does.
 export async function decideProposal(proposalId, decision, actorId = null, db = pool) {
   if (!["approved", "adjusted", "rejected"].includes(decision.status)) {
     throw Object.assign(new Error(`Unknown decision: ${decision.status}`), { status: 400 });

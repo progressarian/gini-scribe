@@ -1,21 +1,3 @@
-// The counselling note the pharmacist reads aloud at the counter.
-//
-// docs/gini-flow/16-PHARMACY-STATION-PLAN.md §5.1, brief §4.6.
-//
-// Pure — no database, no network. It takes the prescription rows and returns
-// two paragraphs. Pure because it is the one thing at this station that is a
-// language artefact rather than a query, and its output is worth being able to
-// check without a floor.
-//
-// A TEMPLATE, not free text. Every sentence is composed from a `change_type`
-// and the values already stored on the medicine, so the note cannot drift from
-// what was actually prescribed. Nothing here translates a dosing instruction:
-// where a medicine carries a clinical note it is quoted verbatim inside the
-// Hindi sentence, exactly as the prototype does, because a machine-translated
-// dose is a clinical risk and a quoted English phrase is not.
-//
-// HINDI FIRST. It is the language the sentence is read aloud in.
-
 const CHANGE_TYPES = ["changed", "new", "stopped", "paused"];
 
 const HINDI_NUMBER = ["कोई", "एक", "दो", "तीन", "चार", "पाँच", "छह", "सात", "आठ", "नौ", "दस"];
@@ -36,9 +18,6 @@ const ENGLISH_NUMBER = [
 
 const clean = (value) => (typeof value === "string" ? value.trim() : "") || null;
 
-// "Fenofibrate 145mg", not "Fenofibrate 145mg 145mg". Brand names in this
-// formulary routinely carry the strength already, and a sentence read aloud
-// that says the dose twice sounds like two doses.
 const nameOf = (m) => {
   const name = clean(m.name);
   const dose = clean(m.dose);
@@ -53,12 +32,8 @@ const nameOf = (m) => {
 const hindiCount = (n) => HINDI_NUMBER[n] || String(n);
 const englishCount = (n) => ENGLISH_NUMBER[n] || String(n);
 
-// One sentence per change, in both languages. `reason` is the consultant's own
-// clinical note — quoted, never rewritten.
 function lineFor(medicine) {
   const label = nameOf(medicine);
-  // `buildCard` calls the consultant's clinical note `note`; the draft rows call
-  // the same field `reason`. Either is the "why" this sentence quotes.
   const reason = clean(medicine.reason ?? medicine.note);
   const from = clean(medicine.previousDose);
   const to = clean(medicine.dose);
@@ -95,11 +70,6 @@ function lineFor(medicine) {
       return null;
   }
 }
-
-// `medicines` is the shape `medicineCard.buildCard` and the prescription rows
-// already use: { medicationId, name, dose, previousDose, changeType, reason,
-// stopReason, external }. External medicines are excluded — the Gini pharmacy
-// did not prescribe them and does not counsel on them.
 export function buildCounsellingNote(medicines = []) {
   const changes = medicines
     .filter((m) => !m.external && CHANGE_TYPES.includes(m.changeType))

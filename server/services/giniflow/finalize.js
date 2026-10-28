@@ -8,38 +8,8 @@ import { orderTests } from "./moStation.js";
 import { checkVisit } from "./interactions.js";
 import { whenToTakeFor } from "../../../shared/giniflowMedTiming.js";
 
-// Finalize — brief §2.3 trigger 4, docs/gini-flow/14-CONSULTANT-PRESCRIPTION-PLAN.md §6.
-//
-// ONE TRANSACTION. Either all of it happens or none of it does: a prescription
-// that reached the pharmacy but not the patient's app is worse than a failed
-// save, and a patient moved to `pharmacy_pending` with no medicines behind them
-// is worse than both.
-//
-// Everything that can fail slowly — the PDF, the Genie push — happens AFTER the
-// commit, never inside it.
-//
-// PLAN NOTE. The plan said to extract the body of `POST /api/consultations` into
-// a shared `consultationSave.js` and call it from here. That is still the right
-// end state, but it is NOT done in this pass: that route is the live Scribe save
-// path, it is bound to the wizard's own payload shape (`mo_data` / `con_data` /
-// `exam_data`), and the repo has no test suite to catch a regression in it.
-// Writing this module against the same helpers and the same conflict keys, and
-// converging later, is the smaller risk. What actually protects the invariant is
-// the database, not the code path: `medications_patient_active_name_uniq` and
-// `medications_patient_inactive_name_uniq` mean neither writer can create a
-// second active row for the same medicine however it is called.
-
 const DISPENSABLE = ["continued", "changed", "new"];
-
-// Proposals the doctor has not decided. One definition, read by the guard below
-// and by the preview the button renders — two counts could disagree, and the
-// disagreement would always surface as a refused click with no explanation.
 export async function pendingProposalCount(visitId, db = pool) {
-  // Both models are counted while the old one is retired (plan §4.1): proposals
-  // now live as draft rows, but the side table still holds what was written
-  // before the change, and a row in either is a decision the doctor has not
-  // made. Counting only the new one would let the old rows through silently —
-  // which is the exact failure this guard exists to prevent.
   const { rows } = await db.query(
     `SELECT (SELECT count(*) FROM giniflow_rx_proposals
               WHERE visit_id = $1 AND status = 'proposed')
@@ -57,21 +27,7 @@ export async function writeMedicines(client, { patientId, consultationId, visitD
   const stopped = items.filter((i) => i.change_type === "stopped");
   const active = items.filter((i) => DISPENSABLE.includes(i.change_type));
   const paused = items.filter((i) => i.change_type === "paused");
-
-  // Stopped first, so a medicine stopped and re-prescribed under a new dose in
-  // the same visit cannot collide on the active unique index.
   if (stopped.length) {
-    // CS-02. `medications_patient_inactive_name_uniq` is unique on the same key
-    // among INACTIVE rows, and the flip below moves a row into that set. A
-    // medicine stopped at an earlier visit, re-prescribed, and stopped again
-    // therefore lands a second inactive row and aborts the whole consultation
-    // with a unique violation the consultant cannot act on.
-    //
-    // The older inactive row is superseded history — the row being stopped now
-    // carries the current dose, timing and consultation. Dropping it keeps the
-    // most recent row per (patient, medicine) in each active state, which is
-    // exactly the policy `scripts/dedup-medications.js` applies when it repairs
-    // this table.
     await client.query(
       `DELETE FROM medications old
         WHERE old.patient_id = $1
@@ -106,9 +62,6 @@ export async function writeMedicines(client, { patientId, consultationId, visitD
       ],
     );
   }
-
-  // A paused medicine is still the patient's medicine — it keeps its row and
-  // its history, and only stops appearing on the card until it resumes.
   if (paused.length) {
     await client.query(
       `UPDATE medications m
@@ -216,17 +169,6 @@ export async function finalizeConsult(
       throw Object.assign(new Error("This consultation is already finalized"), { status: 409 });
     }
 
-    // Finalize means "the consultation happened", so the patient has to have
-    // been called in. Without this, finalizing someone still at the MO desk
-    // would ask the chain to jump three statuses — which it rightly refuses —
-    // and would log a consultation for a patient the consultant never saw.
-    // `ready_for_doctor` is allowed because a consultant who calls a patient and
-    // finishes immediately is a real thing; anything earlier is a mis-tap.
-    // The MO closing a visit without the consultant finalizes from their own
-    // station, so `with_sd` is theirs and theirs only — 31 §5.3. The two sets
-    // stay disjoint deliberately: a consultant must not finalize a patient still
-    // at the MO desk, and an MO must not finalize one sitting with the
-    // consultant.
     const allowed = closedBySd ? ["with_sd"] : ["with_doctor", "ready_for_doctor"];
     if (!allowed.includes(visit.current_status)) {
       throw Object.assign(
@@ -239,13 +181,6 @@ export async function finalizeConsult(
       );
     }
 
-    // The MO's proposals must be decided, not defaulted (addendum v1.1 §3,
-    // docs/gini-flow/24-ADDENDUM-V11-PLAN.md §4.3).
-    //
-    // This used to auto-reject anything still `proposed`, so a consultant could
-    // finalize with "TG tripled — add Fenofibrate" unread and the record would
-    // say they rejected it. They never saw it. A rejection has to be a decision
-    // somebody made.
     const pending = await pendingProposalCount(visitId, client);
     if (pending) {
       throw Object.assign(
@@ -255,14 +190,6 @@ export async function finalizeConsult(
         { status: 409, pendingProposals: pending },
       );
     }
-
-    // A severe interaction stops the finalize until somebody has said why they
-    // are prescribing it anyway (§5.2). Not a hard block, deliberately: dual
-    // antiplatelet after a stent and an MRA with an ACE inhibitor in heart
-    // failure are the combinations this check is best at spotting, and both are
-    // things a cardiologist means. A stop that cannot be passed gets worked
-    // around, and then it protects nobody — so the way past it is a recorded
-    // reason, which is the sentence the whole check exists to produce.
     const interactions = await checkVisit(visitId, client);
     if (interactions.blocking.length) {
       const first = interactions.blocking[0];
@@ -292,12 +219,6 @@ export async function finalizeConsult(
       [visitId],
     );
 
-    // ── 1. The consultation row ──────────────────────────────────────────────
-    // One per patient per visit date. What prevents a second row for the same
-    // visit is the status guard above — a finalized visit is refused — not this
-    // statement, which is a plain INSERT. Said plainly because a comment that
-    // overstates a safety property in a clinical write path is worse than none
-    // (CS-10).
     const { rows: consultRows } = await client.query(
       `INSERT INTO consultations (patient_id, visit_date, visit_type, con_doctor_id, mo_doctor_id, status)
        VALUES ($1, $2::date, 'OPD', $3, $4, 'completed')
@@ -325,9 +246,6 @@ export async function finalizeConsult(
       toStatus: "doctor_done",
       actorRole,
       actorId,
-      // From `with_sd` this steps over ready_for_doctor and with_doctor, which
-      // is further than the chain's normal limit — and is the point: no
-      // consultant saw this patient.
       allowSkip: closedBySd,
       meta: {
         source: "consult_finalize",
@@ -345,28 +263,12 @@ export async function finalizeConsult(
       meta: { source: "consult_finalize", ...(closedBySd ? { closed_by_sd: true } : {}) },
     });
 
-    // The draft has become the prescription; keeping it would give the next
-    // reader two answers to the same question.
     await client.query(`DELETE FROM giniflow_rx_items WHERE visit_id = $1`, [visitId]);
 
     await client.query("COMMIT");
 
-    // ── After the commit ─────────────────────────────────────────────────────
-    // Fire-and-forget. A failure here must never undo a finalized consultation:
-    // the medicines are prescribed either way, and every one of these is
-    // idempotent and re-runnable.
     markMedicationVisitStatus(patientId).catch(() => {});
 
-    // The referral letters (19 §6). Here, beside the prescription PDF, and never
-    // inside the transaction: a Puppeteer render is exactly the "can fail
-    // slowly" this block exists for. Each generation is idempotent — it skips a
-    // referral that already has a letter_file_url — so a retry is always safe,
-    // and a letter that failed to render can be regenerated from the station
-    // with one button.
-    //
-    // A referral is NOT a reason to block Finalize. A consultation that refused
-    // to finalize because a PDF timed out would strand the patient before
-    // pharmacy.
     referralsForVisit(visitId)
       .then((referrals) =>
         Promise.all(
@@ -381,18 +283,6 @@ export async function finalizeConsult(
       )
       .catch((e) => console.warn("[giniflow finalize] referral letters failed:", e?.message));
 
-    // CS-03. Without this a consultation finalized through Gini Flow produced no
-    // prescription PDF at all, while the same consultation finalized through
-    // Scribe's wizard did — so the patient left with nothing to show and nothing
-    // in their app. Same call, same options, same non-blocking shape as
-    // `POST /api/consultations` uses; `savePrescriptionForVisit` is idempotent
-    // per (patient, consultation, source), so a retry cannot produce two PDFs.
-    //
-    // Note on the patient's app: there is no separate Genie push to make here.
-    // The outbound sync was removed on 2026-05-01 ("dual-DB routing replaces
-    // it") — `syncDocumentsToGenie` is `null` in prescriptionAutoSave.js and
-    // `syncVisitToGenie` is `null` in the consultations route. The document
-    // reaching `documents` IS how it reaches the patient now.
     buildVisitPayloadFromDb(patientId, { appointmentId: visit.appointment_id })
       .then((payload) => {
         if (!payload) return null;
@@ -419,29 +309,6 @@ export async function finalizeConsult(
   }
 }
 
-// What Finalize is about to do, for the confirmation panel. Read-only: the
-// consultant sees the fan-out named before they trigger it, in the prototype's
-// own words.
-// The fast path — addendum v1.1 §2, docs/gini-flow/24-ADDENDUM-V11-PLAN.md §3.
-//
-// One tap for a green patient: keep the pre-seeded prescription, repeat today's
-// panel at the next visit, set the follow-up three months out, finalize. Roughly
-// 28% of visits are `in_control`, and for those the consultation is a
-// confirmation rather than a decision.
-//
-// Three transactions, not one, and the ORDER is the design (§3.2). `orderTests`
-// and `finalizeConsult` each own theirs, and giving them client-taking variants
-// would touch both stations for a path that is a convenience. So the sequence is
-// arranged by what a failure leaves behind:
-//
-//   care plan  — harmless on its own if the rest fails
-//   tests      — a patient with tests ordered and still in the room; a phone call
-//   finalize   — last, because a finished visit with no follow-up is not
-//                recoverable by hand
-//
-// Everything below reuses the normal services. `finalizeConsult` is not forked:
-// a second finalize would be a second answer to "what does finishing a visit
-// mean".
 export async function fastPathFinalize(visitId, actorId = null, db = pool, { consultantId } = {}) {
   const { rows } = await db.query(
     `SELECT v.category, v.current_status,
@@ -475,10 +342,6 @@ export async function fastPathFinalize(visitId, actorId = null, db = pool, { con
       { status: 409 },
     );
   }
-  // The fast path finalizes without anybody reading the prescription screen, so
-  // it is the one route where an unread severe interaction would go out
-  // unnoticed. Same rule, and no override here — a combination that needs a
-  // reason needs the consultant to open the patient and give one.
   const interactions = await checkVisit(visitId, db);
   if (interactions.blocking.length) {
     const first = interactions.blocking[0];
@@ -488,8 +351,6 @@ export async function fastPathFinalize(visitId, actorId = null, db = pool, { con
     );
   }
 
-  // 1. The follow-up, three months out. Never overwritten: a doctor who already
-  //    set a date meant it.
   let nextVisitDate = visit.next_visit_date;
   if (!nextVisitDate) {
     const { rows: d } = await db.query(
@@ -499,9 +360,6 @@ export async function fastPathFinalize(visitId, actorId = null, db = pool, { con
     await saveCarePlan(visitId, { nextVisitDate, nextVisitInterval: "~3 months" }, actorId, db);
   }
 
-  // 2. Repeat what was measured today. Read from the visit's own orders — a
-  //    panel nobody chose is a bill the patient did not agree to, so when there
-  //    is nothing to repeat this orders nothing and says so.
   const { rows: repeatable } = await db.query(
     `SELECT DISTINCT t.test_name FROM giniflow_lab_orders o
        JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
@@ -513,11 +371,6 @@ export async function fastPathFinalize(visitId, actorId = null, db = pool, { con
     await orderTests(visitId, { urgency: "next_visit", tests, actorId }, db);
   }
 
-  // 3. The ordinary fan-out — always on the pool, never on a caller's client.
-  //
-  // `finalizeConsult` opens its own transaction (`db.connect()`), so forwarding
-  // a client here would throw on the last and least reversible step. `db` above
-  // is for the reads and the two composable writes; this one owns its own.
   const result = await finalizeConsult(visitId, actorId, undefined, { consultantId });
   return { ...result, fastPath: true, nextVisitDate, testsRepeated: tests };
 }
@@ -535,8 +388,6 @@ export async function finalizePreview(visitId, db = pool) {
       WHERE o.visit_id = $1 GROUP BY o.urgency`,
     [visitId],
   );
-  // Named, not counted: "Ophthalmology referral" is actionable, "1 referral" is
-  // not — and the prototype's Finalize panel says the specialty out loud.
   const referrals = await referralsForVisit(visitId, db);
 
   const { rows: outOfStock } = await db.query(

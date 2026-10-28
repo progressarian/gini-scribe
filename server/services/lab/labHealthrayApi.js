@@ -1,6 +1,3 @@
-// ── Lab HealthRay API Client ─────────────────────────────────────────────────
-// Separate system from node.healthray.com — JWT auth with auto-refresh on 401
-
 import pool from "../../config/db.js";
 import { createLogger } from "../logger.js";
 import { fetchWithTimeout, createRateLimiter } from "../cron/lowPriority.js";
@@ -8,15 +5,9 @@ const { log } = createLogger("Lab Auth");
 
 const LAB_API_BASE = "https://labapi.healthray.com/api/v1";
 
-// Upstream call timeout — prevents a stalled lab API from holding a sync
-// worker (or a user request) indefinitely.
 const LAB_TIMEOUT_MS = 20000;
 
-// Shared outbound limiter — smooths lab API bursts so the server IP doesn't get
-// WAF 403-blocklisted (same defence as the HealthRay client). Tunable via env.
 const labLimiter = createRateLimiter({
-  // Gentle, strictly-serial by default (no bursts). Raise via env once the egress
-  // IP is allowlisted by HealthRay (see HEALTHRAY_PROXY_URL).
   ratePerSec: Number(process.env.LAB_HEALTHRAY_MAX_RPS) || 2,
   maxConcurrent: Number(process.env.LAB_HEALTHRAY_MAX_CONCURRENT) || 1,
 });
@@ -29,27 +20,10 @@ async function gatedFetch(url, options, timeoutMs) {
   }
 }
 
-// In-memory token cache — seeded from .env, refreshed automatically on 401
 let authToken = process.env.LAB_HEALTHRAY_AUTH_TOKEN || null;
 let accessToken = process.env.LAB_HEALTHRAY_ACCESS_TOKEN || null;
 let lastLoginAt = 0;
-let loginInFlight = null; // Promise singleton — coalesces concurrent logins
-
-// Circuit-breaker. HealthRay's WAF IP-rate-limits us with a 403 after too many
-// requests (login OR data). Retrying every cron tick (~30s) keeps the limiter
-// tripped indefinitely, so back off WITHOUT a network call while the window is
-// open, then recover automatically. Shared by login failures and data-endpoint
-// 403s, and reset on the first success.
-//
-// Two backoff regimes (mirrors server/services/healthray/client.js):
-//   • A real WAF block (403/429) → a LONG cooldown that ESCALATES on consecutive
-//     blocks (30m → 1h → 2h cap). A flat short cooldown oscillates forever when
-//     the ban outlasts it (probe → re-banned → wait → probe…), which is exactly
-//     what kept the lab cron spamming "backing off" — see this file's history.
-//   • Any other failure (timeout, login non-200) → a fast 20s → 10min backoff.
-//
-// The cooldown is persisted in app_kv so BOTH processes (worker + API) and
-// restarts honour one window instead of each independently re-poking the WAF.
+let loginInFlight = null;
 let blockFailCount = 0;
 let blockBackoffUntil = 0;
 let wafBlockCount = 0; // consecutive WAF 403/429 blocks — escalates the cooldown
@@ -81,9 +55,6 @@ async function kvSet(key, value) {
     /* best-effort — never let persistence break a sync */
   }
 }
-
-// Pull a cooldown another process/restart may have already established (once;
-// promise-singleton so concurrent callers don't each hit the DB).
 const COOLDOWN_RECHECK_MS = 15_000;
 let cooldownCheckedAt = 0;
 
@@ -144,18 +115,8 @@ function resetBreaker() {
   wafBlockCount = 0;
   kvSet(KV_LAB_COOLDOWN, { until: 0, failCount: 0, blockCount: 0, reason: "" });
 }
-
-// Tokens have empirically lasted well over an hour, but long batch runs
-// (the resync script) can outlast them. Refresh proactively before that
-// becomes a problem — the puppeteer path can't auto-401-retry like labFetch.
 const TOKEN_MAX_AGE_MS = 30 * 60 * 1000; // 30 min
 
-// HealthRay's PDF renderer falls over under heavy concurrent load — multiple
-// simultaneous /download-report requests get stuck on "Generating PDF preview..."
-// because the backend serialises generation. Default to 1 (strictly serial)
-// so the outer concurrency (case_detail fetches) can stay high without
-// overwhelming HealthRay's PDF service. Override via LAB_PUPPETEER_CONCURRENCY
-// once steady-state cron resumes (e.g. =2 for incremental syncs).
 const PUPPETEER_MAX_CONCURRENT = parseInt(process.env.LAB_PUPPETEER_CONCURRENCY || "1", 10);
 let puppeteerInFlight = 0;
 const puppeteerWaiters = [];
@@ -175,7 +136,6 @@ function releasePuppeteerSlot() {
   if (next) next();
 }
 
-// Device token is fixed per device/browser (Firebase push token) — never changes
 const DEVICE_TOKEN = process.env.LAB_HEALTHRAY_DEVICE_TOKEN;
 
 // Fixed lab admin user ID for read-only API calls
@@ -189,9 +149,6 @@ const LAB_HEADERS = () => ({
   "x-device-token": DEVICE_TOKEN,
   "x-healthray-access-token": accessToken,
 });
-
-// ── Auto-login using credentials from .env ───────────────────────────────────
-// Coalesces concurrent calls so 10 parallel workers don't all hit /sign_in.
 export async function labLogin() {
   if (loginInFlight) return loginInFlight;
   loginInFlight = doLogin().finally(() => {
@@ -211,11 +168,7 @@ async function doLogin() {
     );
   }
 
-  // Honour a cooldown a sibling process/restart may have already established.
   await loadPersistedCooldown();
-  // Circuit-breaker: while backing off after recent blocks, fail fast WITHOUT
-  // hitting the network so we stop hammering a rate-limited endpoint. (Checked
-  // here, not in openBreaker, so polling never extends the window.)
   if (isBackingOff()) {
     throw new Error(
       `Lab login backing off (${blockFailCount} consecutive failures) — next attempt in ~${backoffRemainingS()}s`,
@@ -224,8 +177,6 @@ async function doLogin() {
 
   log("Login", `Logging in as ${mobile}...`);
 
-  // Tracks whether this failure was a WAF/IP-block (403/429) vs an ordinary
-  // failure — drives the long-vs-fast cooldown chosen in the catch below.
   let wafBlocked = false;
   try {
     const res = await gatedFetch(
@@ -280,8 +231,6 @@ async function doLogin() {
   }
 }
 
-// Refresh tokens if missing or older than TOKEN_MAX_AGE_MS — used by the
-// puppeteer path which has no 401 retry of its own.
 async function ensureFreshTokens() {
   if (!authToken || Date.now() - lastLoginAt > TOKEN_MAX_AGE_MS) {
     await labLogin();
@@ -291,9 +240,6 @@ async function ensureFreshTokens() {
 // ── Core fetch with auto-retry on 401 ───────────────────────────────────────
 async function labFetch(path, isRetry = false) {
   await loadPersistedCooldown();
-  // Circuit-breaker: while the lab API is blocking us (IP rate-limit 403), fail
-  // fast WITHOUT a network call so the cron stops hammering and the block can
-  // clear. Auto-recovers after the back-off window.
   if (isBackingOff()) {
     throw new Error(
       `Lab API backing off (${blockFailCount} consecutive failures) — next attempt in ~${backoffRemainingS()}s`,
@@ -311,16 +257,12 @@ async function labFetch(path, isRetry = false) {
     LAB_TIMEOUT_MS,
   );
 
-  // 401 = token expired → re-login once and retry
   if (res.status === 401 && !isRetry) {
     log("Auth", "401 received — refreshing tokens...");
     await labLogin();
     return labFetch(path, true);
   }
 
-  // 403/429 = HealthRay WAF / IP rate-limit, NOT a token problem — re-login
-  // can't fix it and only feeds the limiter. Open the breaker (long, escalating
-  // cooldown) so subsequent cron ticks fail fast until the WAF ban clears.
   if (res.status === 403 || res.status === 429) {
     openBreaker(`HTTP ${res.status} at ${path}`, true);
     throw new Error(`Lab API HTTP ${res.status} at ${path}`);
@@ -334,8 +276,6 @@ async function labFetch(path, isRetry = false) {
   return json.data;
 }
 
-// ── IST date → UTC range for API ─────────────────────────────────────────────
-// IST = UTC+5:30, so IST midnight = UTC 18:30 previous day
 function istDateToUtcRange(dateStr) {
   const [y, m, d] = dateStr.split("-").map(Number);
   const from = new Date(Date.UTC(y, m - 1, d - 1, 18, 30, 0));
@@ -402,21 +342,7 @@ async function getBrowser() {
   return browserInstance;
 }
 
-// ── Capture the exact HealthRay PDF via authenticated headless browser ───────
-// The report page generates a PDF client-side but needs auth tokens for its
-// internal API calls. We inject tokens via localStorage + request interception,
-// then capture the resulting blob from the <iframe src="blob:...">.
-//
-// Returns one of:
-//   { buffer, contentType }  — success
-//   { unavailable: true }    — HealthRay's UI explicitly says "No Report Found"
-//                              (definitive — no PDF exists for this case)
-//   null                     — transient failure (nav timeout, render stuck,
-//                              extraction failure). Caller may retry later.
 export async function fetchLabReportPdf(caseUid, caseId) {
-  // Throttle to PUPPETEER_MAX_CONCURRENT — HealthRay's PDF backend serialises
-  // generation, so concurrent /download-report navigations stall on
-  // "Generating PDF preview..." until the underlying queue drains. Default 1.
   await acquirePuppeteerSlot();
   const reportUrl = `https://lab.healthray.com/download-report/pt/1/${caseUid}/${caseId}`;
 
@@ -436,8 +362,6 @@ export async function fetchLabReportPdf(caseUid, caseId) {
         return { unavailable: true };
       }
       if (result.outcome === "render-stuck") {
-        // HealthRay's PDF backend never finished. Retrying queues another
-        // generation request behind the slow one — counterproductive.
         return null;
       }
       // 'transient-failure' — falls through to next attempt
@@ -458,15 +382,10 @@ export async function fetchLabReportPdf(caseUid, caseId) {
   }
 }
 
-// One PDF download attempt with a fresh isolated context. Returns a
-// discriminated outcome the caller uses to decide whether to retry.
 async function attemptFetchPdf(browser, reportUrl, caseId, attempt) {
   let page;
   let context;
   try {
-    // Use an isolated browser context per attempt — the HealthRay SPA reads
-    // and rewrites localStorage during boot, and concurrent pages in the
-    // shared default context were racing to clobber each other's tokens.
     context = await (browser.createBrowserContext
       ? browser.createBrowserContext()
       : browser.createIncognitoBrowserContext());
@@ -489,10 +408,6 @@ async function attemptFetchPdf(browser, reportUrl, caseId, attempt) {
       }
     });
 
-    // ── Step 2: Hook blob creation + inject auth tokens BEFORE any page
-    // script runs. evaluateOnNewDocument runs on every new document as soon
-    // as it's created and BEFORE page scripts execute, so the SPA boots
-    // with our tokens already in localStorage on the first navigation.
     await page.evaluateOnNewDocument(
       (tokens) => {
         window.__pdfBlob = null;
@@ -544,10 +459,7 @@ async function attemptFetchPdf(browser, reportUrl, caseId, attempt) {
               localStorage.setItem("persist:root", JSON.stringify(root));
             }
           } catch {}
-        } catch {
-          // localStorage unavailable on the bootstrap origin (about:blank);
-          // the next document load runs this block again with proper origin.
-        }
+        } catch {}
       },
       { authToken, accessToken },
     );
@@ -561,12 +473,6 @@ async function attemptFetchPdf(browser, reportUrl, caseId, attempt) {
       return { outcome: "transient-failure" };
     }
 
-    // ── Step 4: Wait for a discriminated outcome ──────────────────────
-    // The predicate now distinguishes:
-    //   "no-report"  → HealthRay's UI says no PDF exists (definitive)
-    //   "pdf-ready"  → blob/iframe ready to extract
-    // On timeout, classify as render-stuck (body still says "preparing") or
-    // transient-failure (anything else).
     log("PDF", `Waiting for PDF for case ${caseId}...`);
     let tag;
     try {
@@ -602,11 +508,6 @@ async function attemptFetchPdf(browser, reportUrl, caseId, attempt) {
       return { outcome: "no-report" };
     }
 
-    // tag === "pdf-ready" — extract the blob.
-    // Wait for the blob size to STABILIZE — HealthRay's renderer commonly
-    // emits an early empty/header-only PDF then replaces it once test rows
-    // are fetched. Poll the largest captured blob's size and only proceed
-    // once it stops growing for ~3 consecutive seconds.
     await page.evaluate(async () => {
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       let lastSize = window.__pdfBlob?.size || 0;

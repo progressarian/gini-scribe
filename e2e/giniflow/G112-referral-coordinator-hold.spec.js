@@ -12,7 +12,6 @@ import {
 import { db } from "../billing/phase4b/p4b-refunds.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
-process.env.SCRIBE_RX_WAITS_FOR_COORDINATOR = "1";
 
 const { advanceStatus } = await import("../../server/services/giniflow/statusEngine.js");
 const rx = await import("../../server/services/giniflow/rxStation.js");
@@ -301,18 +300,5 @@ test.describe.serial("G112 a referred patient sees the Care Coordinator before t
     ]);
     expect(after.status).toBe("declined");
     expect(after.outcome_reason).toMatch(/Care Coordinator on the floor: Patient declined/);
-  });
-
-  test("14. with the switch off the hold is recorded but nothing is blocked", async () => {
-    const v = await withConsultant("G112Off");
-    await refer(v.visit);
-    await move(v.visit, "rx_pending");
-    process.env.SCRIBE_RX_WAITS_FOR_COORDINATOR = "0";
-    try {
-      expect((await rxRow(v.visit)).coordinator).toMatchObject({ waiting: true, blocking: false });
-      await rx.startRxExplain(v.visit, USERS.admin.id, db);
-    } finally {
-      process.env.SCRIBE_RX_WAITS_FOR_COORDINATOR = "1";
-    }
   });
 });

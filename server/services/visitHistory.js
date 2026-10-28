@@ -1,16 +1,4 @@
 import pool from "../config/db.js";
-
-// A patient's visit history as the /visit History tab defines it: their
-// consultations, plus HealthRay appointments for days that produced no
-// consultation, newest first, one row per visit_date+status.
-//
-// The GHM patient-record popup listed raw `appointments` rows instead, so the
-// two screens disagreed — the popup showed booking rows the History tab folds
-// away and missed visits that exist only as consultations.
-//
-// Slot and MO are not consultation columns, so each row picks them up from an
-// appointment on the same day when there is one; that keeps the popup's table
-// (Date / Slot / Doctor / MO / Type) filled in.
 export async function fetchVisitHistory(patientId) {
   const { rows } = await pool.query(
     `WITH cons AS (

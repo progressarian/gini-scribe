@@ -120,9 +120,9 @@ On the floor now (3)                                              Updated 10:42
 
 ### 3.5 Valve
 
-`SCRIBE_RX_WAITS_FOR_COORDINATOR` (default **0**, so the hold rows and the screen work but
-nothing blocks until the floor turns it on). Like `SCRIBE_PHARMACY_WAITS_FOR_RX`. Read in
-both API and worker. Restarting the processes is yours.
+No valve. Since 2026-10-28 the block is always on in code: a patient waiting for the Care
+Coordinator cannot be started or explained at the Rx station (the env switch
+`SCRIBE_RX_WAITS_FOR_COORDINATOR` was removed).
 
 ## 4. Server
 
@@ -183,9 +183,8 @@ alongside each step.
    table exists every hold path is a no-op (`holdsReady()`), so the code is safe to deploy
    first, but nothing is recorded either.
 2. Deploy, then restart the API and the worker.
-3. Holds are recorded and the coordinator's list fills, but nothing blocks yet. Turn the
-   block on with `SCRIBE_RX_WAITS_FOR_COORDINATOR=1` in the root `.env`, then restart both
-   processes.
+3. Holds are recorded, the coordinator's list fills, and the Rx station blocks referred
+   patients until the coordinator is done.
 
 **Where the build differs from the plan**
 

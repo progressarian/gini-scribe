@@ -1,8 +1,3 @@
-// ── Medication Sorting Utility ──────────────────────────────────────────────
-// Implements clinical ordering rules from diagnosis-rx-brief.
-// Category metadata + detection patterns live in
-// server/config/medicationCategories.js — edit there to add or rename a group.
-
 import {
   MED_CATEGORIES,
   DIABETES_CLASS_RANK,
@@ -12,24 +7,16 @@ import {
   groupMedicationsByCategory,
 } from "../config/medicationCategories.js";
 
-// Build GROUP_RANK from the canonical category list so we never drift from it.
 const GROUP_RANK = MED_CATEGORIES.reduce((acc, c) => {
   acc[c.id] = c.rank;
   return acc;
 }, {});
-// Aliases kept for backward compatibility with older med_group values.
 GROUP_RANK.cardiovascular = GROUP_RANK.bp;
 GROUP_RANK.supplements = GROUP_RANK.supplement;
-
-// Re-export the shared helpers under their historical names so existing
-// callers (routes/visit.js, prescription template) keep working.
 export { detectDrugClass };
 export const detectMedGroup = detectMedCategory;
 export { getCategoryLabel as getGroupLabel };
 
-// Group medications by clinical category. Same shape as before — returns an
-// object keyed by category id — but the canonical list of category ids comes
-// from medicationCategories.js, and each group is sorted by class.
 export function groupMedications(medications) {
   const groups = groupMedicationsByCategory(medications || []);
   for (const id of Object.keys(groups)) {

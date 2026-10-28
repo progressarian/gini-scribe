@@ -112,10 +112,15 @@ function CoordinatorBadge({ hold }) {
 }
 
 function QueueRow({ row, active, onPick }) {
+  const held = !!row.coordinator?.blocking;
   return (
     <button
       type="button"
-      className={`sq-item${active ? " active" : ""}`}
+      className={`sq-item${active ? " active" : ""}${held ? " is-readonly" : ""}`}
+      disabled={held}
+      title={
+        held ? "Waiting for the Care Coordinator — opens once they send the patient on" : undefined
+      }
       onClick={() => onPick(row.visitId)}
     >
       <div className="si-name">{row.name}</div>
@@ -194,6 +199,7 @@ function Pane({
   busy,
 }) {
   const { data, isLoading } = useRxPatient(visitId);
+  const heldByCoordinator = !!data?.coordinator?.blocking;
   const followupPatient = data && {
     visitId,
     name: data.name,
@@ -432,7 +438,7 @@ function Pane({
           </div>
         )}
 
-        {!readOnly && (
+        {!readOnly && !heldByCoordinator && (
           <div className="dp-foot">
             <button
               className="st-btn st-btn-grn"

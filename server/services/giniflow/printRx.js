@@ -1,9 +1,6 @@
 import pool from "../../config/db.js";
 import { savePrescriptionForVisit, buildVisitPayloadFromDb } from "../prescriptionAutoSave.js";
 
-// Scoped to the visit, not the patient: a desk prints for the person in front of
-// it, and a visit id on a live board is a far smaller surface than a patient
-// directory (docs/gini-flow/25-PRINT-PRESCRIPTION-PLAN.md §6).
 const RX_FOR_VISIT_SQL = `
   SELECT v.id AS visit_id, v.visit_date::text AS visit_date, v.current_status,
          p.id AS patient_id, p.name, p.file_no,
@@ -44,26 +41,12 @@ export async function getPrintableRx(visitId, db = pool) {
       reason: "not_finalized",
     });
   }
-  // The PDF is written after the Finalize commit, fire-and-forget, so a visit can
-  // legitimately be past the consult with no file yet. That is a wait, not a
-  // failure (25 §4.1).
   if (!r.document_id) {
     throw Object.assign(new Error("The prescription is still being prepared"), {
       status: 409,
       reason: "not_ready",
     });
   }
-  // The PDF is rendered once per consultation and never re-rendered for it
-  // (prescriptionAutoSave is idempotent on patient + consultation + source), so
-  // a prescription edited after that render still serves the old file. Six
-  // prescriptions in the week to 5 Sep 2026 changed up to 42 minutes after
-  // theirs, three of which never got a newer document. Handing a patient a
-  // superseded prescription is worse than handing them none, so this refuses
-  // rather than serving quietly.
-  // Only a Scribe-rendered copy can go stale against `medications.updated_at`.
-  // A HealthRay PDF is the doctor's own signed document — our medication rows
-  // were extracted from it, so their timestamps say nothing about whether it
-  // still matches, and the comparison would refuse a perfectly current file.
   if (
     r.doc_source === "visit" &&
     r.last_change &&
@@ -84,9 +67,6 @@ export async function getPrintableRx(visitId, db = pool) {
 export async function fetchRxFile(visitId, db = pool) {
   const r = await getPrintableRx(visitId, db);
 
-  // Reuses the resolver every other document path already goes through: it
-  // knows the Supabase shape, the HealthRay S3 shape, the auth each needs and
-  // the JSON-error body HealthRay returns with HTTP 200.
   const { resolveDocumentUrl } = await import("../../routes/documents.js");
   const resolved = await resolveDocumentUrl(r.document_id);
   if (resolved?.error) {
@@ -118,10 +98,6 @@ export async function fetchRxFile(visitId, db = pool) {
   };
 }
 
-// Re-render the prescription for a visit whose medicines changed after the last
-// copy was made. `overwrite` is the existing contract — it deletes the
-// superseded row before generating a fresh one, which is what we want: a
-// prescription that no longer matches the chart should not stay retrievable.
 export async function regenerateRx(visitId, db = pool) {
   const { rows } = await db.query(
     `SELECT v.patient_id, v.appointment_id, cons.id AS consultation_id
@@ -148,10 +124,6 @@ export async function regenerateRx(visitId, db = pool) {
     });
   }
 
-  // The consult was written in HealthRay, not here. `overwrite` would delete the
-  // doctor's own signed PDF and replace it with one rendered from medication
-  // rows extracted out of that same PDF — strictly less faithful than what it
-  // destroys, and unrecoverable.
   const existing = await db.query(
     `SELECT source FROM documents
       WHERE consultation_id = $1 AND doc_type = 'prescription'

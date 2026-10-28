@@ -1,10 +1,5 @@
-// ── Lab Report PDF Generator ────────────────────────────────────────────────
-// Generates a lab report PDF matching the HealthRay format using PDFKit.
-// Each report/test group gets its own page with header, patient info, results, and signatures.
-
 import PDFDocument from "pdfkit";
 
-// ── Layout constants ────────────────────────────────────────────────────────
 const M_LEFT = 36;
 const M_RIGHT = 560;
 const WIDTH = M_RIGHT - M_LEFT;
@@ -13,7 +8,6 @@ const COL_RESULT = 260;
 const COL_UNIT = 380;
 const COL_RANGE = 470;
 
-// ── Build patient info from case detail ─────────────────────────────────────
 function getPatientInfo(caseDetail) {
   const p = caseDetail.patient || {};
   const name =

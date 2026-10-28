@@ -1,12 +1,3 @@
-/**
- * Lab test name normalization — shared canonical mapping.
- * Maps hundreds of test name variants to a single canonical name.
- *
- * Usage:
- *   import { normalizeTestName } from '../utils/labNormalization.js';
- *   const canonical = normalizeTestName("Glycated Hemoglobin"); // → "HbA1c"
- */
-
 const map = {};
 const add = (canonical, ...aliases) => {
   map[canonical.toLowerCase().trim()] = canonical; // canonical maps to itself
@@ -574,8 +565,6 @@ add(
   "eag",
 );
 
-// ── Vitals stored in lab_results ─────────────────────────────────────────────
-// These are vital signs but HealthRay sometimes sends them as lab rows.
 add("Weight", "weight", "body weight", "weight (kg)", "wt", "wt.");
 add("Height", "height", "height (cm)", "ht", "ht.");
 add("BMI", "bmi", "body mass index", "bmi (kg/m2)", "bmi (kg/m²)");
@@ -583,14 +572,6 @@ add("Waist", "waist", "waist circumference", "waist (cm)", "waist circumference 
 add("Body Fat", "body fat", "body fat %", "body fat percentage", "% body fat");
 add("Systolic BP", "systolic bp", "sbp", "systolic blood pressure", "bp systolic");
 add("Diastolic BP", "diastolic bp", "dbp", "diastolic blood pressure", "bp diastolic");
-
-// ── Vitals-sheet names (with units in parentheses) ───────────────────────────
-// These are NOT added as canonical entries — they map to existing canonical names above.
-// Weight, Height, BMI, BP, Waist, Body Fat from vitals sheet are vital signs, not labs.
-// But some get stored in lab_results if classification misses them.
-// Keep them mapped so outcomes queries can find them.
-
-// ── Fibroscan ─────────────────────────────────────────────────────────────────
 add("FIB4", "fib4", "fib-4", "fibrosis-4", "fibrosis 4", "fib 4");
 add(
   "Fibroscan CAP",
@@ -618,8 +599,6 @@ add(
   "liver stiffness (kpa)",
   "lsm (kpa)",
 );
-
-// ── Screening tests (kept as-is for the screenings panel) ────────────────────
 add("VPT", "vpt", "vibration perception threshold");
 add(
   "VPT Left",
@@ -687,8 +666,6 @@ add("CA 19-9", "ca 19-9", "ca 19.9", "ca19.9");
 
 export const NORMALIZE_TEST = map;
 
-// Strip embedded date suffix like "(13/12/2025)" or "(14/1/26)" before lookup.
-// Some lab reports embed the collection date in the test name itself.
 function stripEmbeddedDate(str) {
   return str.replace(/\s*\(\d{1,2}\/\d{1,2}\/\d{2,4}\)\s*$/i, "").trim();
 }

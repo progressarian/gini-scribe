@@ -78,8 +78,6 @@ export const doctorsWaitForTests = () =>
 export const pharmacyWaitsForRx = () =>
   manualFloor() && process.env.SCRIBE_PHARMACY_WAITS_FOR_RX !== "0";
 
-export const rxWaitsForCoordinator = () => process.env.SCRIBE_RX_WAITS_FOR_COORDINATOR === "1";
-
 export const bloodBeforeMachine = () => process.env.SCRIBE_BLOOD_BEFORE_MACHINE === "1";
 
 export const billTakesTestPayments = () => process.env.SCRIBE_BILL_TAKES_TEST_PAYMENTS === "1";

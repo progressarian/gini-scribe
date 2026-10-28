@@ -1,7 +1,3 @@
-// Builds an HTML document that exactly matches docs/archive/gini-examples.html
-// "Printed Prescription" layout. Used by the Puppeteer PDF generator. Keep CSS
-// in sync with that file (lines 9-115) when the design changes.
-
 import { TRENDS_CSS, biomarkerTrendsHtml } from "./prescriptionTrends.js";
 import { PARAM_TABLE_CSS, parameterTableHtml } from "./prescriptionParameterTable.js";
 import { readFileSync, readdirSync } from "node:fs";
@@ -19,15 +15,6 @@ const HOSPITAL_NAME = DEFAULT_HOSPITAL.name;
 const HOSPITAL_ADDRESS = DEFAULT_HOSPITAL.address;
 const HOSPITAL_PHONE = DEFAULT_HOSPITAL.phone;
 
-// The letterhead logo is read off disk once and inlined as a data URI: Puppeteer
-// renders the PDF with no network access to this server, so a src="/logo.png"
-// prints an empty box. Drop the artwork in templates/assets/ as logo.<ext> —
-// with no file there the header simply prints without it.
-//
-// That file is the white-knockout wordmark, not the app icon: the header band is
-// navy, and the icon's deep-blue lettering on its white tile reads as a sticker
-// pasted over the letterhead. public/brand/logo.png keeps the original colours
-// for light backgrounds.
 const LOGO_MIME = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
@@ -36,8 +23,6 @@ const LOGO_MIME = {
   ".webp": "image/webp",
 };
 
-// The shipped artwork, and the fallback whenever no logo has been uploaded from
-// Settings (services/prescriptionLogo.js) — so the letterhead is never blank.
 const assetDataUri = (prefix) => {
   const dir = join(dirname(fileURLToPath(import.meta.url)), "assets");
   try {
@@ -55,14 +40,6 @@ const assetDataUri = (prefix) => {
 export const DEFAULT_LOGO_DATA_URI = assetDataUri("logo");
 export const NABH_LOGO_DATA_URI = assetDataUri("nabh");
 
-// The closing strip — the services note the clinic used to rubber-stamp on the
-// printed Rx, set as part of the document instead. Navy to bookend the header,
-// so the page reads as designed rather than as a stamp added afterwards.
-// The wording is a setting, not a literal — admin edits it at
-// /admin/prescription-footer (services/prescriptionFooter.js). Rendering falls
-// back to that module's DEFAULT_FOOTER, so a prescription still prints its
-// strip if the lookup failed upstream. Any line left blank drops out entirely,
-// and with every line blank the strip itself does.
 function promoHtml(footer, logo = DEFAULT_LOGO_DATA_URI) {
   const lines = (footer?.serviceLines || []).map((l) => String(l).trim()).filter(Boolean);
   const appLine = String(footer?.appLine || "").trim();
@@ -87,9 +64,6 @@ function promoHtml(footer, logo = DEFAULT_LOGO_DATA_URI) {
   </div>`;
 }
 
-// One letterhead, two documents. The prescription and the referral letter print
-// the same header off this helper so a patient handed both cannot read them as
-// coming from two different hospitals.
 function letterheadHtml(docNameHtml, docCredHtml, logoDataUri = DEFAULT_LOGO_DATA_URI, hospital) {
   const hosp = normalizeHospital(hospital);
   const brand = logoDataUri
@@ -113,9 +87,6 @@ function letterheadHtml(docNameHtml, docCredHtml, logoDataUri = DEFAULT_LOGO_DAT
   </div>`;
 }
 
-// Strip "healthray:<id>" markers (and any trailing dash separator) from notes
-// so the printed Rx doesn't leak the upstream healthray reference. Mirrors
-// the displayNote() helper used by VisitDiagnoses.jsx.
 const cleanNote = (notes) => {
   if (!notes) return "";
   const trimmed = String(notes).trim();
@@ -126,10 +97,6 @@ const cleanNote = (notes) => {
   return trimmed.replace(/healthray:[\w-]+\s*[—–-]*\s*/gi, "").trim();
 };
 
-// Universal healthray-id scrubber — strips `healthray:<id>` (with or without
-// a trailing dash separator) from any string before it reaches the page, so
-// no upstream reference ID can leak into the printed Rx regardless of which
-// field it slipped into (label, notes, detail, indication, dosage text, etc).
 const stripHealthrayId = (s) => {
   if (s == null) return s;
   return String(s)
@@ -139,8 +106,6 @@ const stripHealthrayId = (s) => {
     .replace(/^[\s—–-]+|[\s—–-]+$/g, "");
 };
 
-// Returns null for values that should not be rendered: JS null, undefined, empty string,
-// or the literal string "null" that some DB columns contain when never set.
 const val = (v) => {
   if (v == null) return null;
   const s = String(v).trim();
@@ -366,10 +331,6 @@ const MED_GROUP_RANK = MED_CATEGORIES.reduce((acc, c) => {
   return acc;
 }, {});
 
-// Order the printed medicine list by the clinical sequence the consultants
-// review in — diabetes first, supplements last — so the printed Rx reads in the
-// same order as the diagnosis list above it. Child/support meds keep their
-// parent's position; they are pulled out by rank later, not sorted here.
 const sortMedsClinically = (meds) =>
   meds
     .map((m, i) => ({ m, i, rank: MED_GROUP_RANK[detectMedCategory(m)] ?? 45 }))
@@ -379,17 +340,11 @@ const sortMedsClinically = (meds) =>
 const splitMeds = (activeMeds = []) => {
   // Belt-and-braces: drop any stopped meds even if the client forgot to filter
   const live = activeMeds.filter((m) => m.is_active !== false);
-  // "external" is provenance, not a drug class: only external_doctor or an
-  // explicit med_group puts a medicine under another doctor's heading. It used
-  // to be inferred from urology drug names, which printed the treating doctor's
-  // own Urimax as somebody else's prescription.
   const ownMeds = sortMedsClinically(live.filter((m) => detectMedCategory(m) !== "external"));
   const externalMeds = live.filter((m) => detectMedCategory(m) === "external");
   return { ownMeds, externalMeds };
 };
 
-// Build a parent → children[] map so support / conditional medications render
-// nested under their parent instead of as independent numbered rows.
 const buildChildrenMap = (meds) => {
   const map = {};
   for (const m of meds) {
@@ -606,9 +561,6 @@ function buildPrescriptionHtml(data = {}) {
     workup = null,
   } = data;
 
-  // Every caller (client print, /visit route, sync auto-save) gets the same
-  // clinical sequence: diabetes, obesity, neuropathy, nephropathy, retinopathy,
-  // CAD, CVA, PVD, hypertension, hypercholesterolemia, MASLD, thyroid, rest.
   const activeDx = uniqueDiagnoses(sortDiagnoses(activeDxInput) || []);
   const goals = uniqueGoals(goalsInput || []);
   const history = writtenHistory || recordedHistory(patient, activeDx);
@@ -617,15 +569,6 @@ function buildPrescriptionHtml(data = {}) {
   const latestCon = consultations?.[0]?.con_data || {};
   const followUp = pickNextVisit([latestCon.follow_up, appt_plan?.follow_up]) || {};
   const _notEmpty = (arr) => (Array.isArray(arr) && arr.length > 0 ? arr : null);
-  // The doctor adds tests in two different places — "Order Labs" on /assess
-  // (investigations_to_order) and "Tests for Next Appointment" on the /visit
-  // plan (follow_up.tests_to_bring) — and older rows spell the same thing two
-  // more ways. Taking the first non-empty one meant whichever screen was used
-  // second printed nothing, so every consultation-side list is merged instead,
-  // deduped on the test name. The appointment stays a FALLBACK rather than
-  // another merge source: HealthRay names the same test differently ("FBG" vs
-  // "Fasting Blood Glucose"), which no name match would collapse, so merging it
-  // would print the same test twice.
   const testName = (t) => (typeof t === "string" ? t : t?.name || t?.test || "");
   const mergeTests = (...lists) => {
     const seen = new Set();
@@ -652,10 +595,6 @@ function buildPrescriptionHtml(data = {}) {
     ) ||
     _notEmpty(appt_plan?.investigations_to_order) ||
     [];
-  // FOLLOW UP WITH — free-text patient instructions for the next visit
-  // (fasting / tests to bring / preparations). Captured from prescription
-  // extraction or set inline on /visit. Printed as a dedicated section so the
-  // patient leaves the clinic with these instructions on paper.
   const followUpWith =
     [latestCon.follow_up_with, appt_plan?.follow_up_with]
       .map((v) => (typeof v === "string" ? v.trim() : ""))
@@ -691,12 +630,6 @@ function buildPrescriptionHtml(data = {}) {
   const labTests = split.labTests;
   const referrals = [...split.referrals, ...(Array.isArray(data.referrals) ? data.referrals : [])];
 
-  // ── Patient name and meta line
-  // Age and sex ride with the name in chart shorthand — "Pawan Kumar (61M)"
-  // reads as one fact to a doctor going through a stack. The line beneath
-  // identifies the document instead: UHID, then the date it was issued.
-  // Either half of the parenthetical can be missing, and with both absent the
-  // brackets go too.
   const sexInitial = String(patient.sex || "")
     .trim()
     .charAt(0)
@@ -721,16 +654,11 @@ function buildPrescriptionHtml(data = {}) {
     .filter(Boolean)
     .join(" · ");
 
-  // ── Doctor cred lines (qualification only; reg_no goes in footer)
   const credLines = [];
   if (doctor.qualification) credLines.push(escape(doctor.qualification));
   if (doctor.designation) credLines.push(escape(doctor.designation));
   const docCredHtml = credLines.join("<br>");
 
-  // ── Biomarker tag for a diagnosis. Renders a rich line like
-  //   "HbA1c 7.4% (↓ from 9.8% · target ≤ 7%)"
-  // showing current value, the change arrow vs. the oldest reading, the
-  // baseline value, and the clinical target (when one is defined).
   const findBioHistory = (names, limit = 6) => {
     if (!labResults?.length) return [];
     const out = [];
@@ -746,20 +674,12 @@ function buildPrescriptionHtml(data = {}) {
     }
     return out;
   };
-  // Format a numeric value with up to 1 decimal place, dropping trailing zeros.
   const fmtNum = (v) => {
     if (v == null || Number.isNaN(Number(v))) return String(v ?? "");
     const n = Number(v);
     if (Number.isInteger(n)) return String(n);
     return Number(n.toFixed(1)).toString();
   };
-  // Build the rich tag HTML for one biomarker.
-  //   label  e.g. "HbA1c"
-  //   unit   e.g. "%", " mg/dL", "" (include leading space if needed)
-  //   curr   current value (number)
-  //   first  baseline value (oldest known) — null if no history
-  //   target string like "≤ 7%" — null to omit
-  //   lowerIsBetter — direction for arrow color
   const renderBio = (label, unit, curr, first, target, lowerIsBetter = true) => {
     const cur = Number(curr);
     let arrowHtml = "";
@@ -868,11 +788,6 @@ function buildPrescriptionHtml(data = {}) {
     return null;
   };
 
-  // ── Diagnoses HTML
-  //   Title row : "<Name> (Since YYYY · Age of onset: N yrs)  [STATUS]"
-  //   Sub line  : "<Bio> (↓ from <baseline> · target <target>) · <Bio2> (...)"
-  // Mirrors the visit-page presentation: meta details inline with the name,
-  // biomarker readings with arrows + targets on a single sub-line below.
   const dxHtml = activeDx
     .map((d, i) => {
       const badge = statusBadge(d.status);
@@ -1247,9 +1162,6 @@ function buildPrescriptionHtml(data = {}) {
 </html>`;
 }
 
-// The letterhead is shared, not copied: the referral letter (19 §7.1) prints the
-// same `.rx-header` markup off the same CSS, so a letter and the prescription in
-// the same envelope cannot look like they came from two hospitals.
 export {
   buildPrescriptionHtml,
   escape as escapeHtml,
