@@ -179,6 +179,11 @@ const visitCategory = (a) => {
 const ARRIVAL_FILTERS = [
   { key: "all", label: "All", match: () => true },
   {
+    key: "for_appointment",
+    label: "🔔 Mark arrived for appointment",
+    match: (a) => Boolean(a.awaitsAppointment),
+  },
+  {
     key: "lab_only",
     label: "🧪 Lab only",
     match: (a) => a.samplesOnly || visitCategory(a)?.label === "Tests only",
@@ -2050,6 +2055,9 @@ function ArrivalRow({ arrival, children, note, warning, wide, showLabOnly }) {
           {arrival.name}
           {arrival.priority !== "normal" && <span className="badge b-red">{arrival.priority}</span>}
           {showLabOnly && arrival.samplesOnly && <span className="badge b-tl">🧪 Lab only</span>}
+          {arrival.awaitsAppointment && (
+            <span className="badge b-amb">🔔 Mark arrived for appointment</span>
+          )}
         </div>
         <div className="ar-meta">{identity(arrival)}</div>
         {arrival.homeCollection && <HomeSampleLine record={arrival.homeRecord} />}
@@ -2331,6 +2339,7 @@ export function ArrivalsTab({
   const searching = (data?.query || "").length >= 2;
   const { data: healthray } = useReceptionHealthray();
   const notInScribe = healthray?.notInScribe?.items || [];
+  const toMarkArrived = everyone.filter((a) => a.awaitsAppointment).length;
 
   return (
     <>
@@ -2374,6 +2383,27 @@ export function ArrivalsTab({
           ))}
         </div>
       </div>
+
+      {toMarkArrived > 0 && filterKey !== "for_appointment" && (
+        <div className="workflow-note is-warn" role="status">
+          <span className="wn-ico">🔔</span>
+          <span>
+            <strong>
+              {toMarkArrived} {toMarkArrived === 1 ? "patient needs" : "patients need"} “Arrived for
+              appointment”
+            </strong>{" "}
+            — tests are done and they are booked with a consultant. Mark them when they come back to
+            the desk.
+          </span>
+          <button
+            type="button"
+            className="st-btn st-btn-g"
+            onClick={() => setFilterKey("for_appointment")}
+          >
+            Show them
+          </button>
+        </div>
+      )}
 
       {walkIn && (
         <WalkInPanel
@@ -2782,6 +2812,7 @@ function ReceptionTabs({
   setTab,
   deskTabs,
   arrivalsCount,
+  toMarkArrivedCount,
   paymentsCount,
   refundsCount,
   requestsCount,
@@ -2798,6 +2829,15 @@ function ReceptionTabs({
         onClick={() => setTab(TAB.arrivals)}
       >
         Arrivals <span className="st-tab-n">{arrivalsCount}</span>
+        {toMarkArrivedCount > 0 && (
+          <span
+            className="st-tab-n st-tab-n--alert"
+            aria-label={`${toMarkArrivedCount} to mark arrived for appointment`}
+            title="Tests done and booked with a consultant — mark “Arrived for appointment”"
+          >
+            🔔 {toMarkArrivedCount}
+          </span>
+        )}
       </button>
       {deskTabs.map((entry) => (
         <button
@@ -3148,6 +3188,13 @@ export default function ReceptionStationPage() {
       setTab={setTab}
       deskTabs={desk.deskTabs}
       arrivalsCount={counts.expected}
+      toMarkArrivedCount={
+        [
+          ...(arrivals?.expected || []),
+          ...(arrivals?.onFloor || []),
+          ...(arrivals?.notComing || []),
+        ].filter((a) => a.awaitsAppointment).length
+      }
       paymentsCount={payCounts.pending}
       refundsCount={refundsToPay}
       requestsCount={approvals.total}

@@ -853,6 +853,10 @@
   color: var(--amb);
   align-items: flex-start;
 }
+.gf .workflow-note > .st-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+}
 .gf .nis-list {
   margin: 6px 0 0;
   padding-left: 16px;
