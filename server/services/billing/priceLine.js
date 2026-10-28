@@ -329,6 +329,7 @@ export async function priceLine(input = {}, db = pool) {
     date: line.date,
     role: input.role,
     codesOnBill,
+    autoCodes: input.autoCodes ?? [],
   };
   const fullPay = payment.patient_pays === "full";
   const { rules, refused } = await lineDiscountRules(

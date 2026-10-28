@@ -3,9 +3,11 @@ import { billingVisitType } from "../../../shared/billingVisitType.js";
 import { paise } from "../../../shared/labPayment.js";
 import {
   CONSULTATION_VISIT_TYPES,
+  HOME_COLLECTION_CODE,
   RESERVED_CATEGORY_CODES,
   VISIT_TYPES,
 } from "../../../shared/billingVocab.js";
+import { isHomeCollectionVisit } from "../giniflow/homeCollection.js";
 import { getSettings } from "./billingSettings.js";
 import { indiaToday, normalizeGender, resolveCategoryFor } from "./categoryResolver.js";
 import { cleanDate, wholeNumber } from "./common.js";
@@ -297,10 +299,12 @@ async function admitCodes({ codes, context, lineInputs, settings }, db) {
   const lineCodes = probed.filter((p) => p.rule.applies_per !== "bill").map((p) => p.code);
   const priced = await priceWithCodes(lineInputs, lineCodes, db);
   const max = settings.max_codes_per_bill;
+  const isAuto = (code) => (context.autoCodes ?? []).some((auto) => sameCode(auto, code));
   const admitted = [];
   for (const { code, rule } of probed) {
-    if (max !== null && admitted.length >= max) {
-      refused.push(crowdedRefusal(code, max, admitted.length));
+    const typed = admitted.filter((entry) => !isAuto(entry.code)).length;
+    if (!isAuto(code) && max !== null && typed >= max) {
+      refused.push(crowdedRefusal(code, max, typed));
       continue;
     }
     const outcome =
@@ -537,11 +541,18 @@ function totalsOf(lines) {
 const appointmentVisitType = (appointment) =>
   appointment ? (billingVisitType(appointment.visit_type) ?? NO_CONSULTATION_VISIT) : null;
 
+async function autoCodesFor(input, db) {
+  if (!input.visitId || input.homeCodeRemoved) return [];
+  return (await isHomeCollectionVisit(input.visitId, db)) ? [HOME_COLLECTION_CODE] : [];
+}
+
 export async function priceBill(input = {}, source = pool) {
   if (!isObject(input)) throw httpError(400, "A bill must be an object");
   const db = readOnce(source);
   const lineList = cleanLines(input.lines);
-  const codes = cleanCodes(input.codes);
+  const autoCodes = await autoCodesFor(input, db);
+  const isAuto = (code) => autoCodes.some((auto) => sameCode(auto, code));
+  const codes = [...cleanCodes(input.codes).filter((code) => !isAuto(code)), ...autoCodes];
   const date = cleanDate(input.date, "Date") ?? indiaToday();
   const settings = await getSettings(db);
   const who = await billWho(input, date, db);
@@ -549,7 +560,15 @@ export async function priceBill(input = {}, source = pool) {
   const visitType = input.visitType ?? appointmentVisitType(who.appointment);
   const doctorId = input.doctorId ?? who.appointment?.doctor_id ?? null;
   const draftRule = cleanDraftRule(input.draftRule);
-  const base = { category, date, patient: who.patient, role: input.role, settings, draftRule };
+  const base = {
+    category,
+    date,
+    patient: who.patient,
+    role: input.role,
+    settings,
+    draftRule,
+    autoCodes,
+  };
   const lineManuals = lineList.map((line, index) =>
     cleanManualDiscount(line.manualDiscount, `Line ${index + 1}'s discount`),
   );
@@ -564,7 +583,14 @@ export async function priceBill(input = {}, source = pool) {
     agreedRate: line.agreedRate ?? null,
   }));
   await primeLineItems(lineInputs, db);
-  const context = { category, patient: who.patient, date, role: input.role, codesOnBill: 0 };
+  const context = {
+    category,
+    patient: who.patient,
+    date,
+    role: input.role,
+    codesOnBill: 0,
+    autoCodes,
+  };
   const { admitted, refused, priced, lineCodes } = await admitCodes(
     { codes, context, lineInputs, settings },
     db,
@@ -604,15 +630,22 @@ export async function priceBill(input = {}, source = pool) {
       gst_enabled: settings.gst_enabled,
       max_codes_per_bill: settings.max_codes_per_bill,
     },
-    lines,
-    applied_codes: admitted.map(({ code, rule }) => ({
-      code,
-      rule_id: rule.id,
-      name: rule.name,
-      applies_per: rule.applies_per,
-      amount: takenBy(rule.id, lines),
-    })),
-    refused_codes: refused,
+    lines: lines.map((line) =>
+      line.refused_codes
+        ? { ...line, refused_codes: line.refused_codes.filter((entry) => !isAuto(entry.code)) }
+        : line,
+    ),
+    applied_codes: admitted
+      .map(({ code, rule }) => ({
+        code,
+        rule_id: rule.id,
+        name: rule.name,
+        applies_per: rule.applies_per,
+        amount: takenBy(rule.id, lines),
+        auto: isAuto(code),
+      }))
+      .filter((entry) => !entry.auto || entry.amount > 0),
+    refused_codes: refused.filter((entry) => !isAuto(entry.code)),
     bill_discounts: steps.map(({ rule, amount, shares }) => ({
       ...stepOf(rule, amount),
       line_nos: shares.map((s) => s.index + 1),

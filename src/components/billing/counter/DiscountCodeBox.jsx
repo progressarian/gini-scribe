@@ -7,6 +7,7 @@ import {
   useSuggestedCodes,
 } from "../../../queries/hooks/useBilling";
 import { codeTyped, errorOf, fromPaise } from "../format";
+import { HOME_COLLECTION_CODE } from "../../../../shared/billingVocab.js";
 import FinalBillDiscount from "./FinalBillDiscount";
 import ManualDiscountFields, {
   discountDraft,
@@ -23,6 +24,8 @@ export default function DiscountCodeBox({ bill, onBill, form, patient }) {
   const setBillDiscount = useSetBillDiscount();
   const [extra, setExtra] = useState(null);
   const [extraError, setExtraError] = useState(null);
+  const [confirmHome, setConfirmHome] = useState(false);
+  const isHome = (entered) => entered.toLowerCase() === HOME_COLLECTION_CODE.toLowerCase();
   const manual = bill.manual_discount;
   const manualTotal = (bill.discounts || [])
     .filter((entry) => entry.method === "manual")
@@ -42,7 +45,8 @@ export default function DiscountCodeBox({ bill, onBill, form, patient }) {
     );
   const chipText = (entered) => {
     const detail = detailOf(entered);
-    return detail ? `${entered} · ${detail.name} · ${fromPaise(detail.amount)} off` : entered;
+    const label = isHome(entered) ? `${entered} (auto)` : entered;
+    return detail ? `${label} · ${detail.name} · ${fromPaise(detail.amount)} off` : label;
   };
 
   const applyCode = async (wanted, typed) => {
@@ -85,6 +89,7 @@ export default function DiscountCodeBox({ bill, onBill, form, patient }) {
   const drop = async (entered) => {
     setAccepted(null);
     setRefused(null);
+    setConfirmHome(false);
     try {
       onBill(
         await removeCode.mutateAsync({ billId: bill.id, visitId: bill.visit_id, code: entered }),
@@ -174,7 +179,7 @@ export default function DiscountCodeBox({ bill, onBill, form, patient }) {
                   className="bc-chip__x"
                   aria-label={`Remove ${entered}`}
                   disabled={removeCode.isPending}
-                  onClick={() => drop(entered)}
+                  onClick={() => (isHome(entered) ? setConfirmHome(true) : drop(entered))}
                 >
                   ×
                 </button>
@@ -182,6 +187,36 @@ export default function DiscountCodeBox({ bill, onBill, form, patient }) {
             </li>
           ))}
         </ul>
+      )}
+
+      {confirmHome && draft && (
+        <div className="bc-mdisc__current" role="alertdialog" aria-label="Remove home discount">
+          <span>
+            Remove the home-collection discount
+            {detailOf(HOME_COLLECTION_CODE)
+              ? ` (${fromPaise(detailOf(HOME_COLLECTION_CODE).amount)})`
+              : ""}{" "}
+            from this bill? It stays off this bill until the code is entered again.
+          </span>
+          <button
+            type="button"
+            className="st-btn st-btn-red"
+            disabled={removeCode.isPending}
+            onClick={() => drop(HOME_COLLECTION_CODE)}
+          >
+            Remove discount
+          </button>
+          <button type="button" className="st-btn st-btn-g" onClick={() => setConfirmHome(false)}>
+            Keep
+          </button>
+        </div>
+      )}
+
+      {draft && bill.home_code_removed && (
+        <div className="bc-hint">
+          Home-collection discount removed from this bill. Enter {HOME_COLLECTION_CODE} to add it
+          back.
+        </div>
       )}
 
       {!!automatic.length && (

@@ -810,6 +810,9 @@ async function matchFacts(line, context, db) {
     date: cleanDate(context?.date, "Date") ?? indiaToday(),
     role: typeof context?.role === "string" ? context.role : null,
     codesOnBill: codesOnBill ?? 0,
+    autoCodes: Array.isArray(context?.autoCodes)
+      ? context.autoCodes.map((code) => String(code).toLowerCase())
+      : [],
   };
 }
 
@@ -927,10 +930,13 @@ const refuse = (reason, details) => ({ ok: false, reason, message: MESSAGES[reas
 
 async function codeMiss(rule, facts, db) {
   if (!rule.is_active) return { reason: "inactive" };
-  if (!(rule.allowed_roles ?? BILLING_ROLES).includes(facts.role)) return { reason: "role" };
+  const auto = facts.autoCodes.includes(String(rule.code).toLowerCase());
+  if (!auto && !(rule.allowed_roles ?? BILLING_ROLES).includes(facts.role)) {
+    return { reason: "role" };
+  }
   if (rule.valid_from !== null && facts.date < rule.valid_from) return { reason: "not_yet_valid" };
   if (rule.valid_to !== null && facts.date > rule.valid_to) return { reason: "expired" };
-  const crowded = await tooManyCodes(facts.codesOnBill, db);
+  const crowded = auto ? null : await tooManyCodes(facts.codesOnBill, db);
   if (crowded) return { reason: "too_many_codes", ...crowded };
   const reason = ruleMiss(rule, facts);
   if (reason === "doctor") return { reason, names: await doctorNames(db, rule.doctor_ids) };

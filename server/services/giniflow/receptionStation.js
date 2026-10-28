@@ -1,7 +1,7 @@
 import pool from "../../config/db.js";
 import { draftAtCheckIn, refuseOrderOnBill } from "../billing/visitLines.js";
 import { billTakesTestPayments } from "../../../shared/manualFloor.js";
-import { catalogBasePriceSql, consultationRateJoinSql } from "../pricing.js";
+import { catalogBasePriceSql, consultationRateJoinSql, testPricesFor } from "../pricing.js";
 import {
   BACK_FOR_TESTS,
   STATUS_LABEL,
@@ -70,7 +70,7 @@ import {
 // that log, not from a status column that only shows the present.
 
 const ORDER_SELECT = `
-  SELECT o.id, o.visit_id, o.urgency, o.payment_status, o.sample_status, o.kind,
+  SELECT o.id, o.visit_id, o.urgency, o.payment_status, o.sample_status, o.kind, o.scheme_code,
          o.amount_total, o.amount_paid, o.amount_claimed, o.created_at, o.updated_at,
          o.insurer, o.policy_no, o.claim_no, o.claim_state, o.claim_note, o.version,
          p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
@@ -319,14 +319,37 @@ const shapeHealthrayLab = (r) => ({
   homeSample: homeSampleOf(r),
 });
 
+async function homeDiscountsOf(rows, db) {
+  const home = rows.filter((r) => r.home_collection && r.kind === "lab" && !r.bill_items);
+  const out = new Map();
+  if (!home.length) return out;
+  const listed = new Map();
+  for (const scheme of new Set(home.map((r) => r.scheme_code || null))) {
+    const names = home
+      .filter((r) => (r.scheme_code || null) === scheme)
+      .flatMap((r) => (r.tests || []).map((t) => t.name));
+    listed.set(scheme, await testPricesFor(names, scheme, db));
+  }
+  for (const r of home) {
+    const full = listed.get(r.scheme_code || null);
+    const off = (r.tests || [])
+      .filter((t) => full[t.name] !== undefined && full[t.name] !== null)
+      .reduce((sum, t) => sum + paise(full[t.name]) - paise(t.price), 0);
+    if (off > 0) out.set(r.id, rupeesFromPaise(off));
+  }
+  return out;
+}
+
 export async function getPaymentQueue(visitDate, db = pool, { q = "" } = {}) {
   const { rows } = await db.query(`${ORDER_SELECT} ORDER BY o.created_at`, [visitDate]);
   const machines = await getMachines(db);
+  const homeDiscounts = await homeDiscountsOf(rows, db);
   const allOrders = rows.map((r) => {
     const bill = { items: r.bill_items || [] };
     const discountOn = billDiscountOn(bill, machines);
     return {
       ...shape(r),
+      homeDiscount: homeDiscounts.get(r.id) ?? 0,
       billLine:
         r.kind === "machine" ? combinedBillLineOf(bill, machines)(r.tests?.[0]?.name) : null,
       billDiscount: discountOn(

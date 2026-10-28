@@ -15,7 +15,12 @@ import {
 import { normalizeGender, resolveCategoryFor } from "./categoryResolver.js";
 import { testsAfterConsult } from "./afterConsult.js";
 import { cghsSubForReferral, startingCghsSub } from "../../../shared/cghsSubCategory.js";
-import { FOLLOW_UP_WITHIN_DAYS, RECENT_FOLLOW_UP } from "../../../shared/billingVocab.js";
+import {
+  FOLLOW_UP_WITHIN_DAYS,
+  HOME_COLLECTION_CODE,
+  RECENT_FOLLOW_UP,
+} from "../../../shared/billingVocab.js";
+import { columnReady } from "../slots/readiness.js";
 import { checkCode } from "./discountRules.js";
 import { issuedGstReady } from "./issuedGst.js";
 import { assertBillLineBalances } from "./lineInvariant.js";
@@ -517,8 +522,35 @@ async function saveTotals(client, bill, totals, ctx) {
   return rows[0];
 }
 
-const pricingInput = (bill, lines, codes, ctx) => ({
+const homeRemovalReady = columnReady("bills", "home_code_removed_at");
+
+async function markHomeCode(client, billId, removedBy) {
+  if (!(await homeRemovalReady())) {
+    throw httpError(
+      409,
+      "Removing the home-collection discount needs a database update first. Ask an administrator to run its migration.",
+    );
+  }
+  await client.query(
+    `UPDATE bills SET home_code_removed_at = CASE WHEN $2 THEN NOW() END,
+            home_code_removed_by = CASE WHEN $2 THEN $3::int END
+      WHERE id = $1`,
+    [billId, removedBy !== undefined, removedBy ?? null],
+  );
+}
+
+async function homeCodeRemoved(db, billId) {
+  if (!billId) return false;
+  const { rows } = await db.query(
+    `SELECT to_jsonb(b)->>'home_code_removed_at' AS removed_at FROM bills b WHERE b.id = $1`,
+    [billId],
+  );
+  return !!rows[0]?.removed_at;
+}
+
+const pricingInput = (bill, lines, codes, ctx, { removed = false } = {}) => ({
   patientId: bill.patient_id,
+  ...(bill.visit_id ? { visitId: bill.visit_id, homeCodeRemoved: removed } : {}),
   ...(bill.appointment_id ? { appointmentId: bill.appointment_id } : {}),
   category: bill.scheme_code,
   date: bill.bill_date,
@@ -540,7 +572,8 @@ async function reprice(client, bill, codes, ctx) {
   if (!lines.length) {
     return { priced: null, lines: [], bill: await saveTotals(client, bill, ZERO_TOTALS, ctx) };
   }
-  const priced = await priceBill(pricingInput(bill, lines, codes, ctx), client);
+  const removed = await homeCodeRemoved(client, bill.id);
+  const priced = await priceBill(pricingInput(bill, lines, codes, ctx, { removed }), client);
   priced.lines.forEach(assertBillLineBalances);
   const { rows: highest } = await client.query(
     `SELECT COALESCE(MAX(line_no), 0) AS top FROM bill_lines WHERE bill_id = $1`,
@@ -561,6 +594,20 @@ async function reprice(client, bill, codes, ctx) {
     ctx,
     bill.manual_discount_by ?? null,
   );
+  const auto = priced.applied_codes.find((entry) => entry.auto);
+  if (auto && !codes.some((code) => sameCode(code, auto.code))) {
+    await writeAudit(client, {
+      entity: SPEC.table,
+      entityId: bill.id,
+      action: "update",
+      before: { codes },
+      after: {
+        codes: [...codes, auto.code],
+        reason: "Home collection discount applied automatically",
+      },
+      ...auditFields(ctx),
+    });
+  }
   return { priced, lines, bill: await saveTotals(client, bill, priced.totals, ctx) };
 }
 
@@ -594,16 +641,18 @@ async function billManualOf(client, row) {
 }
 
 async function withLines(client, row, extra = {}) {
-  const [lines, discounts, manualDiscount, consultant] = await Promise.all([
+  const [lines, discounts, manualDiscount, consultant, homeRemoved] = await Promise.all([
     shownLines(client, row.id, { all: showsEveryLine(row) }),
     billDiscounts(client, row.id),
     billManualOf(client, row),
     billConsultantOf(client, row.id),
+    homeCodeRemoved(client, row.id),
   ]);
   return shapeBill(row, lines, {
     discounts,
     manual_discount: manualDiscount,
     consultant,
+    home_code_removed: homeRemoved,
     ...extra,
   });
 }
@@ -700,6 +749,7 @@ export async function priceUnsavedDraft(client, visitId, lines, ctx) {
   const category = await startingCategory(client, resolution);
   const bill = {
     patient_id: visit.patient_id,
+    visit_id: visitId,
     appointment_id: visit.appointment_id,
     scheme_code: category.code,
     bill_date: visit.visit_date,
@@ -733,7 +783,10 @@ async function catchUpPrices(client, bill, ctx) {
   const codes = await billCodes(client, bill.id);
   let priced;
   try {
-    priced = await priceBill(pricingInput(bill, lines, codes, ctx), client);
+    priced = await priceBill(
+      pricingInput(bill, lines, codes, ctx, { removed: await homeCodeRemoved(client, bill.id) }),
+      client,
+    );
   } catch (error) {
     if (error.status) return { bill, changes: null };
     throw error;
@@ -1559,6 +1612,9 @@ export async function addCode(billId, input, ctx, db = pool) {
     if (codes.some((entered) => sameCode(entered, code))) {
       throw httpError(409, `The code ${code} is already on this bill`);
     }
+    if (sameCode(code, HOME_COLLECTION_CODE) && (await homeCodeRemoved(client, bill.id))) {
+      await markHomeCode(client, bill.id);
+    }
     const saved = await reprice(client, bill, [...codes, code], ctx);
     if (!saved.priced) throw httpError(409, "Add an item before entering a discount code");
     const applied = saved.priced.applied_codes.find((entry) => sameCode(entry.code, code));
@@ -1605,12 +1661,14 @@ export async function suggestCodes(billId, ctx, db = pool) {
     [bill.bill_date, onBill.map((code) => code.toLowerCase())],
   );
   if (!rules.length) return { codes: [] };
-  const base = await priceBill(pricingInput(bill, lines, onBill, ctx), db);
+  const removed = await homeCodeRemoved(db, id);
+  const base = await priceBill(pricingInput(bill, lines, onBill, ctx, { removed }), db);
   const found = [];
   for (const { code } of rules) {
-    const priced = await priceBill(pricingInput(bill, lines, [...onBill, code], ctx), db).catch(
-      () => null,
-    );
+    const priced = await priceBill(
+      pricingInput(bill, lines, [...onBill, code], ctx, { removed }),
+      db,
+    ).catch(() => null);
     if (!priced) continue;
     const applied = priced.applied_codes.find((entry) => sameCode(entry.code, code));
     const saves = base.totals.payable - priced.totals.payable;
@@ -1676,13 +1734,18 @@ export async function removeCode(billId, input, ctx, db = pool) {
       throw httpError(404, `The code ${code} isn't on this bill`);
     }
     const kept = codes.filter((entered) => !sameCode(entered, code));
+    const home = sameCode(code, HOME_COLLECTION_CODE);
+    if (home) await markHomeCode(client, bill.id, ctx?.actorId ?? null);
     const saved = await reprice(client, bill, kept, ctx);
     await writeAudit(client, {
       entity: SPEC.table,
       entityId: bill.id,
       action: "update",
       before: { codes },
-      after: { codes: kept },
+      after: {
+        codes: kept,
+        ...(home ? { reason: "Home collection discount removed from this bill" } : {}),
+      },
       ...auditFields(ctx),
     });
     return withLines(client, saved.bill, { codes: await billCodes(client, bill.id) });

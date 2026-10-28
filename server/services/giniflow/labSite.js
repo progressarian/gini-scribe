@@ -5,6 +5,7 @@ import { publish } from "./eventHub.js";
 import { publishEvents } from "./realtimeBus.js";
 import { logAppointmentEvent } from "../appointmentHistory.js";
 import { LIVE_LAB_CASE_SQL } from "./testsHold.js";
+import { repriceOpenLabOrders } from "./homeOrderPrices.js";
 
 export const LAB_SITES = ["home", "ghm"];
 const CLOSED_STATUSES = ["no_show", "cancelled"];
@@ -154,6 +155,7 @@ export async function setLabSite(
         actor: { id: actorId, name: actorName },
       });
     }
+    await repriceOpenLabOrders(client, row.id);
     await client.query("COMMIT");
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
@@ -175,4 +177,14 @@ export async function followBookingTag(appointment, db = pool) {
       WHERE patient_id = $1 AND visit_date = $2::date AND lab_site IS NOT NULL`,
     [appointment.patient_id, appointment.appointment_date],
   );
+  const { rows } = await db.query(
+    `SELECT id FROM giniflow_visits
+      WHERE patient_id = $1 AND visit_date = $2::date AND merged_into_visit_id IS NULL`,
+    [appointment.patient_id, appointment.appointment_date],
+  );
+  for (const { id } of rows) {
+    await repriceOpenLabOrders(db, id).catch((e) =>
+      console.warn("[lab site] home-collection reprice failed:", e.message),
+    );
+  }
 }

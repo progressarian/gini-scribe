@@ -44,7 +44,7 @@ import {
 } from "../../../shared/journeyOrder.js";
 import { getMachines } from "./machineCatalog.js";
 import { addMachineTestOn } from "./machineStation.js";
-import { testPricesFor, schemeForVisit } from "../pricing.js";
+import { testPricesFor, schemeForVisit, withHomeDiscount } from "../pricing.js";
 import {
   LIVE_LAB_CASE_SQL,
   caseFromEarlierLabOnlyVisit,
@@ -526,7 +526,9 @@ export async function raiseOrdersFromSteps(client, visitId, steps, actorId = nul
     // row, so a card corrected next week cannot re-price a settled order.
     const schemeCode = await schemeForVisit(visitId, client);
     const priceOf = {
-      ...(picked.length ? await testPricesFor(picked, schemeCode, client) : {}),
+      ...(picked.length
+        ? await withHomeDiscount(visitId, await testPricesFor(picked, schemeCode, client), client)
+        : {}),
       ...Object.fromEntries(billed),
     };
     const unknown = wantedTests.filter((n) => priceOf[n] === undefined);

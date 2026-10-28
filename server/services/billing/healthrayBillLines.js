@@ -9,6 +9,8 @@ import { httpError, inTransaction } from "./transaction.js";
 import { addLineIn, addLinesToDraftIn, openDraftIn } from "./bills.js";
 import { REMOVED_BY_DESK_SQL, suggestionPrice } from "./visitLines.js";
 import { isLiveBillItem } from "../giniflow/patientBill.js";
+import { getMachines } from "../giniflow/machineCatalog.js";
+import { machineForTest, machinesOnBillLine } from "../../../shared/machineStages.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -95,7 +97,37 @@ async function candidatesFor(db, bill) {
   return { readAt: stored[0].read_at, ...(await matchLines(db, bill, lines)) };
 }
 
-export async function matchLines(db, bill, lines) {
+async function coveredByBilledMachines(db, visitId) {
+  if (!visitId) return () => false;
+  const machines = await getMachines(db);
+  const { rows } = await db.query(
+    `SELECT t.test_name
+       FROM bill_lines l
+       JOIN bills b ON b.id = l.bill_id AND b.status <> 'cancelled'
+       JOIN giniflow_lab_orders o ON o.id = l.lab_order_id AND o.kind = 'machine'
+       JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
+      WHERE l.visit_id = $1 AND l.is_live
+     UNION
+     SELECT c.test_name
+       FROM bill_lines l
+       JOIN bills b ON b.id = l.bill_id AND b.status <> 'cancelled'
+       JOIN service_items i ON i.id = l.service_item_id
+       JOIN giniflow_test_catalog c ON c.id = i.test_catalog_id AND c.category = 'machine'
+      WHERE l.visit_id = $1 AND l.is_live`,
+    [visitId],
+  );
+  const billed = new Set(
+    rows.map((row) => machineForTest(machines, row.test_name)?.id).filter(Boolean),
+  );
+  return (desc) => {
+    const onLine = machinesOnBillLine(machines, desc);
+    return onLine.length > 1 && onLine.every((id) => billed.has(id));
+  };
+}
+
+export async function matchLines(db, bill, allLines) {
+  const covered = await coveredByBilledMachines(db, bill.visit_id);
+  const lines = allLines.filter((line) => !covered(line.desc));
   const matched = await itemsFor(
     db,
     lines.map((line) => line.desc),

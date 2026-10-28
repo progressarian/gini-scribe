@@ -1,6 +1,10 @@
 import pool from "../config/db.js";
 import { billingVisitTypeSql } from "../../shared/billingVisitType.js";
 import { indiaToday } from "./billing/categoryResolver.js";
+import { applyDiscounts } from "./billing/lineDiscounts.js";
+import { isHomeCollectionVisit } from "./giniflow/homeCollection.js";
+import { HOME_COLLECTION_CODE } from "../../shared/billingVocab.js";
+import { paise } from "../../shared/labPayment.js";
 
 // ============================================================================
 // Scheme pricing (33-PATIENT-SCHEME-PLAN.md §4, rule R3).
@@ -117,4 +121,49 @@ export async function testPriceForVisit(visitId, testName, db = pool) {
   const name = rows[0].test_name;
   const prices = await testPricesFor([name], await schemeForVisit(visitId, db), db);
   return prices[name] ?? null;
+}
+
+const ruleCovers = (rule, item) => {
+  const targets = [
+    [rule.group_ids, item.group_id],
+    [rule.subgroup_ids, item.subgroup_id],
+    [rule.service_item_ids, item.id],
+  ].filter(([ids]) => ids?.length);
+  return !targets.length || targets.some(([ids, id]) => ids.includes(id));
+};
+
+export async function withHomeDiscount(visitId, priceOf, db = pool, date = indiaToday()) {
+  const names = Object.keys(priceOf || {});
+  if (!visitId || !names.length) return priceOf;
+  if (!(await isHomeCollectionVisit(visitId, db))) return priceOf;
+  const { rows: rules } = await db.query(
+    `SELECT id, name, kind, value, max_discount, priority, stackable,
+            group_ids, subgroup_ids, service_item_ids
+       FROM discount_rules
+      WHERE method = 'code' AND lower(code) = lower($1) AND is_active AND kind <> 'fixed_price'
+        AND (valid_from IS NULL OR valid_from <= $2::date)
+        AND (valid_to IS NULL OR valid_to >= $2::date)
+      LIMIT 1`,
+    [HOME_COLLECTION_CODE, date],
+  );
+  if (!rules.length) return priceOf;
+  const rule = { ...rules[0], applies_per: "line" };
+  const { rows: items } = await db.query(
+    `SELECT c.test_name, i.id, i.subgroup_id, sg.group_id
+       FROM giniflow_test_catalog c
+       JOIN service_items i ON i.test_catalog_id = c.id AND i.is_active
+       JOIN service_subgroups sg ON sg.id = i.subgroup_id
+      WHERE c.test_name = ANY($1::text[])`,
+    [names],
+  );
+  const out = { ...priceOf };
+  for (const item of items) {
+    const price = out[item.test_name];
+    if (price === null || price === undefined || !(Number(price) > 0) || !ruleCovers(rule, item))
+      continue;
+    const actual = paise(price);
+    const { discount } = applyDiscounts({ actual, rules: [rule], stacking: "best_only" });
+    out[item.test_name] = (actual - discount) / 100;
+  }
+  return out;
 }

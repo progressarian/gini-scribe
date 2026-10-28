@@ -9,6 +9,7 @@ export const DISCOUNT_KINDS = ["percent", "flat", "fixed_price"];
 export const PATIENT_PAYS = ["full", "amount", "percent", "nothing"];
 export const REMAINDERS = ["claim", "adjustment"];
 export const DISCOUNT_METHODS = ["auto", "code"];
+export const HOME_COLLECTION_CODE = "HMCOL10";
 export const CATEGORY_RULE_MODES = ["suggest", "auto"];
 export const FOLLOW_UP_WITHIN_DAYS = 3;
 export const RECENT_FOLLOW_UP = "Follow Up (3 days)";

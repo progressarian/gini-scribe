@@ -14,6 +14,7 @@ import {
   testPricesFor,
   testCategoriesFor,
   schemeForVisit,
+  withHomeDiscount,
 } from "../pricing.js";
 import {
   BACK_FOR_TESTS,
@@ -722,6 +723,16 @@ export async function getTestPanels(db = pool, visitId = null) {
         db,
       )
     : {};
+  const listed = Object.fromEntries(
+    tests.map((t) => {
+      const scheme = schemePrices[t.test_name];
+      return [
+        t.test_name,
+        scheme === undefined || scheme === null ? Number(t.price) : Number(scheme),
+      ];
+    }),
+  );
+  const homePrices = visitId ? await withHomeDiscount(visitId, listed, db) : listed;
   return {
     panels: panels.map((p) => ({
       key: p.panel_key,
@@ -731,16 +742,16 @@ export async function getTestPanels(db = pool, visitId = null) {
     })),
     // The gloss is why an MO picks a test, so it travels with the price.
     tests: tests.map((t) => {
-      const scheme = schemePrices[t.test_name];
-      const price = scheme === undefined || scheme === null ? Number(t.price) : Number(scheme);
+      const price = homePrices[t.test_name];
       return {
         name: t.test_name,
         price,
+        homeDiscounted: price !== listed[t.test_name],
         gloss: t.gloss,
         // The picker can say WHY a price differs from the usual one, instead of
         // the MO wondering whether the list is wrong.
         basePrice: Number(t.price),
-        schemePriced: price !== Number(t.price),
+        schemePriced: listed[t.test_name] !== Number(t.price),
         uses: usesByName.get(t.test_name) || 0,
       };
     }),
@@ -811,7 +822,11 @@ export async function orderTests(
     // Override if the scheme has one for this test, else the catalogue price.
     // Every override table is empty until the hospital's rate card lands, so
     // today this returns exactly the base prices it always did.
-    const priceOf = await testPricesFor(catalogueNames, schemeCode, client);
+    const priceOf = await withHomeDiscount(
+      visitId,
+      await testPricesFor(catalogueNames, schemeCode, client),
+      client,
+    );
     const uncatalogued = catalogueNames.filter((name) => priceOf[name] === undefined);
     if (uncatalogued.length)
       throw Object.assign(new Error(`Not in the test catalogue: ${uncatalogued.join(", ")}`), {

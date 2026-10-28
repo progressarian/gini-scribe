@@ -377,6 +377,9 @@ function OrderCard({ order, onClear, pending, actorId, onCancelTest, canCancelTe
         {order.billDiscount > 0 && (
           <span className="toc-part">{rupees(order.billDiscount)} HealthRay discount</span>
         )}
+        {order.homeDiscount > 0 && (
+          <span className="toc-part">{rupees(order.homeDiscount)} home-collection discount</span>
+        )}
         {order.paid > 0 && <span className="toc-part">Collected {rupees(order.paid)}</span>}
         {order.claimed > 0 && (
           <span className="toc-part">
