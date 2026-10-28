@@ -123,6 +123,26 @@ export async function testPriceForVisit(visitId, testName, db = pool) {
   return prices[name] ?? null;
 }
 
+export async function testPricesForVisit(visitId, testNames, db = pool) {
+  const wanted = [...new Set((testNames || []).filter(Boolean))];
+  if (!wanted.length) return {};
+  const { rows } = await db.query(
+    `SELECT DISTINCT ON (w.name) w.name AS wanted, c.test_name
+       FROM unnest($1::text[]) AS w(name)
+       JOIN giniflow_test_catalog c
+         ON UPPER(c.test_name) = UPPER(w.name) AND COALESCE(c.is_active, TRUE)
+      ORDER BY w.name, c.test_name`,
+    [wanted],
+  );
+  if (!rows.length) return {};
+  const prices = await testPricesFor(
+    rows.map((row) => row.test_name),
+    await schemeForVisit(visitId, db),
+    db,
+  );
+  return Object.fromEntries(rows.map((row) => [row.wanted, prices[row.test_name] ?? null]));
+}
+
 const ruleCovers = (rule, item) => {
   const targets = [
     [rule.group_ids, item.group_id],

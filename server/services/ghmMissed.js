@@ -48,7 +48,7 @@ const attendedSince = (m, sinceDay) => `(EXISTS (
      AND ${NOT_LAB_ONLY("xp")})
   OR (${m}.file_no LIKE 'GNI-%' AND length(${m}.phone10) = 10 AND EXISTS (
   SELECT 1 FROM appointments xg
-   WHERE xg.phone LIKE '%' || ${m}.phone10
+   WHERE RIGHT(xg.phone, 10) = ${m}.phone10
      AND xg.appointment_date > ${sinceDay}
      AND xg.status IN ${ATTENDED}
      AND ${NOT_LAB_ONLY("xg")}))
@@ -148,10 +148,10 @@ export const missedCte = (from, to) => `
      ORDER BY UPPER(p.file_no), p.missed_date DESC, p.kind_rank
   )`;
 
-export const historyCte = () => `
+export const historyCte = (source = "missed") => `
   hist_pts AS (
     SELECT DISTINCT m.file_no AS key, f.file_no
-      FROM missed m, unnest(ARRAY[m.file_no, UPPER(m.file_no)]) AS f(file_no)
+      FROM ${source} m, unnest(ARRAY[m.file_no, UPPER(m.file_no)]) AS f(file_no)
   ),
   hist_miss_dates AS (
     SELECT hp.key AS file_no, a.appointment_date AS d
@@ -187,7 +187,7 @@ export const historyCte = () => `
             AND ${NOT_LAB_ONLY("x")})
     UNION
     SELECT m.file_no, m.missed_date
-      FROM missed m JOIN appointments a ON a.id = m.id
+      FROM ${source} m JOIN appointments a ON a.id = m.id
      WHERE NOT (m.missed_kind = 'appointment'
                 AND 'cancelled' IN (COALESCE(a.status, ''), COALESCE(a.booking_status, '')))
   ),

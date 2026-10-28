@@ -117,13 +117,6 @@ async function staffOptions(sql) {
   return rows;
 }
 
-async function territoryOptions(sql) {
-  const { rows } = await sql(
-    "SELECT id, name FROM crm.territories WHERE deleted_at IS NULL ORDER BY name",
-  );
-  return rows;
-}
-
 export const canPickStaff = (crmUser) => ASSIGNING_ROLES.includes(crmUser?.role);
 
 async function resolveIn(sql, crmUser, query = {}) {
@@ -200,9 +193,7 @@ const between = (col, fromParam, toParam) =>
 const territoryClause = (alias, param) =>
   `(${param}::uuid IS NULL OR ${alias}.territory_id = ${param}::uuid)`;
 
-async function visitMetrics(sql, f, from, to) {
-  const { rows } = await sql(
-    `SELECT v.executive_id,
+const visitMetricsSql = (from, to) => `SELECT v.executive_id,
             count(*)::int AS visits,
             count(DISTINCT v.doctor_id)::int AS unique_doctors,
             count(*) FILTER (WHERE v.outcome = 'doctor_unavailable')::int AS doctor_unavailable,
@@ -212,23 +203,16 @@ async function visitMetrics(sql, f, from, to) {
        FROM crm.visits v
        JOIN crm.doctors d ON d.id = v.doctor_id
       WHERE v.deleted_at IS NULL AND v.executive_id = ANY($1::uuid[])
-        AND ${between("v.occurred_at", "$2", "$3")}
+        AND ${between("v.occurred_at", from, to)}
         AND ${territoryClause("d", "$4")}
-      GROUP BY GROUPING SETS ((v.executive_id), ())`,
-    [f.repIds, from, to, f.territory],
-  );
-  return rows;
-}
+      GROUP BY GROUPING SETS ((v.executive_id), ())`;
 
-async function coverageMetrics(sql, f, from, to) {
-  const { rows } = await sql(
-    `WITH ${VISIT_DUE_CTE}
-     SELECT a.executive_id,
+const coverageMetricsSql = (from, to) => `SELECT a.executive_id,
             count(*)::int AS assigned,
             count(*) FILTER (WHERE EXISTS (
               SELECT 1 FROM crm.visits v
                WHERE v.doctor_id = a.doctor_id AND v.executive_id = a.executive_id
-                 AND v.deleted_at IS NULL AND ${between("v.occurred_at", "$2", "$3")}))::int AS covered,
+                 AND v.deleted_at IS NULL AND ${between("v.occurred_at", from, to)}))::int AS covered,
             count(*) FILTER (WHERE vd.due_state = 'overdue')::int AS overdue_now,
             count(*) FILTER (WHERE vd.due_state = 'never_visited')::int AS never_visited_now
        FROM crm.doctor_assignments a
@@ -236,42 +220,30 @@ async function coverageMetrics(sql, f, from, to) {
        LEFT JOIN vd_all vd ON vd.doctor_id = d.id
       WHERE a.effective_to IS NULL AND a.executive_id = ANY($1::uuid[])
         AND ${territoryClause("d", "$4")}
-      GROUP BY GROUPING SETS ((a.executive_id), ())`,
-    [f.repIds, from, to, f.territory],
-  );
-  return rows;
-}
+      GROUP BY GROUPING SETS ((a.executive_id), ())`;
 
-async function referralMetrics(sql, f, from, to) {
-  const { rows } = await sql(
-    `SELECT r.responsible_executive_id AS executive_id,
-            count(*) FILTER (WHERE ${between("r.referred_at", "$2", "$3")})::int AS logged,
-            count(*) FILTER (WHERE ${between("r.referred_at", "$2", "$3")}
+const referralMetricsSql = (from, to) => `SELECT r.responsible_executive_id AS executive_id,
+            count(*) FILTER (WHERE ${between("r.referred_at", from, to)})::int AS logged,
+            count(*) FILTER (WHERE ${between("r.referred_at", from, to)}
                                AND r.attribution_status = 'verified')::int AS verified,
-            count(*) FILTER (WHERE ${between("r.referred_at", "$2", "$3")}
+            count(*) FILTER (WHERE ${between("r.referred_at", from, to)}
                                AND r.attribution_status = 'claimed')::int AS claimed,
-            count(*) FILTER (WHERE ${between("r.referred_at", "$2", "$3")}
+            count(*) FILTER (WHERE ${between("r.referred_at", from, to)}
                                AND r.status = ANY($5::text[]))::int AS reached,
-            count(*) FILTER (WHERE ${between("r.referred_at", "$2", "$3")}
+            count(*) FILTER (WHERE ${between("r.referred_at", from, to)}
                                AND r.status = 'lost')::int AS lost,
             count(*) FILTER (WHERE r.status = 'new')::int AS untouched_now
        FROM crm.doctor_referrals r
        LEFT JOIN crm.doctors d ON d.id = r.referring_doctor_id
       WHERE r.deleted_at IS NULL AND r.responsible_executive_id = ANY($1::uuid[])
         AND ${territoryClause("d", "$4")}
-      GROUP BY GROUPING SETS ((r.responsible_executive_id), ())`,
-    [f.repIds, from, to, f.territory, REACHED],
-  );
-  return rows;
-}
+      GROUP BY GROUPING SETS ((r.responsible_executive_id), ())`;
 
-async function taskMetrics(sql, f, from, to) {
-  const { rows } = await sql(
-    `SELECT t.owner_id AS executive_id,
+const taskMetricsSql = (from, to) => `SELECT t.owner_id AS executive_id,
             count(*) FILTER (WHERE t.status = 'done'
-                               AND ${between("t.completed_at", "$2", "$3")})::int AS completed,
+                               AND ${between("t.completed_at", from, to)})::int AS completed,
             count(*) FILTER (WHERE t.status = 'done'
-                               AND ${between("t.completed_at", "$2", "$3")}
+                               AND ${between("t.completed_at", from, to)}
                                AND (t.due_date IS NULL
                                     OR ${istDayOf("t.completed_at")} <= t.due_date))::int AS on_time,
             count(*) FILTER (WHERE t.status IN ('open', 'in_progress')
@@ -280,11 +252,7 @@ async function taskMetrics(sql, f, from, to) {
        LEFT JOIN crm.doctors d ON d.id = t.doctor_id
       WHERE t.deleted_at IS NULL AND t.owner_id = ANY($1::uuid[])
         AND ($4::uuid IS NULL OR d.territory_id = $4::uuid)
-      GROUP BY GROUPING SETS ((t.owner_id), ())`,
-    [f.repIds, from, to, f.territory],
-  );
-  return rows;
-}
+      GROUP BY GROUPING SETS ((t.owner_id), ())`;
 
 const ZERO = {
   visits: 0,
@@ -335,13 +303,19 @@ function shape(m) {
   };
 }
 
-async function metricsFor(sql, f, from, to) {
-  const [visits, coverage, referrals, tasks] = await Promise.all([
-    visitMetrics(sql, f, from, to),
-    coverageMetrics(sql, f, from, to),
-    referralMetrics(sql, f, from, to),
-    taskMetrics(sql, f, from, to),
-  ]);
+const withDates = (rows) =>
+  (rows ?? []).map((r) =>
+    r.last_visit_at ? { ...r, last_visit_at: new Date(r.last_visit_at) } : r,
+  );
+
+const metricsSql = (from, to) => ({
+  visits: visitMetricsSql(from, to),
+  coverage: coverageMetricsSql(from, to),
+  referrals: referralMetricsSql(from, to),
+  tasks: taskMetricsSql(from, to),
+});
+
+function metricsFrom({ visits, coverage, referrals, tasks }) {
   const byRep = new Map();
   const merge = (rows, rename = {}) => {
     for (const row of rows) {
@@ -354,10 +328,10 @@ async function metricsFor(sql, f, from, to) {
       byRep.set(key, target);
     }
   };
-  merge(visits);
-  merge(coverage);
-  merge(referrals);
-  merge(tasks, { overdue_now: "tasks_overdue_now" });
+  merge(withDates(visits));
+  merge(coverage ?? []);
+  merge(referrals ?? []);
+  merge(tasks ?? [], { overdue_now: "tasks_overdue_now" });
   return byRep;
 }
 
@@ -385,21 +359,19 @@ function bucketLabel(start, group, withYear) {
   return `${d} ${MONTHS[m - 1]}${year}`;
 }
 
-async function trend(sql, f) {
-  const { rows } = await sql(
-    `SELECT x.start, x.executive_id,
+const trendSql = `SELECT x.start, x.executive_id,
             count(*)::int AS visits,
             count(DISTINCT x.doctor_id)::int AS unique_doctors
-       FROM (SELECT date_trunc($5, ${istDayOf("v.occurred_at")})::date::text AS start,
+       FROM (SELECT date_trunc($8, ${istDayOf("v.occurred_at")})::date::text AS start,
                     v.executive_id, v.doctor_id
                FROM crm.visits v
                JOIN crm.doctors d ON d.id = v.doctor_id
               WHERE v.deleted_at IS NULL AND v.executive_id = ANY($1::uuid[])
                 AND ${between("v.occurred_at", "$2", "$3")}
                 AND ${territoryClause("d", "$4")}) x
-      GROUP BY GROUPING SETS ((x.start, x.executive_id), (x.start))`,
-    [f.repIds, f.from, f.to, f.territory, f.group],
-  );
+      GROUP BY GROUPING SETS ((x.start, x.executive_id), (x.start))`;
+
+function trendFrom(rows, f) {
   const all = buckets(f.from, f.to, f.group);
   const withYear = all[0].slice(0, 4) !== f.to.slice(0, 4);
   return all.map((start) => {
@@ -417,17 +389,54 @@ async function trend(sql, f) {
   });
 }
 
-async function breakdowns(sql, f) {
-  const { rows } = await sql(
-    `SELECT v.visit_type, v.outcome, v.source, t.name AS territory
+const breakdownSql = `SELECT v.visit_type, v.outcome, v.source, t.name AS territory
        FROM crm.visits v
        JOIN crm.doctors d ON d.id = v.doctor_id
        LEFT JOIN crm.territories t ON t.id = d.territory_id
       WHERE v.deleted_at IS NULL AND v.executive_id = ANY($1::uuid[])
         AND ${between("v.occurred_at", "$2", "$3")}
-        AND ${territoryClause("d", "$4")}`,
-    [f.repIds, f.from, f.to, f.territory],
+        AND ${territoryClause("d", "$4")}`;
+
+const territorySql = "SELECT id, name FROM crm.territories WHERE deleted_at IS NULL ORDER BY name";
+
+const jsonRows = (key, query) => `(SELECT json_agg(q) FROM (${query}) q) AS "${key}"`;
+
+async function reportData(sql, f) {
+  const parts = {
+    ...Object.fromEntries(
+      Object.entries(metricsSql("$2", "$3")).map(([k, q]) => [`current_${k}`, q]),
+    ),
+    ...Object.fromEntries(
+      Object.entries(metricsSql("$6", "$7")).map(([k, q]) => [`previous_${k}`, q]),
+    ),
+    trend: trendSql,
+    breakdowns: breakdownSql,
+    territories: territorySql,
+  };
+  const { rows } = await sql(
+    `WITH ${VISIT_DUE_CTE}
+     SELECT ${Object.entries(parts)
+       .map(([k, q]) => jsonRows(k, q))
+       .join(",\n            ")}`,
+    [f.repIds, f.from, f.to, f.territory, REACHED, f.previous.from, f.previous.to, f.group],
   );
+  const r = rows[0];
+  const pick = (prefix) => ({
+    visits: r[`${prefix}_visits`],
+    coverage: r[`${prefix}_coverage`],
+    referrals: r[`${prefix}_referrals`],
+    tasks: r[`${prefix}_tasks`],
+  });
+  return {
+    current: metricsFrom(pick("current")),
+    previous: metricsFrom(pick("previous")),
+    trendRows: trendFrom(r.trend ?? [], f),
+    split: breakdownsFrom(r.breakdowns ?? []),
+    territories: r.territories ?? [],
+  };
+}
+
+function breakdownsFrom(rows) {
   const count = (key, labels, empty) => {
     const tally = new Map();
     for (const r of rows) {
@@ -453,13 +462,7 @@ async function breakdowns(sql, f) {
 export async function progressReport(crmUser, query) {
   return withCrmContext(crmUser, async (sql) => {
     const f = await resolveIn(sql, crmUser, query);
-    const [current, previous, trendRows, split, territories] = await Promise.all([
-      metricsFor(sql, f, f.from, f.to),
-      metricsFor(sql, f, f.previous.from, f.previous.to),
-      trend(sql, f),
-      breakdowns(sql, f),
-      territoryOptions(sql),
-    ]);
+    const { current, previous, trendRows, split, territories } = await reportData(sql, f);
     const names = new Map(f.staffOptions.map((o) => [o.id, o.full_name]));
     if (!names.has(crmUser.id)) names.set(crmUser.id, crmUser.full_name);
     const staff =

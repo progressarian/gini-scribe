@@ -10,7 +10,7 @@ import {
 } from "../giniflow/journey.js";
 import { getMachines } from "../giniflow/machineCatalog.js";
 import { stepsAllowedByBill, storedBill } from "../giniflow/patientBill.js";
-import { schemeForVisit, testPriceForVisit, testPricesFor } from "../pricing.js";
+import { schemeForVisit, testPricesFor, testPricesForVisit } from "../pricing.js";
 import { priceUnsavedDraft } from "./bills.js";
 import { outsourcedTestNames, TEST_MATCHES_SQL } from "./testMatch.js";
 import { consultationItem } from "./visitLines.js";
@@ -71,10 +71,16 @@ async function journeyTests(db, visitId, visit, steps) {
     ...lab.filter((name) => !outsourced.has(name)),
     ...lab.filter((name) => outsourced.has(name)),
   ];
-  for (const step of routed) {
-    const machine = step.catalogId ? machineFor(machines, step.catalogId) : null;
-    if (!machine) continue;
-    const price = Number((await testPriceForVisit(visitId, machine.tests[0], db)) ?? 0);
+  const routedMachines = routed
+    .map((step) => (step.catalogId ? machineFor(machines, step.catalogId) : null))
+    .filter(Boolean);
+  const machinePrices = await testPricesForVisit(
+    visitId,
+    routedMachines.map((machine) => machine.tests[0]),
+    db,
+  );
+  for (const machine of routedMachines) {
+    const price = Number(machinePrices[machine.tests[0]] ?? 0);
     if (!(price > 0)) {
       throw new JourneyRefused(
         `${machine.name} has no price in the test catalogue — an admin must add it under Settings → Flow → Test catalogue before it can be billed`,

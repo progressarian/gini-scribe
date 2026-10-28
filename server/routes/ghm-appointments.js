@@ -679,8 +679,14 @@ router.delete("/call-attempts/:id", async (req, res) => {
 // Every ACTIVE doctor (from the doctors table) is included even with zero
 // bookings, so a freshly-added doctor is immediately bookable. Legacy doctor
 // names that only exist on past appointments are kept too.
+const DOCTORS_CACHE_MS = 2 * 60 * 1000;
+let doctorsCache = null;
+
 router.get("/ghm-appointments/doctors", async (_req, res) => {
   try {
+    if (doctorsCache && Date.now() - doctorsCache.at < DOCTORS_CACHE_MS) {
+      return res.json(doctorsCache.rows);
+    }
     const r = await pool.query(
       `WITH appt AS (
          SELECT doctor_name, COUNT(*)::int AS cnt
@@ -704,6 +710,7 @@ router.get("/ghm-appointments/doctors", async (_req, res) => {
        ) u
        ORDER BY cnt DESC, doctor_name ASC`,
     );
+    doctorsCache = { at: Date.now(), rows: r.rows };
     res.json(r.rows);
   } catch (e) {
     handleError(res, e, "GHM doctors list");
@@ -1292,16 +1299,26 @@ router.get("/ghm-appointments", async (req, res) => {
         missed_range AS (
           SELECT GREATEST(COALESCE($1::date, t - 6), t - ${MISSED_MAX_DAYS - 1}) AS f, t FROM bounds
         )`;
+      const pageFirst = req.query.sort !== "risk" && !risk;
+      const limitIdx = mParams.length + 1;
+      const pageCte = `paged AS MATERIALIZED (
+          SELECT m.id, m.file_no, m.missed_date, m.missed_kind, COUNT(*) OVER () AS total_rows
+            FROM missed m
+            JOIN appointments a ON a.id = m.id
+           ${mWhere}
+           ORDER BY ${mOrder}
+           LIMIT $${limitIdx} OFFSET $${limitIdx + 1}
+        )`;
       const missedJoins = joins.replace(
         "FROM appointments a",
-        `FROM missed m
+        `FROM ${pageFirst ? "paged" : "missed"} m
          JOIN history h ON h.file_no = m.file_no
          JOIN appointments a ON a.id = m.id`,
       );
       const { rows } = await pool.query(
         `WITH ${range},
               ${missedCte("(SELECT f FROM missed_range)", "(SELECT t FROM missed_range)")},
-              ${historyCte()}
+              ${pageFirst ? `${pageCte}, ${historyCte("paged")}` : historyCte()}
          SELECT ${baseCols},
                 a.call_status AS call_status_any,
                 ${callStatusToday("a")} AS call_status,
@@ -1321,11 +1338,11 @@ router.get("/ghm-appointments", async (req, res) => {
                      WHEN h.miss_total >= ${OFTEN_MISSES_AT} THEN 'often' END AS miss_risk,
                 (SELECT f::text FROM missed_range) AS range_from,
                 (SELECT t::text FROM missed_range) AS range_to,
-                COUNT(*) OVER () AS total_rows
+                ${pageFirst ? "m.total_rows" : "COUNT(*) OVER () AS total_rows"}
          ${missedJoins}
-         ${mWhere}
+         ${pageFirst ? "" : mWhere}
          ORDER BY ${mOrder}
-         LIMIT $${mParams.length + 1} OFFSET $${mParams.length + 2}`,
+         ${pageFirst ? "" : `LIMIT $${limitIdx} OFFSET $${limitIdx + 1}`}`,
         [...mParams, effLimit, offset],
       );
       const total = Number(rows[0]?.total_rows || 0);

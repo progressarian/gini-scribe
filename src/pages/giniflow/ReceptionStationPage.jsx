@@ -2375,7 +2375,7 @@ export function ArrivalsTab({
               type="button"
               className={filterKey === f.key ? "on" : ""}
               aria-pressed={filterKey === f.key}
-              onClick={() => setFilterKey(f.key)}
+              onClick={() => setFilterKey((on) => (on === f.key ? "all" : f.key))}
             >
               {f.label}
               <span className="sq-fcount">{everyone.filter(f.match).length}</span>
