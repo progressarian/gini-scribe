@@ -493,7 +493,7 @@ router.patch(
 
 router.get(
   "/giniflow/reports",
-  requireCapability(CAP.GINIFLOW_BOARD),
+  requireCapability(CAP.GINIFLOW_REPORTS),
   validateQuery(giniflowReportQuerySchema),
   async (req, res) => {
     try {

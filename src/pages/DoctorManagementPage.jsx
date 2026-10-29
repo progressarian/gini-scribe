@@ -226,7 +226,7 @@ function SettingsTab({ doctor, consultants, onSaved }) {
           )}
         </SettingsGroup>
       )}
-      {consultant && (
+      {consultant && VITALS_REST_MINUTES > 0 && (
         <SettingsGroup title="Clinic timing">
           {doctor.role === "consultant" && (
             <ToggleSetting

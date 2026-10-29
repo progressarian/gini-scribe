@@ -138,7 +138,7 @@ export const PAGE_CAPABILITIES = {
   // VIEW to reach `/api/giniflow*` for their station and still must not open
   // the floor board.
   "/giniflow/manager": CAP.GINIFLOW_BOARD,
-  "/giniflow/reports": CAP.GINIFLOW_BOARD,
+  "/giniflow/reports": CAP.GINIFLOW_REPORTS,
   // The pre-OPD triage board writes the clinical category, so it is narrower
   // than the read-only board above: coordinator and admin.
   "/giniflow/triage": CAP.GINIFLOW_TRIAGE,

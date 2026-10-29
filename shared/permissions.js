@@ -138,6 +138,7 @@ export const CAPABILITIES = {
   // prefix gate — a desk role needs it to work its own station, and taking it
   // away to hide the board would break the station instead.
   GINIFLOW_BOARD: "GINIFLOW_BOARD",
+  GINIFLOW_REPORTS: "GINIFLOW_REPORTS",
   GINIFLOW_SLA_ADMIN: "GINIFLOW_SLA_ADMIN", // edit the Gini Flow time budgets
   // Add or retire a patient scheme, set its daily cap and its fees. Admin only,
   // deliberately: a receptionist who can raise the ECHS cap from 10 to 30 has
@@ -477,6 +478,7 @@ export const ROLE_CAPABILITIES = {
     C.OBT_OPS,
     C.GINIFLOW_VIEW,
     C.GINIFLOW_BOARD,
+    C.GINIFLOW_REPORTS,
     C.GINIFLOW_SLA_ADMIN,
     C.GINIFLOW_MANAGE_QUEUE,
     C.GINIFLOW_STATION_VITALS,

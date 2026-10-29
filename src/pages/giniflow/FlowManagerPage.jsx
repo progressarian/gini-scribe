@@ -1686,6 +1686,7 @@ export default function FlowManagerPage() {
   // lab tech holding GINIFLOW_BOARD reads this board too, and moving a patient
   // onto a consultant's list is the same decision the triage board gates.
   const canAssign = hasCapability(role, CAP.GINIFLOW_TRIAGE);
+  const canSeeReports = hasCapability(role, CAP.GINIFLOW_REPORTS);
   const queryClient = useQueryClient();
   const now = useTick();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -2000,9 +2001,11 @@ export default function FlowManagerPage() {
           </div>
         </div>
         <div className="rr">
-          <a className="rbtn" href="/giniflow/reports">
-            📊 Day report
-          </a>
+          {canSeeReports && (
+            <a className="rbtn" href="/giniflow/reports">
+              📊 Day report
+            </a>
+          )}
           <button className="rbtn" data-gf-toggle onClick={() => setDrawerOpen(true)}>
             ⚙ Time budgets
           </button>
