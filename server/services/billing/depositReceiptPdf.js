@@ -30,6 +30,7 @@ export async function depositReceiptView(paymentId, db = pool) {
   if (!UUID.test(id)) throw httpError(400, "Choose a valid deposit receipt");
   const { rows } = await db.query(
     `SELECT p.id, p.mode, p.amount, p.reference, p.receipt_no, p.received_at,
+            p.voided_at, p.void_reason, COALESCE(vd.short_name, vd.name) AS voided_by_name,
             e.balance_after, e.note,
             COALESCE(d.short_name, d.name) AS received_by_name,
             pt.id AS patient_id, pt.name, pt.age, pt.sex, pt.file_no, pt.health_id
@@ -37,6 +38,7 @@ export async function depositReceiptView(paymentId, db = pool) {
        JOIN deposit_entries e ON e.payment_id = p.id AND e.kind = 'received'
        JOIN patients pt ON pt.id = p.deposit_patient_id
        LEFT JOIN doctors d ON d.id = p.received_by
+       LEFT JOIN doctors vd ON vd.id = p.voided_by
       WHERE p.id = $1 AND p.bill_id IS NULL AND p.direction = 'in'`,
     [id],
   );
@@ -54,6 +56,9 @@ export async function depositReceiptView(paymentId, db = pool) {
       received_by_name: row.received_by_name,
       balance_after: paise(row.balance_after),
       note: row.note,
+      voided_at: row.voided_at,
+      void_reason: row.void_reason,
+      voided_by_name: row.voided_by_name,
     },
     bill: null,
     patient: {
@@ -69,6 +74,14 @@ export async function depositReceiptView(paymentId, db = pool) {
     hospital: marks.hospital,
     logo: marks.logo,
   };
+}
+
+function voidNoteHtml(payment) {
+  if (!payment.voided_at) return "";
+  const by = payment.voided_by_name ? ` by ${payment.voided_by_name}` : "";
+  return `<div class="bp-subtitle">${escapeHtml(
+    `VOID — entered by mistake, no money received. Voided${by} on ${stampText(payment.voided_at)}: ${payment.void_reason}`,
+  )}</div>`;
 }
 
 export function buildDepositReceiptHtml(view) {
@@ -88,8 +101,9 @@ export function buildDepositReceiptHtml(view) {
   if (payment.note) left.push(field("Note", payment.note));
   const body = `<div class="bp-page">
   ${headerHtml(view, billHeaderIdentity(view, gst))}
-  ${titleHtml("ADVANCE DEPOSIT RECEIPT")}
+  ${titleHtml(payment.voided_at ? "ADVANCE DEPOSIT RECEIPT — VOID" : "ADVANCE DEPOSIT RECEIPT")}
   ${infoGridHtml(left, right)}
+  ${voidNoteHtml(payment)}
   <div class="bp-subtitle">${escapeHtml("Advance deposit — not a bill. It is used on this patient's bills, or refunded on request.")}</div>
   ${closingHtml(view, {
     totals: totalsTableHtml([

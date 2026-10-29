@@ -459,6 +459,13 @@ export function usePayOutDepositRefund() {
   );
 }
 
+export function useVoidDeposit() {
+  return useDepositMove(
+    async ({ entryId, ...body }) =>
+      (await api.post(`${DESK}/deposit-entries/${entryId}/void`, body)).data,
+  );
+}
+
 export const depositSlipPdfHref = (entryId) =>
   `${API_URL}${DESK}/deposit-entries/${entryId}/slip.pdf?token=${encodeURIComponent(authToken())}`;
 

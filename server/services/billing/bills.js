@@ -3,7 +3,7 @@ import { BILL_CONSULTANT_SQL, billConsultantOf, HOSPITAL_ADMIN_ID_SQL } from "./
 import { paise } from "../../../shared/labPayment.js";
 import { CAPABILITIES, hasCapability } from "../../../shared/permissions.js";
 import { decryptAadhaarFull, encryptAadhaar } from "../../utils/aadhaarCrypt.js";
-import { writeAudit } from "./audit.js";
+import { writeAudit, writeAuditMany } from "./audit.js";
 import { nextNumber, seriesFor } from "./billNumber.js";
 import { addsConsultation, getSettings } from "./billingSettings.js";
 import {
@@ -898,22 +898,36 @@ export async function listVisitBills(visitId, db = pool) {
   return bills;
 }
 
-async function itemFor(client, itemId) {
+async function itemRow(client, itemId) {
   const { rows } = await client.query(
     `SELECT id, name, kind, visit_type, is_active, allow_quantity, max_quantity, price_per_patient,
             test_catalog_id, base_price
        FROM service_items WHERE id = $1`,
     [itemId],
   );
-  if (!rows.length) throw httpError(404, "That item doesn't exist");
-  if (!rows[0].is_active) throw httpError(409, `${rows[0].name} is deactivated`);
-  return rows[0];
+  return rows[0] ?? null;
 }
 
-async function approvalFor(client, bill, item, repeatRequestId, ctx, held) {
-  await client.query(`SELECT id FROM bills WHERE visit_id = $1 ORDER BY id FOR UPDATE`, [
-    bill.visit_id,
-  ]);
+function usableItem(item) {
+  if (!item) throw httpError(404, "That item doesn't exist");
+  if (!item.is_active) throw httpError(409, `${item.name} is deactivated`);
+  return item;
+}
+
+async function itemFor(client, itemId) {
+  return usableItem(await itemRow(client, itemId));
+}
+
+async function approvalFor(
+  client,
+  bill,
+  item,
+  repeatRequestId,
+  ctx,
+  held,
+  { locked = false } = {},
+) {
+  if (!locked) await lockVisitBills(client, bill.visit_id);
   const line = await liveLineFor(client, {
     visitId: bill.visit_id,
     serviceItemId: item.id,
@@ -1033,11 +1047,12 @@ const cleanCustomLineName = (value) => {
   return text ? text.slice(0, 120) : null;
 };
 
-async function insertLineIn(client, bill, input, ctx) {
+async function insertLineIn(client, bill, input, ctx, { locked = false, lineNo = null } = {}) {
   assertDraft(bill);
   const itemId = cleanItemId(input?.item_id ?? input?.item);
   const doctorId = wholeNumber(input?.doctor_id, "Doctor", { min: 1 }) ?? null;
-  await refuseRemovedConsultant(client, bill, itemId, doctorId);
+  const found = await itemRow(client, itemId);
+  if (found?.kind === "consultation") await refuseRemovedConsultant(client, bill, itemId, doctorId);
   const quantity = wholeNumber(input?.quantity, "Quantity", { min: 1 }) ?? 1;
   const source = input?.source ?? "added";
   if (!LINE_SOURCES.includes(source)) throw httpError(400, "That line source isn't known");
@@ -1045,7 +1060,7 @@ async function insertLineIn(client, bill, input, ctx) {
   if ((source === "lab_order") !== Boolean(labOrderId)) {
     throw httpError(400, "A test-order line must name its order, and no other line may");
   }
-  const item = await itemFor(client, itemId);
+  const item = usableItem(found);
   const agreedRate = cleanAgreedRate(input?.agreed_rate);
   if (agreedRate !== null && !item.price_per_patient && Number(item.base_price) > 0) {
     throw httpError(
@@ -1054,7 +1069,7 @@ async function insertLineIn(client, bill, input, ctx) {
     );
   }
   await refuseOtherConsultation(client, bill, item, doctorId);
-  const held = await receptionHolder(client, bill, item, labOrderId);
+  const held = await receptionHolder(client, bill, item, labOrderId, { locked });
   const customName = source === "ordered" ? cleanCustomLineName(input?.bill_name) : null;
   if (customName) {
     const { rows: same } = await client.query(
@@ -1084,13 +1099,11 @@ async function insertLineIn(client, bill, input, ctx) {
         input?.repeat_request_id ? cleanUuid(input.repeat_request_id, "approval") : null,
         ctx,
         held,
+        { locked },
       );
   const linkedOrderId =
-    source === "added" && !labOrderId ? await orderToLink(client, bill, item) : null;
-  const { rows: seats } = await client.query(
-    `SELECT COALESCE(MAX(line_no), 0) + 1 AS next FROM bill_lines WHERE bill_id = $1`,
-    [bill.id],
-  );
+    source === "added" && !labOrderId ? await orderToLink(client, bill, item, { locked }) : null;
+  const seat = lineNo ?? (await nextLineNo(client, bill.id));
   const { rows } = await client.query(
     `INSERT INTO bill_lines (bill_id, visit_id, line_no, service_item_id, source, lab_order_id,
                              doctor_id, repeat_request_id, bill_name, quantity, created_by, updated_by,
@@ -1103,7 +1116,7 @@ async function insertLineIn(client, bill, input, ctx) {
     [
       bill.id,
       bill.visit_id,
-      seats[0].next,
+      seat,
       item.id,
       linkedOrderId ? "lab_order" : source,
       labOrderId ?? linkedOrderId,
@@ -1120,14 +1133,23 @@ async function insertLineIn(client, bill, input, ctx) {
   return { line: rows[0], linkedOrderId, repeatRequestId };
 }
 
+async function nextLineNo(client, billId) {
+  const { rows } = await client.query(
+    `SELECT COALESCE(MAX(line_no), 0) + 1 AS next FROM bill_lines WHERE bill_id = $1`,
+    [billId],
+  );
+  return Number(rows[0].next);
+}
+
+const lineCreated = (bill, line) => ({
+  entity: "bill_lines",
+  entityId: line.id,
+  action: "create",
+  after: { ...line, bill_no: bill.bill_no },
+});
+
 const auditLineCreated = (client, bill, line, ctx) =>
-  writeAudit(client, {
-    entity: "bill_lines",
-    entityId: line.id,
-    action: "create",
-    after: { ...line, bill_no: bill.bill_no },
-    ...auditFields(ctx),
-  });
+  writeAudit(client, { ...lineCreated(bill, line), ...auditFields(ctx) });
 
 export async function addLineIn(client, bill, input, ctx, { priceLater = false } = {}) {
   const { line, linkedOrderId, repeatRequestId } = await insertLineIn(client, bill, input, ctx);
@@ -1168,13 +1190,16 @@ export async function addLinesToDraftIn(client, visitId, inputs, ctx) {
   try {
     return await inTransaction(async (outer) => {
       const bill = await openDraftIn(outer, visitId, ctx);
+      await lockVisitOrders(outer, visitId);
+      const firstSeat = await nextLineNo(outer, bill.id);
       const inserted = [];
       const skipped = [];
       for (const [index, input] of inputs.entries()) {
         try {
+          const seat = { locked: true, lineNo: firstSeat + index };
           inserted.push({
             index,
-            ...(await inTransaction((inner) => insertLineIn(inner, bill, input, ctx), outer)),
+            ...(await inTransaction((inner) => insertLineIn(inner, bill, input, ctx, seat), outer)),
           });
         } catch (error) {
           if (error.code === "40P01") throw error;
@@ -1190,7 +1215,11 @@ export async function addLinesToDraftIn(client, visitId, inputs, ctx) {
           throw ONE_BY_ONE;
         }
       }
-      for (const { line } of inserted) await auditLineCreated(outer, bill, line, ctx);
+      await writeAuditMany(
+        outer,
+        inserted.map(({ line }) => lineCreated(bill, line)),
+        auditFields(ctx),
+      );
       if (inserted.some((row) => row.linkedOrderId)) {
         await resettleTestOrders(outer, saved.bill, ctx);
       }

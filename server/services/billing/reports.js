@@ -426,7 +426,7 @@ async function collections(filters, db) {
               CASE WHEN m.bill_id IS NULL THEN m.mode || '_deposit' ELSE m.mode END AS mode,
               m.received_by, m.shift_id, m.direction, m.amount
          FROM payments m LEFT JOIN bills b ON b.id = m.bill_id ${SCHEME_JOIN}
-        WHERE ${scope.sql} AND m.mode <> '${DEPOSIT_MODE}'
+        WHERE ${scope.sql} AND m.mode <> '${DEPOSIT_MODE}' AND m.voided_at IS NULL
      ), rolled AS (
        SELECT day, mode, received_by, shift_id, ${rolledFlags(dims)},
               COUNT(*) FILTER (WHERE direction = 'in') AS payments_in,
@@ -1131,6 +1131,7 @@ const DEPOSIT_MOVES = [
   col("moved_in", "Moved in from patients"),
   col("to_ipd", "Moved to IPD"),
   col("refunded", "Paid back"),
+  col("voided", "Voided (entered by mistake)"),
   col("net", "Net change"),
 ];
 
@@ -1142,6 +1143,7 @@ const DEPOSIT_SUMS = `
   COALESCE(SUM(e.amount) FILTER (WHERE e.kind = 'transfer_in'), 0) AS moved_in,
   COALESCE(-SUM(e.amount) FILTER (WHERE e.kind = 'to_ipd'), 0) AS to_ipd,
   COALESCE(-SUM(e.amount) FILTER (WHERE e.kind = 'refunded'), 0) AS refunded,
+  COALESCE(-SUM(e.amount) FILTER (WHERE e.kind = 'voided'), 0) AS voided,
   COALESCE(SUM(e.amount), 0) AS net`;
 
 async function deposits(filters, db) {

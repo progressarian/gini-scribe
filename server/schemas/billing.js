@@ -1131,6 +1131,13 @@ export const billingDepositPayOutSchema = z.strictObject(
   objectOnly("Send the pay-out as an object"),
 );
 
+export const billingDepositVoidSchema = z.strictObject(
+  {
+    reason: depositText("Say why this receipt is being voided", 300),
+  },
+  objectOnly("Send the void as an object"),
+);
+
 export const billingClearHealthraySchema = deskObject(
   { version: whole },
   objectOnly("Send the bill's version as an object"),

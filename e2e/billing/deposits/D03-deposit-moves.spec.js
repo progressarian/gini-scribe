@@ -253,4 +253,15 @@ test.describe.serial("D03 deposits: move to a patient, to IPD, pay back with app
       client.release();
     }
   });
+
+  test("11. an admin may approve their own deposit refund", async () => {
+    const own = await deposits.requestRefund(
+      ritesh,
+      { amount: 100, mode: "cash", reason: "Admin asked and approves" },
+      admin,
+      db,
+    );
+    const approved = await requests.approveRequest(own.request_id, {}, admin, db);
+    expect(approved.deposit_refund).toMatchObject({ amount: 10000, approved_mode: "cash" });
+  });
 });

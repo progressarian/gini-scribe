@@ -3,7 +3,14 @@ import { paise } from "../../../shared/labPayment.js";
 import { DEPOSIT_MAX, DEPOSIT_MODE } from "../../../shared/billingVocab.js";
 import { writeAudit } from "./audit.js";
 import { nextNumber, seriesFor } from "./billNumber.js";
-import { cashOutShift, DRAWER_MODE, openShiftIdFor, PAYMENT_MODES } from "./cashShifts.js";
+import { CAPABILITIES, hasAnyCapability } from "../../../shared/permissions.js";
+import {
+  cashOutShift,
+  DRAWER_MODE,
+  openShiftIdFor,
+  PAYMENT_MODES,
+  refreshClosedDrawer,
+} from "./cashShifts.js";
 import { SUPABASE_SERVICE_KEY, SUPABASE_URL, STORAGE_BUCKET } from "../../config/storage.js";
 import { auditFields, cleanMoney, INT_MAX, readNumber } from "./common.js";
 import { httpError, inTransaction } from "./transaction.js";
@@ -310,7 +317,11 @@ export async function restoreToDeposit(client, { note, patientId, amount }, ctx)
 const ENTRY_SQL = `
   SELECT e.id, e.kind, e.amount, e.balance_after, e.note, e.created_at, e.payment_id,
          e.bill_id, b.bill_no, b.bill_type, o.bill_no AS original_bill_no,
-         p.mode, p.reference, p.receipt_no,
+         p.mode, p.reference, p.receipt_no, p.shift_id, p.received_by,
+         p.voided_at, p.void_reason, COALESCE(vd.short_name, vd.name) AS voided_by_name,
+         s.closed_at AS shift_closed_at, e.counter_entry_id, cp.receipt_no AS counter_receipt_no,
+         (SELECT v.id FROM deposit_entries v
+           WHERE v.counter_entry_id = e.id AND v.kind = 'voided') AS void_entry_id,
          e.slip_no, e.relationship, e.ipd_number, e.consent_document_id, e.request_id,
          e.other_patient_id, op.name AS other_patient_name, op.file_no AS other_patient_file_no,
          COALESCE(d.short_name, d.name) AS created_by_name
@@ -318,6 +329,10 @@ const ENTRY_SQL = `
     LEFT JOIN bills b ON b.id = e.bill_id
     LEFT JOIN bills o ON o.id = b.original_bill_id
     LEFT JOIN payments p ON p.id = e.payment_id
+    LEFT JOIN cash_shifts s ON s.id = p.shift_id
+    LEFT JOIN doctors vd ON vd.id = p.voided_by
+    LEFT JOIN deposit_entries ce ON ce.id = e.counter_entry_id AND e.kind = 'voided'
+    LEFT JOIN payments cp ON cp.id = ce.payment_id
     LEFT JOIN patients op ON op.id = e.other_patient_id
     LEFT JOIN doctors d ON d.id = e.created_by
    WHERE e.patient_id = $1
@@ -342,7 +357,7 @@ export async function refuseMergeWithDeposit(client, patientId, label = "This pa
   await client.query(`DELETE FROM deposit_accounts WHERE patient_id = $1`, [patientId]);
 }
 
-export async function getDeposit(patientIdValue, db = pool) {
+export async function getDeposit(patientIdValue, db = pool, ctx = null) {
   const patientId = cleanPatientId(patientIdValue);
   const [{ rows: account }, { rows: entries }, { rows: open }, { rows: who }] = await Promise.all([
     db.query(`SELECT balance FROM deposit_accounts WHERE patient_id = $1`, [patientId]),
@@ -395,7 +410,11 @@ export async function getDeposit(patientIdValue, db = pool) {
       payment_id: row.payment_id,
       mode: row.mode,
       reference: row.reference,
-      receipt_no: row.receipt_no,
+      receipt_no: row.kind === "voided" ? row.counter_receipt_no : row.receipt_no,
+      voided_at: row.voided_at,
+      void_reason: row.void_reason,
+      voided_by_name: row.voided_by_name,
+      can_void: mayVoid(row, ctx),
       slip_no: row.slip_no,
       relationship: row.relationship,
       ipd_number: row.ipd_number,
@@ -714,6 +733,109 @@ export async function payOutRefund(requestIdValue, input, ctx, db = pool) {
       entry_id: entry.id,
       amount,
       mode,
+      balance: entry.balanceAfter,
+    };
+  }, db);
+}
+
+const VOID_REASON_MIN = 5;
+
+function cleanVoidReason(value) {
+  const reason = typeof value === "string" ? value.trim() : "";
+  if (reason.length < VOID_REASON_MIN) throw httpError(400, "Say why this receipt is being voided");
+  if (reason.length > TEXT_MAX) {
+    throw httpError(400, `The reason is too long — keep it under ${TEXT_MAX} letters`);
+  }
+  return reason;
+}
+
+export function mayVoid(row, ctx) {
+  if (row.kind !== "received" || row.voided_at || row.void_entry_id) return false;
+  if (hasAnyCapability(ctx?.role, CAPABILITIES.BILLING_MASTER)) return true;
+  return row.received_by === ctx?.actorId && !!row.shift_id && !row.shift_closed_at;
+}
+
+function voidRefusal(row, ctx) {
+  if (row.kind !== "received") {
+    return httpError(409, "Only a deposit taken at the counter can be voided");
+  }
+  if (row.voided_at || row.void_entry_id) {
+    return httpError(409, "This receipt was already voided");
+  }
+  return httpError(
+    403,
+    row.received_by === ctx?.actorId
+      ? "Your shift for that receipt is closed — ask a reception admin to void it"
+      : "Only the person who took that deposit (while their shift is open) or a reception admin can void it",
+  );
+}
+
+export async function voidDeposit(entryIdValue, input, ctx, db = pool) {
+  const entryId = cleanUuid(entryIdValue, "deposit receipt");
+  const reason = cleanVoidReason(input?.reason);
+  if (!ctx?.actorId) throw httpError(401, "Sign in again to void a deposit");
+  return inTransaction(async (client) => {
+    const { rows } = await client.query(
+      `SELECT e.id, e.kind, e.patient_id, e.payment_id,
+              p.amount, p.mode, p.receipt_no, p.shift_id, p.received_by, p.voided_at,
+              s.closed_at AS shift_closed_at,
+              (SELECT v.id FROM deposit_entries v
+                WHERE v.counter_entry_id = e.id AND v.kind = 'voided') AS void_entry_id
+         FROM deposit_entries e
+         LEFT JOIN payments p ON p.id = e.payment_id
+         LEFT JOIN cash_shifts s ON s.id = p.shift_id
+        WHERE e.id = $1
+          FOR UPDATE OF e`,
+      [entryId],
+    );
+    const row = rows[0];
+    if (!row) throw httpError(404, "That deposit receipt no longer exists");
+    if (!mayVoid(row, ctx)) throw voidRefusal(row, ctx);
+    const amount = paise(row.amount);
+    const account = await lockAvailable(client, row.patient_id);
+    refuseShort(account, amount, "voided");
+    await client.query(`SELECT id FROM payments WHERE id = $1 FOR UPDATE`, [row.payment_id]);
+    await client.query(
+      `UPDATE payments
+          SET voided_at = NOW(), voided_by = $2, void_reason = $3,
+              updated_at = NOW(), updated_by = $2
+        WHERE id = $1`,
+      [row.payment_id, ctx.actorId, reason],
+    );
+    await writeAudit(client, {
+      entity: "payments",
+      entityId: row.payment_id,
+      action: "update",
+      before: { voided_at: null },
+      after: {
+        deposit_patient_id: row.patient_id,
+        receipt_no: row.receipt_no,
+        mode: row.mode,
+        amount,
+        voided: true,
+        void_reason: reason,
+      },
+      ...auditFields(ctx),
+    });
+    const entry = await addEntry(
+      client,
+      {
+        patientId: row.patient_id,
+        kind: "voided",
+        amount: -amount,
+        counterEntryId: entryId,
+        note: reason,
+      },
+      ctx,
+    );
+    if (row.mode === DRAWER_MODE && row.shift_id) {
+      await refreshClosedDrawer(client, row.shift_id, ctx);
+    }
+    return {
+      entry_id: entry.id,
+      payment_id: row.payment_id,
+      receipt_no: row.receipt_no,
+      amount,
       balance: entry.balanceAfter,
     };
   }, db);

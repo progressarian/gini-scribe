@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { ROLES } from "../../../shared/permissions.js";
 import { writeAudit } from "./audit.js";
 import {
   checkRefund,
@@ -922,10 +923,10 @@ async function approveRefund(client, before, input, note, ctx) {
 const DEPOSIT_PAY_MODES = ["cash", "card", "upi"];
 
 async function approveDepositRefund(client, before, input, note, ctx) {
-  if (before.requested_by && before.requested_by === ctx.actorId) {
+  if (before.requested_by && before.requested_by === ctx.actorId && ctx.role !== ROLES.ADMIN) {
     throw httpError(
       409,
-      "A deposit refund needs a second person — someone other than the one who asked must approve it",
+      "A deposit refund needs a second person — someone other than the one who asked, or an admin, must approve it",
     );
   }
   const approvedMode = String(input?.approved_mode ?? before.requested_mode).toLowerCase();

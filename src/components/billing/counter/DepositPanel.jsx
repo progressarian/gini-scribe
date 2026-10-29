@@ -13,6 +13,7 @@ import { when } from "../importText";
 import { PAYMENT_MODE_LABEL } from "./lineText";
 import { PdfButton } from "./PdfViewer";
 import DepositMoves, { AmountField } from "./DepositMoves";
+import VoidDepositDialog from "./VoidDepositDialog";
 import { DEPOSIT_MAX } from "../../../../shared/billingVocab.js";
 
 const KIND_LABEL = {
@@ -23,6 +24,7 @@ const KIND_LABEL = {
   transfer_in: "Moved in from another patient",
   to_ipd: "Moved to IPD",
   refunded: "Paid back",
+  voided: "Receipt voided",
 };
 
 const REFERENCE_HINT = {
@@ -51,6 +53,7 @@ function detailOf(entry) {
       .join(" ");
   }
   if (entry.kind === "to_ipd") return `IP ${entry.ipd_number} · ${entry.slip_no}`;
+  if (entry.kind === "voided") return entry.receipt_no ? `Receipt ${entry.receipt_no}` : "";
   if (entry.kind === "refunded") {
     return [PAYMENT_MODE_LABEL[entry.mode] ?? entry.mode, entry.reference]
       .filter(Boolean)
@@ -78,6 +81,7 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
   const [note, setNote] = useState(null);
   const [lastReceipt, setLastReceipt] = useState(null);
   const [confirming, setConfirming] = useState(false);
+  const [voidingEntry, setVoidingEntry] = useState(null);
 
   const balance = data?.balance ?? 0;
   const entries = data?.entries ?? [];
@@ -317,10 +321,20 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
                         </td>
                         <td>
                           {KIND_LABEL[entry.kind] ?? entry.kind}
+                          {entry.voided_at ? (
+                            <span className="badge b-red bc-deposit__void">Voided</span>
+                          ) : null}
                           {detailOf(entry) ? (
                             <div className="bc-hint">{detailOf(entry)}</div>
                           ) : null}
                           {entry.note ? <div className="bc-hint">{entry.note}</div> : null}
+                          {entry.voided_at ? (
+                            <div className="bc-hint">
+                              Voided {when(entry.voided_at)}
+                              {entry.voided_by_name ? ` by ${entry.voided_by_name}` : ""}:{" "}
+                              {entry.void_reason}
+                            </div>
+                          ) : null}
                           {SLIP_KINDS.includes(entry.kind) ? (
                             <PdfButton
                               className="st-btn st-btn-g"
@@ -353,6 +367,13 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
                               Receipt
                             </PdfButton>
                           ) : null}
+                          {entry.can_void ? (
+                            <VoidButton
+                              entry={entry}
+                              available={data?.available ?? 0}
+                              onVoid={() => setVoidingEntry(entry)}
+                            />
+                          ) : null}
                         </td>
                         <td className="bc-num">
                           {entry.amount > 0 ? "+" : "−"}
@@ -368,6 +389,47 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
           </div>
         </div>
       )}
+      {voidingEntry && (
+        <VoidDepositDialog
+          entry={voidingEntry}
+          patient={{ name: patientName, file_no: patientFileNo }}
+          balance={balance}
+          onClose={() => setVoidingEntry(null)}
+          onVoided={(done) => {
+            setVoidingEntry(null);
+            setLastReceipt(null);
+            setNote(
+              `Receipt ${done.receipt_no} voided — ${fromPaise(done.amount)} taken off the deposit. Balance now ${fromPaise(done.balance)}.`,
+            );
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+function VoidButton({ entry, available, onVoid }) {
+  const short = entry.amount > available;
+  const reason = short
+    ? `Only ${fromPaise(available)} of the deposit is unused — part of this receipt was already used, moved or held for a pay back, so it can't be voided`
+    : null;
+  return (
+    <>
+      <button
+        type="button"
+        className="st-btn st-btn-g"
+        disabled={short}
+        onClick={onVoid}
+        aria-label={`Void deposit receipt ${entry.receipt_no || ""}`.trim()}
+        aria-describedby={short ? `void-why-${entry.id}` : undefined}
+      >
+        Void
+      </button>
+      {short ? (
+        <div id={`void-why-${entry.id}`} className="bc-hint">
+          {reason}
+        </div>
+      ) : null}
+    </>
   );
 }

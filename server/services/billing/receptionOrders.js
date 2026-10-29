@@ -122,9 +122,15 @@ export async function heldCatalogs(db, { visitId, billId = null, catalogIds }) {
   return held;
 }
 
-export async function receptionHolder(client, bill, item, labOrderId = null) {
+export async function receptionHolder(
+  client,
+  bill,
+  item,
+  labOrderId = null,
+  { locked = false } = {},
+) {
   if (item.kind !== "test" || !item.test_catalog_id || !bill.visit_id) return null;
-  await lockVisitOrders(client, bill.visit_id);
+  if (!locked) await lockVisitOrders(client, bill.visit_id);
   return receptionHolds(client, {
     visitId: bill.visit_id,
     billId: bill.id,

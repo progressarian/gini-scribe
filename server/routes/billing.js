@@ -40,6 +40,7 @@ import {
   billingDepositPayOutSchema,
   billingDepositRefundRequestSchema,
   billingDepositTransferSchema,
+  billingDepositVoidSchema,
   billingClearHealthraySchema,
   billingConsultantChangeConfirmSchema,
   billingConsultantChangeDismissSchema,
@@ -81,6 +82,7 @@ import {
   transferToIpd,
   transferToPatient,
   uploadConsent,
+  voidDeposit,
 } from "../services/billing/deposits.js";
 import {
   generateDepositReceiptPdf,
@@ -546,7 +548,7 @@ router.get(
 router.get(
   `${BASE}/patients/:patientId/deposit`,
   desk,
-  run("Patient deposit", 200, (req) => getDeposit(req.params.patientId)),
+  run("Patient deposit", 200, (req) => getDeposit(req.params.patientId, undefined, ctx(req))),
 );
 
 router.post(
@@ -607,6 +609,13 @@ router.post(
   run("Pay out deposit refund", 201, (req) =>
     payOutRefund(req.params.requestId, req.body, ctx(req)),
   ),
+);
+
+router.post(
+  `${BASE}/deposit-entries/:entryId/void`,
+  desk,
+  validate(billingDepositVoidSchema, BILLING_DESK_LABELS),
+  run("Void deposit receipt", 200, (req) => voidDeposit(req.params.entryId, req.body, ctx(req))),
 );
 
 router.get(

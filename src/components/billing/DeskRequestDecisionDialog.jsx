@@ -113,7 +113,7 @@ export default function DeskRequestDecisionDialog({ request, mode, subject, onCl
             {rejecting
               ? "The desk sees this note, so say why — a rejection without a note is refused."
               : depositRefund
-                ? `Approving lets the desk pay ${fromPaise(request.deposit_refund.amount)} back from ${request.patient?.name ?? "the patient"}'s deposit. It must be approved by someone other than the person who asked.`
+                ? `Approving lets the desk pay ${fromPaise(request.deposit_refund.amount)} back from ${request.patient?.name ?? "the patient"}'s deposit. It must be approved by someone other than the person who asked, or by an admin.`
                 : refund && refundMode === "deposit"
                   ? "Approving makes the credit note now and keeps the money as this patient's deposit — nothing is paid out at the counter."
                   : refund

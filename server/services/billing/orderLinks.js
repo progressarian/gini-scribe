@@ -77,9 +77,9 @@ export async function openOrdersFor(client, { visitId, billId, catalogId }) {
   return open;
 }
 
-export async function orderToLink(client, bill, item) {
+export async function orderToLink(client, bill, item, { locked = false } = {}) {
   if (item.kind !== "test" || !item.test_catalog_id || !bill.visit_id) return null;
-  await lockVisitOrders(client, bill.visit_id);
+  if (!locked) await lockVisitOrders(client, bill.visit_id);
   const [first] = await openOrdersFor(client, {
     visitId: bill.visit_id,
     billId: bill.id,

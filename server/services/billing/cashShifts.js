@@ -101,7 +101,7 @@ const DRAWER_SQL = `
          + COALESCE(SUM(p.amount) FILTER (WHERE p.direction = 'in'), 0)
          - COALESCE(SUM(p.amount) FILTER (WHERE p.direction = 'out'), 0) AS cash
     FROM cash_shifts s
-    LEFT JOIN payments p ON p.shift_id = s.id AND p.mode = $2
+    LEFT JOIN payments p ON p.shift_id = s.id AND p.mode = $2 AND p.voided_at IS NULL
    WHERE s.id = $1
    GROUP BY s.opening_cash`;
 
@@ -127,7 +127,7 @@ const SHIFT_SQL = `
              COUNT(*) FILTER (WHERE p.direction = 'out') AS refund_count,
              COUNT(DISTINCT p.bill_id) FILTER (WHERE p.direction = 'out') AS credit_note_count
         FROM payments p
-       WHERE p.shift_id = s.id
+       WHERE p.shift_id = s.id AND p.voided_at IS NULL
     ) t ON TRUE
     LEFT JOIN LATERAL (
       SELECT COALESCE(SUM(h.amount) FILTER (WHERE h.mode = '${HEALTHRAY_MODE}'

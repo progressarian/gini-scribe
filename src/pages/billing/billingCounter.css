@@ -2501,6 +2501,10 @@ body > [role="dialog"][aria-modal="true"] .bc-err {
 .gf .bc-layout .bc-deposit .bc-card__title {
   margin: 0;
 }
+.gf .bc-deposit__void {
+  margin-left: 8px;
+}
+
 .gf .bc-deposit__balance {
   margin-left: 8px;
   font-weight: 700;
