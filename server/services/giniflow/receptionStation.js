@@ -888,7 +888,7 @@ export const ARRIVAL_SELECT = `
          opd_fee.rate AS scheme_opd_fee,
          (v.visit_date + COALESCE(v.appointment_time, '00:00'::time))
            AT TIME ZONE 'Asia/Kolkata' AS slot_at,
-         p.name, p.file_no, p.age, p.sex, p.phone,
+         p.name, p.file_no, p.age, p.sex, p.phone, p.id_pending,
          checkin_ev.occurred_at AS checked_in_at,
          last_ev.occurred_at    AS status_since,
          sugg.id AS suggested_visit_type_id,
@@ -1013,6 +1013,7 @@ export const shapeArrival = (r, now) => ({
   // is the last moment before money is keyed into HealthRay, and because it is
   // the catch-all entry point: a walk-in reaches no booking form at all.
   schemeCode: r.scheme_code || null,
+  idPending: !!r.id_pending,
   bookingType: r.booking_type || null,
   walkIn: !!r.walk_in,
   // What the OPD consultation should cost under that scheme. DISPLAY ONLY —

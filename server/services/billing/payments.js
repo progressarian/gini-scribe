@@ -144,6 +144,7 @@ function shapePayment(row) {
     mode: row.mode,
     amount: paise(row.amount),
     reference: row.reference,
+    paid_via: row.paid_via ?? null,
     receipt_no: row.receipt_no,
     shift_id: row.shift_id,
     received_by: row.received_by,
@@ -151,8 +152,8 @@ function shapePayment(row) {
   };
 }
 
-const PAYMENT_COLUMNS = `id, bill_id, direction, mode, amount, reference, receipt_no, shift_id,
-  received_by, received_at`;
+const PAYMENT_COLUMNS = `id, bill_id, direction, mode, amount, reference, paid_via, receipt_no,
+  shift_id, received_by, received_at`;
 
 export const MONEY_COLUMNS = `b.patient_payable,
          GREATEST(b.paid_amount,

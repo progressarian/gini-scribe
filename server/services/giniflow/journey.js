@@ -16,6 +16,7 @@ import { reopenForTests } from "./lateTests.js";
 import { advanceStatus, reopenResultsForNewOrder } from "./statusEngine.js";
 import {
   labOnlyJourney,
+  labOnlyName,
   PROCEDURE_STEP,
   procedureStep,
   withProcedure,
@@ -97,6 +98,8 @@ const shapeStep = (r) => ({
 });
 
 export { AUTO_LAB_BILLING_SQL, JOURNEY_STEPS_SQL };
+
+const LAB_ONLY_LEG = ["blood_sample", "lab_processing_2"];
 
 const PLANNED_STEP_SQL = (step) => `NOT ${AUTO_LAB_BILLING_SQL(step)}`;
 
@@ -342,7 +345,18 @@ export async function getJourney(visitId, db = pool) {
     [visitId],
   );
   const visitStatus = visitRows[0]?.current_status || null;
-  const steps = rows.map(shapeStep);
+  const skipNote = rows.some(
+    (r) => r.status === "skipped" && LAB_ONLY_LEG.includes(r.step_catalog_id),
+  )
+    ? await labLegSkipNote(db, visitId)
+    : null;
+  const steps = rows
+    .map(shapeStep)
+    .map((s) =>
+      skipNote && s.status === "skipped" && LAB_ONLY_LEG.includes(s.catalogId)
+        ? { ...s, skipNote }
+        : s,
+    );
   const done = steps.filter((s) => s.status === "done").length;
   const current = steps.find((s) => s.status === "in_progress") || null;
   const next = steps.find((s) => s.status === "pending") || null;
@@ -934,6 +948,7 @@ export async function checkInIn(
     await priceOrdersFromBill(client, visitId, bill, machines);
     await syncBillCharges(client, visitId, bill, machines, await billSuppressor(client, visitId));
     await insertLabStepsIfHealthrayCase(client, visitId);
+    await addSkippedLabLeg(client, visitId);
     await placeTestsBeforeDoctors(client, visitId);
   }
 
@@ -1043,6 +1058,7 @@ export async function ensurePlan(visitId, db = pool) {
     );
     await syncFromStatus(client, visitId, visit.current_status);
     await insertLabStepsIfHealthrayCase(client, visitId);
+    await addSkippedLabLeg(client, visitId);
     await client.query("COMMIT");
     return { seeded: true, visitTypeId };
   } catch (e) {
@@ -1176,7 +1192,13 @@ const firstPendingAfterVitals = (plan) =>
   plan.find((s) => s.status === "pending" && s.step_catalog_id !== "vitals") ||
   plan.find((s) => s.status === "pending");
 
-async function insertAutoSteps(client, visitId, wanted, placeIn) {
+async function insertAutoSteps(
+  client,
+  visitId,
+  wanted,
+  placeIn,
+  { status = "pending", nameOf = (c) => c.name } = {},
+) {
   const { rows: plan } = await client.query(
     `SELECT s.step_catalog_id, s.step_order, s.status, s.chain_status,
             COALESCE(c.machine, FALSE) AS machine
@@ -1215,31 +1237,77 @@ async function insertAutoSteps(client, visitId, wanted, placeIn) {
     await client.query(
       `INSERT INTO giniflow_visit_steps
          (visit_id, step_order, step_catalog_id, step_name, planned_duration_min,
-          station, assigned_role, chain_status, source)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'auto')`,
+          station, assigned_role, chain_status, source, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'auto',$9)`,
       [
         visitId,
         at + i,
         c.id,
-        c.name,
+        nameOf(c),
         c.default_duration_min,
         c.station,
         c.assigned_role,
         c.chain_status,
+        status,
       ],
     );
   }
-  await client.query(
-    `UPDATE giniflow_visits
-        SET planned_total_min = COALESCE(planned_total_min, 0) + $2, updated_at = NOW()
-      WHERE id = $1`,
-    [visitId, ordered.reduce((sum, c) => sum + (c.default_duration_min || 0), 0)],
-  );
+  if (status === "pending") {
+    await client.query(
+      `UPDATE giniflow_visits
+          SET planned_total_min = COALESCE(planned_total_min, 0) + $2, updated_at = NOW()
+        WHERE id = $1`,
+      [visitId, ordered.reduce((sum, c) => sum + (c.default_duration_min || 0), 0)],
+    );
+  }
   await placeTestsBeforeDoctors(client, visitId);
   return { added: ordered.map((c) => c.id) };
 }
 
+async function labLegSkipNote(db, visitId) {
+  const { rows } = await db.query(`SELECT lab_site FROM giniflow_visits WHERE id = $1`, [visitId]);
+  if (rows[0]?.lab_site === "home") return "collected at home";
+  if (await sampleTakenBeforeVisit(db, visitId)) return "sample taken earlier";
+  const { rows: lab } = await db.query(
+    `SELECT EXISTS (SELECT 1 FROM giniflow_lab_orders o
+                     WHERE o.visit_id = v.id AND o.urgency = 'today' AND o.kind = 'lab'
+                       AND o.sample_status <> 'cancelled')
+            OR EXISTS (SELECT 1 FROM lab_cases lc
+                        WHERE lc.case_date = v.visit_date
+                          AND (lc.patient_id = v.patient_id
+                               OR (lc.patient_id IS NULL
+                                   AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+                          AND ${LIVE_LAB_CASE_SQL("lc")}) AS has_lab
+       FROM giniflow_visits v JOIN patients p ON p.id = v.patient_id
+      WHERE v.id = $1`,
+    [visitId],
+  );
+  return lab[0]?.has_lab ? "sample not collected yet" : "no lab test billed";
+}
+
+export async function addSkippedLabLeg(client, visitId) {
+  if (!(await isLabOnlyVisit(client, visitId))) return { added: [] };
+  return insertAutoSteps(
+    client,
+    visitId,
+    LAB_ONLY_LEG,
+    (plan) => {
+      const report = plan.find((s) => s.step_catalog_id === "report_upload");
+      const checkIn = plan.find((s) => s.step_catalog_id === "check_in");
+      return report?.step_order ?? (checkIn ? checkIn.step_order + 1 : null);
+    },
+    { status: "skipped", nameOf: (c) => labOnlyName({ catalogId: c.id, name: c.name }) },
+  );
+}
+
 export async function insertLabStepsForOrder(client, visitId) {
+  if (await isLabOnlyVisit(client, visitId)) {
+    await client.query(
+      `UPDATE giniflow_visit_steps SET status = 'pending'
+        WHERE visit_id = $1 AND status = 'skipped' AND step_catalog_id = ANY($2::text[])`,
+      [visitId, LAB_ONLY_LEG],
+    );
+  }
   return insertAutoSteps(client, visitId, ["lab_billing", "blood_sample"], (plan) => {
     const pendingSample = plan.find(
       (s) => s.step_catalog_id === "blood_sample" && s.status === "pending",

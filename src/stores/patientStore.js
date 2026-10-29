@@ -119,7 +119,7 @@ const usePatientStore = create((set, get) => ({
   },
 
   // ── savePatient: create or update patient in DB ──
-  savePatient: async (referralSource = null) => {
+  savePatient: async (referralSource = null, registration = null) => {
     const { patient, dbPatientId } = get();
     if (!patient.name?.trim()) return { error: "Patient name is required" };
 
@@ -146,6 +146,8 @@ const usePatientStore = create((set, get) => ({
     // and crm.patient_referral_sources holds one row per patient — asking again
     // on an edit would be a second, conflicting answer.
     if (!dbPatientId && referralSource) payload.referral_source = referralSource;
+    if (!dbPatientId && registration)
+      Object.assign(payload, registration, { registration: "desk" });
 
     try {
       let result;
@@ -169,7 +171,10 @@ const usePatientStore = create((set, get) => ({
       }
       return { data: saved };
     } catch (e) {
-      return { error: e.response?.data?.error || "Failed to save patient" };
+      return {
+        error: e.response?.data?.error || "Failed to save patient",
+        fields: e.response?.data?.fields,
+      };
     }
   },
 

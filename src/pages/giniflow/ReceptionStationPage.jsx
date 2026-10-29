@@ -61,6 +61,7 @@ import {
   TOAST_MS,
 } from "../../lib/testCancelText.js";
 import ConfirmModal from "../../components/ui/ConfirmModal";
+import IdPendingBadge from "../../components/patient/IdPendingBadge.jsx";
 import OrderedServicesPanel from "../../components/billing/OrderedServicesPanel";
 import StationNotice from "../../components/giniflow/StationNotice";
 import JourneyBuilder, { TestPicker } from "../../components/giniflow/JourneyBuilder";
@@ -1891,6 +1892,7 @@ function JourneyPanel({ arrival, onClose }) {
   const { data: timeline } = useGiniflowTimeline(arrival.visitId);
   const step = useJourneyStep();
   const steps = data?.steps || [];
+  const skippedCount = steps.filter((s) => s.status === "skipped").length;
   const planColumns = new Set(
     steps.map((s) => s.chainStatus && columnForStatus(s.chainStatus)).filter(Boolean),
   );
@@ -1924,7 +1926,9 @@ function JourneyPanel({ arrival, onClose }) {
             {isLoading && <div className="empty-note">Loading…</div>}
             {steps.length > 0 && (
               <div className="dp-hint">
-                {data.doneCount} of {data.totalCount} stops done · ~{data.plannedTotalMin}m planned
+                {data.doneCount} of {data.totalCount} stops done
+                {skippedCount ? ` · ${skippedCount} skipped` : ""} · ~{data.plannedTotalMin}m
+                planned
                 {data.currentStep
                   ? ` · now: ${data.currentStep}`
                   : data.nextStep
@@ -1975,8 +1979,12 @@ function JourneyPanel({ arrival, onClose }) {
                     // record now, and a tick offered here would be somebody
                     // writing history from memory.
                     <span className="jp-status">
-                      {s.status === "skipped" ? "not done" : s.status.replace(/_/g, " ")}
+                      {s.status === "skipped"
+                        ? `not done${s.skipNote ? ` · ${s.skipNote}` : ""}`
+                        : s.status.replace(/_/g, " ")}
                     </span>
+                  ) : s.status === "skipped" && s.skipNote ? (
+                    <span className="jp-status">skipped · {s.skipNote}</span>
                   ) : s.manual && s.status === "done" ? (
                     <button
                       className="st-btn st-btn-ghost"
@@ -2047,6 +2055,7 @@ function HomeSampleButton({ arrival, onHome }) {
 }
 
 function ArrivalRow({ arrival, children, note, warning, wide, showLabOnly }) {
+  const queryClient = useQueryClient();
   return (
     <div className="ar-row">
       <div className="ar-slot">{arrival.slot || "—"}</div>
@@ -2057,6 +2066,16 @@ function ArrivalRow({ arrival, children, note, warning, wide, showLabOnly }) {
           {showLabOnly && arrival.samplesOnly && <span className="badge b-tl">🧪 Lab only</span>}
           {arrival.awaitsAppointment && (
             <span className="badge b-amb">🔔 Mark arrived for appointment</span>
+          )}
+          {arrival.idPending && (
+            <IdPendingBadge
+              patientId={arrival.patientId}
+              name={arrival.name}
+              fileNo={arrival.fileNo}
+              onSaved={() =>
+                queryClient.invalidateQueries({ queryKey: ["giniflow", "reception", "arrivals"] })
+              }
+            />
           )}
         </div>
         <div className="ar-meta">{identity(arrival)}</div>

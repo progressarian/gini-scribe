@@ -54,6 +54,11 @@ import { homeSamplesReady } from "../services/giniflow/homeSampleRecords.js";
 import { followBookingTag } from "../services/giniflow/labSite.js";
 import { ghmSlotsFromSchedule } from "../services/giniflow/floorSettings.js";
 import { isWithin3VisitType } from "../../shared/slotCapacity.js";
+import {
+  checkNewPatientIdentity,
+  identityFailure,
+  sealIdentity,
+} from "../services/patients/identity.js";
 
 const router = Router();
 
@@ -1225,6 +1230,7 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.booking_status,
                 a.visit_type, a.appointment_type, a.booking_source,
                 a.booked_by_name, a.booking_date, a.created_at AS booked_at,
+                (a.appointment_date - (a.created_at AT TIME ZONE 'Asia/Kolkata')::date) AS booking_gap_days,
                 a.condition, a.chief_complaint,
                 a.insurance_taken, a.how_did_you_know, a.referred_by_doctor_name,
                 a.earlier_slot_given, a.show_no_show, a.status,
@@ -1511,7 +1517,7 @@ router.get("/ghm-appointments", async (req, res) => {
     }
 
     let where;
-    const orderBy = `ORDER BY a.time_slot ASC NULLS LAST, a.created_at ASC, a.id ASC`;
+    let orderBy = `ORDER BY a.time_slot ASC NULLS LAST, a.created_at ASC, a.id ASC`;
     // if (mode === "followup") {
     //   where = `WHERE (${ownFu("a")} = $1 OR a.preferred_date = $1)
     //          AND (
@@ -1545,6 +1551,13 @@ router.get("/ghm-appointments", async (req, res) => {
     where += homeCond;
     where += modeCond;
     where += callsCond;
+    const bookedBeforeDays = Number(req.query.booked_before_days);
+    if (Number.isInteger(bookedBeforeDays) && bookedBeforeDays >= 1 && bookedBeforeDays <= 60) {
+      params.push(bookedBeforeDays);
+      where += ` AND a.appointment_date = $1 AND (a.created_at AT TIME ZONE 'Asia/Kolkata')::date <= ${IST_TODAY} - $${params.length}::int
+                 AND ${PREFERRED_BOOKING_ELSEWHERE("a", "$1")} IS NULL`;
+      orderBy = `ORDER BY (a.appointment_date - (a.created_at AT TIME ZONE 'Asia/Kolkata')::date) ASC, a.time_slot ASC NULLS LAST, a.id ASC`;
+    }
     if (doctor) {
       params.push(`%${doctor}%`);
       where += ` AND (a.doctor_name ILIKE $${params.length} OR a.preferred_doctor ILIKE $${params.length})`;
@@ -1739,6 +1752,12 @@ router.post("/ghm-appointments", async (req, res) => {
 
     // New patient — create a master record so they're tracked permanently
     if (!patient_id) {
+      let identity = null;
+      if (req.body.registration === "desk") {
+        const check = await checkNewPatientIdentity(req.body);
+        if (!check.identity) return identityFailure(res, check);
+        identity = check;
+      }
       let newFileNo = file_no;
       if (!newFileNo) {
         const seq = await pool.query(
@@ -1748,8 +1767,9 @@ router.post("/ghm-appointments", async (req, res) => {
         newFileNo = `GNI-${String(seq.rows[0].next).padStart(5, "0")}`;
       }
       const created = await pool.query(
-        `INSERT INTO patients (name, phone, file_no, address, alt_phone, dob, age, sex)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, file_no`,
+        `INSERT INTO patients (name, phone, file_no, address, alt_phone, dob, age, sex,
+                               scheme_code, scheme_ref, aadhaar, govt_id, govt_id_type, id_pending)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id, file_no`,
         [
           patient_name,
           phone || null,
@@ -1759,6 +1779,12 @@ router.post("/ghm-appointments", async (req, res) => {
           demo.dob,
           demo.age,
           demo.sex,
+          identity?.identity.scheme_code || null,
+          sealIdentity(identity?.identity.scheme_ref),
+          sealIdentity(identity?.identity.aadhaar),
+          identity?.identity.govt_id || null,
+          identity?.identity.govt_id_type || null,
+          Boolean(identity?.requiredScan),
         ],
       );
       patient_id = created.rows[0].id;

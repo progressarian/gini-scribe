@@ -10,6 +10,14 @@ import ReferralSourcePicker, {
   referralSourcePayload,
 } from "../components/ReferralSourcePicker.jsx";
 import { PATIENT_CATEGORIES, categoryLabel } from "../../shared/patientCategories.js";
+import RegistrationIdentityFields, {
+  EMPTY_FILES,
+  EMPTY_IDENTITY,
+  FILE_LABELS,
+  identityPayload,
+  registrationProblems,
+  uploadRegistrationFiles,
+} from "../components/patient/RegistrationIdentityFields.jsx";
 import "./PatientPage.css";
 
 export default function PatientPage() {
@@ -30,6 +38,10 @@ export default function PatientPage() {
   const [saveMsg, setSaveMsg] = useState(null);
   const [fieldErrors, setFieldErrors] = useState({});
   const [referralSource, setReferralSource] = useState(null);
+  const [identity, setIdentity] = useState(EMPTY_IDENTITY);
+  const [files, setFiles] = useState(EMPTY_FILES);
+  const [idErrs, setIdErrs] = useState({});
+  const [pendingUpload, setPendingUpload] = useState(null);
   const [resettingPw, setResettingPw] = useState(false);
   const [tempPassword, setTempPassword] = useState(null);
   const [resetError, setResetError] = useState(null);
@@ -61,7 +73,9 @@ export default function PatientPage() {
     if (!patient.name?.trim()) errs.name = true;
     const referral = referralSourcePayload(referralSource);
     if (!dbPatientId && !referral) errs.referralSource = true;
-    if (Object.keys(errs).length) {
+    const problems = dbPatientId ? {} : registrationProblems(identity, files);
+    setIdErrs(problems);
+    if (Object.keys(errs).length || Object.keys(problems).length) {
       setFieldErrors(errs);
       setSaveMsg({ type: "error", text: "Please fill required fields" });
       return;
@@ -69,17 +83,49 @@ export default function PatientPage() {
     setFieldErrors({});
     setSaving(true);
     setSaveMsg(null);
-    const result = await savePatient(referral);
-    setSaving(false);
+    const isNew = !dbPatientId;
+    const result = await savePatient(referral, isNew ? identityPayload(identity) : null);
     if (result.error) {
+      setSaving(false);
+      if (result.fields) setIdErrs(result.fields);
       setSaveMsg({ type: "error", text: result.error });
-    } else {
-      setSaveMsg({
-        type: "success",
-        text: dbPatientId ? "Patient updated" : "Patient created",
-      });
-      setTimeout(() => navigate("/dashboard"), 600);
+      return;
     }
+    if (isNew && result.data?._isNew) {
+      await saveFiles(result.data.id, files);
+      setSaving(false);
+      return;
+    }
+    setSaving(false);
+    finish(isNew ? "Patient created" : "Patient updated");
+  };
+
+  const finish = (text) => {
+    setSaveMsg({ type: "success", text });
+    setTimeout(() => navigate("/dashboard"), 600);
+  };
+
+  const saveFiles = async (patientId, toSave) => {
+    const { failed } = await uploadRegistrationFiles(patientId, toSave);
+    if (!failed.length) {
+      setPendingUpload(null);
+      finish("Patient created");
+      return;
+    }
+    setPendingUpload({ patientId, failed });
+    setSaveMsg({
+      type: "error",
+      text: `Patient registered, but the ${failed.map((k) => FILE_LABELS[k]).join(", ")} could not be saved. The patient stays “ID pending” until it is.`,
+    });
+  };
+
+  const retryFiles = async () => {
+    setSaving(true);
+    await saveFiles(
+      pendingUpload.patientId,
+      Object.fromEntries(pendingUpload.failed.map((k) => [k, files[k]])),
+    );
+    setSaving(false);
   };
 
   return (
@@ -141,6 +187,24 @@ export default function PatientPage() {
 
       {!dbPatientId && (
         <div className="patient-page__refsrc">
+          <RegistrationIdentityFields
+            value={identity}
+            onChange={(v) => {
+              setIdentity(v);
+              setIdErrs({});
+            }}
+            errors={idErrs}
+            files={files}
+            onFilesChange={(f) => {
+              setFiles(f);
+              setIdErrs((e) => ({ ...e, id_proof: null, scheme_card: null }));
+            }}
+          />
+        </div>
+      )}
+
+      {!dbPatientId && (
+        <div className="patient-page__refsrc">
           <ReferralSourcePicker
             value={referralSource}
             onChange={(v) => {
@@ -198,7 +262,9 @@ export default function PatientPage() {
       )}
 
       <details className="patient-page__ids">
-        <summary className="patient-page__ids-summary">Health & Government IDs (optional)</summary>
+        <summary className="patient-page__ids-summary">
+          {dbPatientId ? "Health & Government IDs (optional)" : "Health IDs (optional)"}
+        </summary>
         <div className="patient-page__ids-grid">
           <div>
             <label className="patient-page__label">ABHA ID</label>
@@ -222,63 +288,67 @@ export default function PatientPage() {
               with the other government IDs rather than on one appointment. Set
               once here, it falls onto every future booking automatically
               (33-PATIENT-SCHEME-PLAN.md §2). */}
-          <div>
-            <label className="patient-page__label">Billing scheme</label>
-            <select
-              value={patient.schemeCode || ""}
-              onChange={(e) => updatePatient("schemeCode", e.target.value)}
-              className="patient-page__id-input"
-            >
-              {PATIENT_CATEGORIES.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.sub ? `\u00a0\u00a0\u00a0${c.label}` : c.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          {patient.schemeCode && (
-            <div>
-              <label className="patient-page__label">
-                {categoryLabel(patient.schemeCode)} card no.
-              </label>
-              <input
-                value={patient.schemeRef || ""}
-                onChange={(e) => updatePatient("schemeRef", e.target.value)}
-                placeholder="Beneficiary / card number"
-                className="patient-page__id-input"
-              />
-            </div>
+          {dbPatientId && (
+            <>
+              <div>
+                <label className="patient-page__label">Billing scheme</label>
+                <select
+                  value={patient.schemeCode || ""}
+                  onChange={(e) => updatePatient("schemeCode", e.target.value)}
+                  className="patient-page__id-input"
+                >
+                  {PATIENT_CATEGORIES.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.sub ? `\u00a0\u00a0\u00a0${c.label}` : c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {patient.schemeCode && (
+                <div>
+                  <label className="patient-page__label">
+                    {categoryLabel(patient.schemeCode)} card no.
+                  </label>
+                  <input
+                    value={patient.schemeRef || ""}
+                    onChange={(e) => updatePatient("schemeRef", e.target.value)}
+                    placeholder="Beneficiary / card number"
+                    className="patient-page__id-input"
+                  />
+                </div>
+              )}
+              <div>
+                <label className="patient-page__label">Aadhaar</label>
+                <input
+                  value={patient.aadhaar || ""}
+                  onChange={(e) => updatePatient("aadhaar", e.target.value)}
+                  placeholder="XXXX XXXX XXXX"
+                  className="patient-page__id-input"
+                />
+              </div>
+              <div>
+                <label className="patient-page__label">
+                  <select
+                    value={patient.govtIdType || ""}
+                    onChange={(e) => updatePatient("govtIdType", e.target.value)}
+                    className="patient-page__id-type-select"
+                  >
+                    <option value="">Other ID</option>
+                    <option value="Passport">Passport</option>
+                    <option value="DrivingLicense">Driving License</option>
+                    <option value="VoterID">Voter ID</option>
+                    <option value="PAN">PAN</option>
+                  </select>
+                </label>
+                <input
+                  value={patient.govtId || ""}
+                  onChange={(e) => updatePatient("govtId", e.target.value)}
+                  placeholder="ID number"
+                  className="patient-page__id-input"
+                />
+              </div>
+            </>
           )}
-          <div>
-            <label className="patient-page__label">Aadhaar</label>
-            <input
-              value={patient.aadhaar || ""}
-              onChange={(e) => updatePatient("aadhaar", e.target.value)}
-              placeholder="XXXX XXXX XXXX"
-              className="patient-page__id-input"
-            />
-          </div>
-          <div>
-            <label className="patient-page__label">
-              <select
-                value={patient.govtIdType || ""}
-                onChange={(e) => updatePatient("govtIdType", e.target.value)}
-                className="patient-page__id-type-select"
-              >
-                <option value="">Other ID</option>
-                <option value="Passport">Passport</option>
-                <option value="DrivingLicense">Driving License</option>
-                <option value="VoterID">Voter ID</option>
-                <option value="PAN">PAN</option>
-              </select>
-            </label>
-            <input
-              value={patient.govtId || ""}
-              onChange={(e) => updatePatient("govtId", e.target.value)}
-              placeholder="ID number"
-              className="patient-page__id-input"
-            />
-          </div>
         </div>
       </details>
 
@@ -392,9 +462,30 @@ export default function PatientPage() {
         </div>
       )}
 
+      {pendingUpload && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <button
+            type="button"
+            onClick={retryFiles}
+            disabled={saving}
+            className="patient-page__dup-load-btn"
+          >
+            {saving ? "Retrying…" : "Retry upload"}
+          </button>
+          <button
+            type="button"
+            onClick={() => finish("Patient created")}
+            disabled={saving}
+            className="patient-page__dup-clear-btn"
+          >
+            Continue without it
+          </button>
+        </div>
+      )}
+
       <button
         onClick={handleSave}
-        disabled={saving || !patient.name}
+        disabled={saving || !patient.name || Boolean(pendingUpload)}
         className={`patient-page__next-btn ${patient.name && !saving ? "patient-page__next-btn--active" : "patient-page__next-btn--disabled"}`}
       >
         {saving

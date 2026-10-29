@@ -8,6 +8,8 @@ const KEY = process.env.AADHAAR_ENCRYPTION_KEY
 if (!KEY)
   console.warn("⚠️  AADHAAR_ENCRYPTION_KEY not set — Aadhaar numbers will be stored as plain text");
 
+export const encryptionReady = () => Boolean(KEY);
+
 // Encrypt: returns "iv:authTag:ciphertext" (all hex)
 export function encryptAadhaar(plain) {
   if (!plain || !KEY) return plain;

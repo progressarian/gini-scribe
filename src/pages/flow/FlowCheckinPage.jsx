@@ -695,6 +695,11 @@ export default function FlowCheckinPage() {
       // app's existing generator) so reception never has to invent one.
       let fileNo = form.file_no.trim();
       let dbId = patientDbId;
+      if (!dbId && !fileNo) {
+        toast("Register the patient first: category and ID are required for a new patient", "warn");
+        setNewPatientOpen(true);
+        return;
+      }
       if (!dbId) {
         const { data: pt } = await api.post("/api/patients", {
           name: form.name.trim(),

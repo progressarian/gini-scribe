@@ -154,8 +154,8 @@ export const patientCreateSchema = z
     file_no: optStr,
     abha_id: optStr,
     health_id: optStr,
-    aadhaar: optStr,
-    govt_id: optStr,
+    aadhaar: z.string().trim().max(20).optional().nullable(),
+    govt_id: z.string().trim().max(40).optional().nullable(),
     govt_id_type: optStr,
     email: optStr,
     address: optStr,
@@ -179,6 +179,7 @@ export const patientCreateSchema = z
     // The one sanctioned way to create a patient without asking. Flow check-in
     // resolves-or-creates mid-queue and must not stop to run a doctor picker.
     allow_unattributed: z.boolean().optional(),
+    registration: z.enum(["desk"]).optional(),
   })
   .passthrough();
 

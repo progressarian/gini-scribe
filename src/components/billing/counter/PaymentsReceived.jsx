@@ -1,9 +1,23 @@
 import { useState } from "react";
 import { useCorrectPaymentMode } from "../../../queries/hooks/useBilling";
 import { errorOf, fromPaise } from "../format";
+import { HEALTHRAY_MODE } from "../../../../shared/billingVocab";
 import { PAYMENT_MODE_LABEL, paymentModeText } from "./lineText";
 
 const MODES = Object.keys(PAYMENT_MODE_LABEL);
+
+const isHealthray = (payment) => payment.mode === HEALTHRAY_MODE;
+
+const currentMode = (payment) => (isHealthray(payment) ? payment.paid_via : payment.mode);
+
+const modeText = (payment) =>
+  [
+    paymentModeText(payment.mode),
+    isHealthray(payment) && payment.paid_via && PAYMENT_MODE_LABEL[payment.paid_via],
+    payment.reference,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
 const timeOf = (iso) =>
   iso
@@ -16,7 +30,8 @@ const timeOf = (iso) =>
 
 function CorrectForm({ bill, payment, onDone, onCancel }) {
   const correct = useCorrectPaymentMode();
-  const [mode, setMode] = useState(MODES.find((m) => m !== payment.mode) || "cash");
+  const healthray = isHealthray(payment);
+  const [mode, setMode] = useState(MODES.find((m) => m !== currentMode(payment)) || "cash");
   const [reference, setReference] = useState("");
   const [reason, setReason] = useState("");
   const [error, setError] = useState(null);
@@ -43,9 +58,11 @@ function CorrectForm({ bill, payment, onDone, onCancel }) {
   return (
     <form className="bc-head__row" onSubmit={save} aria-label="Correct how it was paid">
       <label className="bc-field">
-        <span className="bc-field__lbl">Really paid by</span>
+        <span className="bc-field__lbl">
+          {healthray ? "Paid in HealthRay by" : "Really paid by"}
+        </span>
         <select className="bc-field__in" value={mode} onChange={(e) => setMode(e.target.value)}>
-          {MODES.filter((m) => m !== payment.mode || payment.reference).map((m) => (
+          {MODES.filter((m) => m !== currentMode(payment) || payment.reference).map((m) => (
             <option key={m} value={m}>
               {PAYMENT_MODE_LABEL[m]}
             </option>
@@ -70,12 +87,18 @@ function CorrectForm({ bill, payment, onDone, onCancel }) {
           className="bc-field__in"
           value={reason}
           maxLength={300}
-          placeholder="e.g. Paid by UPI, entered as cash"
+          placeholder={
+            healthray
+              ? "e.g. Paid by UPI at the HealthRay counter"
+              : "e.g. Paid by UPI, entered as cash"
+          }
           onChange={(e) => setReason(e.target.value)}
         />
       </label>
       <span className="bc-head__hint">
-        {fromPaise(payment.amount)} · {paymentModeText(payment.mode)} → {PAYMENT_MODE_LABEL[mode]}
+        {fromPaise(payment.amount)} · {modeText(payment)} →{" "}
+        {healthray ? `${paymentModeText(payment.mode)} · ` : ""}
+        {PAYMENT_MODE_LABEL[mode]}
         {payment.receipt_no ? ` · receipt ${payment.receipt_no}` : ""}. The amount stays the same.
       </span>
       <button
@@ -129,10 +152,7 @@ export default function PaymentsReceived({ bill, payments }) {
             {received.map((payment) => (
               <tr key={payment.id}>
                 <td>{payment.receipt_no || "—"}</td>
-                <td>
-                  {paymentModeText(payment.mode)}
-                  {payment.reference ? ` · ${payment.reference}` : ""}
-                </td>
+                <td>{modeText(payment)}</td>
                 <td className="bc-num">{fromPaise(payment.amount)}</td>
                 <td>
                   {timeOf(payment.received_at)}
@@ -145,9 +165,9 @@ export default function PaymentsReceived({ bill, payments }) {
                         type="button"
                         className="st-btn st-btn-g"
                         onClick={() => setOpen(payment.id)}
-                        aria-label={`Correct ${fromPaise(payment.amount)} ${paymentModeText(payment.mode)} payment`}
+                        aria-label={`${isHealthray(payment) ? "Update mode of" : "Correct"} ${fromPaise(payment.amount)} ${paymentModeText(payment.mode)} payment`}
                       >
-                        Correct mode
+                        {isHealthray(payment) ? "Update mode" : "Correct mode"}
                       </button>
                     )}
                   </td>

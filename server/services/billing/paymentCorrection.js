@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { CAPABILITIES, hasAnyCapability } from "../../../shared/permissions.js";
+import { HEALTHRAY_MODE } from "../../../shared/billingVocab.js";
 import { paise } from "../../../shared/labPayment.js";
 import { writeAudit } from "./audit.js";
 import { DRAWER_MODE, PAYMENT_MODES, refreshClosedDrawer } from "./cashShifts.js";
@@ -12,7 +13,7 @@ const MODE_LABEL = { cash: "Cash", card: "Card", upi: "UPI" };
 const REASON_MAX = 300;
 
 const PAYMENT_SQL = `
-  SELECT p.id, p.bill_id, p.direction, p.mode, p.amount, p.reference, p.receipt_no,
+  SELECT p.id, p.bill_id, p.direction, p.mode, p.amount, p.reference, p.paid_via, p.receipt_no,
          p.shift_id, p.received_by, p.received_at, p.deposit_patient_id,
          b.status AS bill_status, b.bill_no,
          s.closed_at AS shift_closed_at,
@@ -25,8 +26,12 @@ const PAYMENT_SQL = `
 const correctable = (row) =>
   row.direction === "in" && PAYMENT_MODES.includes(row.mode) && !row.deposit_patient_id;
 
+const paidInHealthray = (row) => row.direction === "in" && row.mode === HEALTHRAY_MODE;
+
 export function mayCorrect(row, ctx) {
-  if (!correctable(row) || row.bill_status === "cancelled") return false;
+  if (row.bill_status === "cancelled") return false;
+  if (paidInHealthray(row)) return true;
+  if (!correctable(row)) return false;
   if (hasAnyCapability(ctx?.role, CAPABILITIES.BILLING_MASTER)) return true;
   return row.received_by === ctx?.actorId && !!row.shift_id && !row.shift_closed_at;
 }
@@ -58,7 +63,7 @@ function refusal(row, ctx) {
   if (!correctable(row)) {
     return httpError(
       409,
-      "Only a cash, card or UPI payment taken at the counter can have its mode corrected",
+      "Only a cash, card, UPI or HealthRay payment can have its mode corrected",
     );
   }
   return httpError(
@@ -78,6 +83,7 @@ export async function correctPaymentMode(paymentId, input, ctx, db = pool) {
     if (!rows.length) throw httpError(404, "That payment no longer exists");
     const before = rows[0];
     if (!mayCorrect(before, ctx)) throw refusal(before, ctx);
+    if (paidInHealthray(before)) return recordHealthrayMode(client, before, wanted, ctx);
     if (before.mode === wanted.mode && (before.reference ?? null) === wanted.reference) {
       throw httpError(400, "That is already the payment's mode and reference");
     }
@@ -100,6 +106,28 @@ export async function correctPaymentMode(paymentId, input, ctx, db = pool) {
     if (drawerMoved && before.shift_id) await refreshClosedDrawer(client, before.shift_id, ctx);
     return { ...updated[0], amount: paise(updated[0].amount) };
   }, db);
+}
+
+async function recordHealthrayMode(client, before, wanted, ctx) {
+  if (before.paid_via === wanted.mode && (before.reference ?? null) === wanted.reference) {
+    throw httpError(400, "That is already the payment's mode and reference");
+  }
+  const { rows: updated } = await client.query(
+    `UPDATE payments SET paid_via = $2, reference = $3, updated_at = NOW(), updated_by = $4
+      WHERE id = $1
+      RETURNING id, bill_id, direction, mode, amount, reference, paid_via, receipt_no, shift_id,
+                received_by, received_at`,
+    [before.id, wanted.mode, wanted.reference, ctx?.actorId ?? null],
+  );
+  await writeAudit(client, {
+    entity: "payments",
+    entityId: before.id,
+    action: "update",
+    before: { paid_via: before.paid_via, reference: before.reference },
+    after: { paid_via: wanted.mode, reference: wanted.reference, reason: wanted.reason },
+    ...auditFields(ctx),
+  });
+  return { ...updated[0], amount: paise(updated[0].amount) };
 }
 
 export async function paymentsWithRights(billId, ctx, db = pool) {

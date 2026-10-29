@@ -230,6 +230,246 @@ body {
   color: #dc2626;
 }
 
+.regid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.regid__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: 10px;
+}
+.regid__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.regid__label,
+.capslot__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
+.regid__input {
+  min-height: 38px;
+  padding: 8px 11px;
+  font-size: 13px;
+  color: #1e293b;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.regid .regid__input[aria-invalid="true"] {
+  border-color: #dc2626;
+}
+.regid .regid__input:focus-visible,
+.regid .regid__toggle:focus-visible,
+.capslot .capslot__btn:focus-visible,
+.capslot .capslot__link:focus-visible,
+.capslot__dialog .capslot__btn:focus-visible {
+  outline: 2px solid #1e40af;
+  outline-offset: 2px;
+}
+.regid-ghm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.regid__toggle,
+.capslot__link {
+  align-self: flex-start;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e40af;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.regid__err,
+.capslot__err {
+  font-size: 12px;
+  color: #dc2626;
+}
+.regid__files {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 10px;
+}
+.capslot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.capslot--error {
+  border-color: #dc2626;
+}
+.capslot__actions,
+.capslot__dialog-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.capslot__btn {
+  min-height: 34px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #1e293b;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.capslot__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.capslot__btn--primary {
+  color: #fff;
+  background: #1e40af;
+  border-color: #1e40af;
+}
+.capslot__picked {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.capslot__thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+.capslot__view {
+  display: inline-flex;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: zoom-in;
+}
+.capslot .capslot__view:focus-visible {
+  outline: 2px solid #1e40af;
+  outline-offset: 2px;
+}
+.capslot__dialog--view {
+  width: min(900px, 100%);
+}
+.capslot__full {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  margin: 0 auto;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #f1f5f9;
+}
+.capslot__viewer {
+  width: 100%;
+  height: 70vh;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+.capslot__pdf {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  background: #e2e8f0;
+  border-radius: 6px;
+}
+.capslot__name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: #334155;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.capslot__hint {
+  font-size: 12px;
+  color: #64748b;
+}
+.capslot__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.55);
+}
+.capslot__dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(640px, 100%);
+  padding: 16px;
+  background: #fff;
+  border-radius: 10px;
+}
+.capslot__dialog-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1e293b;
+}
+.capslot__video {
+  width: 100%;
+  max-height: 60vh;
+  background: #0f172a;
+  border-radius: 8px;
+}
+.capslot__dialog-actions {
+  justify-content: flex-end;
+}
+.regid__field,
+.capslot {
+  min-width: 0;
+}
+@media (max-width: 640px) {
+  .regid__input {
+    min-height: 44px;
+    font-size: 16px;
+  }
+  .capslot__btn {
+    flex: 1 1 auto;
+    min-height: 44px;
+  }
+  .regid__toggle,
+  .capslot__link {
+    min-height: 32px;
+  }
+  .capslot__overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .capslot__dialog {
+    border-radius: 12px 12px 0 0;
+    max-height: 100dvh;
+    overflow-y: auto;
+  }
+  .capslot__dialog-actions .capslot__btn {
+    flex: 1 1 0;
+  }
+}
+
 .patient-page__refsrc {
   margin-top: 18px;
   padding-top: 16px;

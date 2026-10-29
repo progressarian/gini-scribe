@@ -17,6 +17,14 @@ import { MOBILE_HINT, PHONE_DIGITS, isValidMobile, toEntryDigits } from "../shar
 import usePatientStore from "./stores/patientStore.js";
 import PdfViewerModal from "./components/visit/PdfViewerModal.jsx";
 import ReferralSourcePicker, { referralSourcePayload } from "./components/ReferralSourcePicker.jsx";
+import RegistrationIdentityFields, {
+  EMPTY_FILES,
+  EMPTY_IDENTITY,
+  FILE_LABELS,
+  identityPayload,
+  registrationProblems,
+  uploadRegistrationFiles,
+} from "./components/patient/RegistrationIdentityFields.jsx";
 import LiveDashboard from "./components/opd/LiveDashboard.jsx";
 import CohortDashboard from "./components/opd/CohortDashboard.jsx";
 import OpdRangeReport from "./components/opd/OpdRangeReport.jsx";
@@ -5114,6 +5122,11 @@ function NewPatientForm({ onCreated, onBack, showToast }) {
   const [saving, setSaving] = useState(false);
   const [errs, setErrs] = useState({});
   const [referralSource, setReferralSource] = useState(null);
+  const [identity, setIdentity] = useState(EMPTY_IDENTITY);
+  const [files, setFiles] = useState(EMPTY_FILES);
+  const [idErrs, setIdErrs] = useState({});
+  const [created, setCreated] = useState(null);
+  const [failedFiles, setFailedFiles] = useState([]);
   const [p, setP] = useState({
     name: "",
     dob: "",
@@ -5126,9 +5139,6 @@ function NewPatientForm({ onCreated, onBack, showToast }) {
     abha_id: "",
     health_id: "",
     genie_id: "",
-    aadhaar: "",
-    govt_id_type: "",
-    govt_id: "",
   });
   const set = (k, v) => setP((prev) => ({ ...prev, [k]: v }));
 
@@ -5176,6 +5186,12 @@ function NewPatientForm({ onCreated, onBack, showToast }) {
       showToast(p.phone ? MOBILE_HINT : "Phone number is required", "err");
       return;
     }
+    const problems = registrationProblems(identity, files);
+    if (Object.keys(problems).length) {
+      setIdErrs(problems);
+      showToast(Object.values(problems)[0], "err");
+      return;
+    }
     const referral = referralSourcePayload(referralSource);
     if (!referral) {
       setErrs({ referralSource: true });
@@ -5183,20 +5199,52 @@ function NewPatientForm({ onCreated, onBack, showToast }) {
       return;
     }
     setErrs({});
+    setIdErrs({});
     setSaving(true);
     try {
       const r = await apiFetch("/api/patients", {
         method: "POST",
-        body: JSON.stringify({ ...p, referral_source: referral }),
+        body: JSON.stringify({
+          ...p,
+          ...identityPayload(identity),
+          referral_source: referral,
+          registration: "desk",
+        }),
       });
       const data = await r.json();
-      if (data.id) {
+      if (!data.id) {
+        if (data.fields) setIdErrs(data.fields);
+        showToast(data.error || "Could not create patient", "err");
+      } else if (!data._isNew) {
         onCreated(data);
-        showToast(`✓ Patient ${data._isNew ? "created" : "updated"}`);
-      } else showToast(data.error || "Could not create patient", "err");
+        showToast("✓ Existing patient record found and updated");
+      } else {
+        setCreated(data);
+        await saveFiles(data, files);
+      }
     } catch {
       showToast("Network error", "err");
     }
+    setSaving(false);
+  };
+
+  const saveFiles = async (patient, toSave) => {
+    const { failed } = await uploadRegistrationFiles(patient.id, toSave);
+    setFailedFiles(failed);
+    if (failed.length) {
+      showToast(
+        `Patient registered, but ${failed.map((k) => FILE_LABELS[k]).join(", ")} not saved`,
+        "err",
+      );
+      return;
+    }
+    onCreated(patient);
+    showToast("✓ Patient created");
+  };
+
+  const retryFiles = async () => {
+    setSaving(true);
+    await saveFiles(created, Object.fromEntries(failedFiles.map((k) => [k, files[k]])));
     setSaving(false);
   };
 
@@ -5326,6 +5374,32 @@ function NewPatientForm({ onCreated, onBack, showToast }) {
         </div>
       </div>
 
+      <div
+        style={{
+          background: WH,
+          border: `1px solid ${BD}`,
+          borderRadius: 10,
+          padding: 16,
+          marginBottom: 12,
+          boxShadow: SH,
+        }}
+      >
+        <SLbl>Category & Identity</SLbl>
+        <RegistrationIdentityFields
+          value={identity}
+          onChange={(v) => {
+            setIdentity(v);
+            setIdErrs({});
+          }}
+          errors={idErrs}
+          files={files}
+          onFilesChange={(f) => {
+            setFiles(f);
+            setIdErrs((e) => ({ ...e, id_proof: null, scheme_card: null }));
+          }}
+        />
+      </div>
+
       {/* Health & Govt IDs */}
       <div
         style={{
@@ -5352,7 +5426,7 @@ function NewPatientForm({ onCreated, onBack, showToast }) {
           }}
         >
           <span style={{ fontSize: 12, fontWeight: 600, color: INK }}>
-            🪪 Health & Government IDs{" "}
+            🪪 Health IDs{" "}
             <span style={{ fontSize: 10, color: INK3, fontWeight: 400 }}>(optional)</span>
           </span>
           <span
@@ -5401,31 +5475,6 @@ function NewPatientForm({ onCreated, onBack, showToast }) {
                 placeholder="Genie ID"
               />
             </div>
-            <div>
-              <Lbl>Aadhaar</Lbl>
-              <Inp
-                value={p.aadhaar}
-                onChange={(e) => set("aadhaar", e.target.value)}
-                placeholder="XXXX XXXX XXXX"
-              />
-            </div>
-            <div>
-              {sel("Other ID Type", "govt_id_type", [
-                ["", "— Select type"],
-                "Passport",
-                "Driver's License",
-                "Voter ID",
-                "PAN Card",
-              ])}
-            </div>
-            <div>
-              <Lbl>ID Number</Lbl>
-              <Inp
-                value={p.govt_id}
-                onChange={(e) => set("govt_id", e.target.value)}
-                placeholder="ID number"
-              />
-            </div>
           </div>
         )}
       </div>
@@ -5440,6 +5489,67 @@ function NewPatientForm({ onCreated, onBack, showToast }) {
           error={errs.referralSource ? "Please record who referred this patient" : null}
         />
       </div>
+
+      {created && failedFiles.length > 0 && (
+        <div
+          role="alert"
+          style={{
+            border: "1px solid #fca5a5",
+            background: "#fef2f2",
+            borderRadius: 8,
+            padding: "10px 12px",
+            marginBottom: 12,
+            fontSize: 13,
+            color: INK,
+            display: "flex",
+            gap: 10,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          <span style={{ flex: 1 }}>
+            <b>{created.name}</b> ({created.file_no}) is registered.{" "}
+            {failedFiles.map((k) => FILE_LABELS[k]).join(", ")} could not be saved; the patient
+            stays marked “ID pending” until it is.
+          </span>
+          <button
+            type="button"
+            onClick={retryFiles}
+            disabled={saving}
+            style={{
+              padding: "6px 14px",
+              borderRadius: 7,
+              fontSize: 12,
+              fontWeight: 600,
+              background: T,
+              color: "#fff",
+              border: "none",
+              cursor: "pointer",
+              fontFamily: FB,
+            }}
+          >
+            {saving ? "Retrying…" : "Retry upload"}
+          </button>
+          <button
+            type="button"
+            onClick={() => onCreated(created)}
+            disabled={saving}
+            style={{
+              padding: "6px 14px",
+              borderRadius: 7,
+              fontSize: 12,
+              fontWeight: 600,
+              background: WH,
+              border: `1px solid ${BD}`,
+              color: INK2,
+              cursor: "pointer",
+              fontFamily: FB,
+            }}
+          >
+            Continue without it
+          </button>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 9 }}>
         <button
@@ -5460,7 +5570,7 @@ function NewPatientForm({ onCreated, onBack, showToast }) {
         </button>
         <button
           onClick={handleCreate}
-          disabled={saving}
+          disabled={saving || Boolean(created)}
           style={{
             padding: "9px 24px",
             borderRadius: 8,
@@ -5474,7 +5584,7 @@ function NewPatientForm({ onCreated, onBack, showToast }) {
             boxShadow: "0 2px 8px rgba(0,158,140,.25)",
           }}
         >
-          {saving ? "Creating…" : "Create Patient & Continue →"}
+          {saving ? (created ? "Saving ID scans…" : "Creating…") : "Create Patient & Continue →"}
         </button>
       </div>
     </div>

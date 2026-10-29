@@ -1141,6 +1141,14 @@ a.pcell__ph:hover {
 .fld--wide {
   grid-column: 1 / -1;
 }
+.fgrid > * {
+  min-width: 0;
+}
+@media (max-width: 640px) {
+  .fgrid {
+    grid-template-columns: 1fr;
+  }
+}
 
 .fld--check {
   flex-direction: row;

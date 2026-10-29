@@ -117,6 +117,11 @@ import { toast } from "../stores/uiStore";
 import { visitStatus } from "../lib/visitStatus.js";
 import { isEarlierVisitDue, isNewVisitType } from "../../shared/patientLists.js";
 import { isInvestigationVisit } from "../../shared/labOnly.js";
+import RegistrationIdentityFields, {
+  EMPTY_IDENTITY,
+  identityPayload,
+  registrationProblems,
+} from "../components/patient/RegistrationIdentityFields.jsx";
 
 const safeArr = (v) => (Array.isArray(v) ? v : []);
 
@@ -251,13 +256,23 @@ const EXPORT_LABELS = {
   by_date: "ghm-by-date",
   tomorrow: "ghm-tomorrow",
   fu3: "wati-appt-confirmation",
+  booked10: "ghm-booked-10-days-ago",
   lookup: "ghm-patient-lookup",
 };
+
+const BOOKED_LONG_AGO_DAYS = 10;
 
 const VIEW_TABS = [
   { id: "by_date", label: "Today", Icon: CalendarDays, offset: 0 },
   { id: "tomorrow", label: "Tomorrow", Icon: Sunrise, offset: 1 },
   { id: "fu3", label: "Follow-up in 3 Days", Icon: Phone, offset: 3 },
+  {
+    id: "booked10",
+    label: "Booked 10+ Days Ago",
+    Icon: CalendarClock,
+    offset: 2,
+    hint: "Patients booked 10 or more days ago. HealthRay bookings count from when Scribe first saw them.",
+  },
   { id: "missed", label: "Missed", Icon: CalendarX, offset: null },
   { id: "changes", label: "Status Changes", Icon: History, offset: null },
   { id: "lookup", label: "Patient Lookup", Icon: Search, offset: null },
@@ -793,7 +808,7 @@ function GhmFilters({
           <DatePicker
             value={draft.date}
             onChange={(v) => set("date", v)}
-            minDate={view === "fu3" ? todayStr() : undefined}
+            minDate={view === "fu3" || view === "booked10" ? todayStr() : undefined}
             placeholder={view === "lookup" ? "Today" : "Select date"}
             clearable={view === "lookup"}
           />
@@ -1090,6 +1105,8 @@ export function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, on
   const [err, setErr] = useState("");
   const [dup, setDup] = useState(null);
   const [booked, setBooked] = useState(null);
+  const [identity, setIdentity] = useState(EMPTY_IDENTITY);
+  const [idErrs, setIdErrs] = useState({});
 
   useBodyScrollLock();
 
@@ -1228,12 +1245,18 @@ export function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, on
       return setErr("File No can only contain letters, numbers, _ and -");
     if (form.dob && form.dob > todayStr()) return setErr("Date of birth cannot be in the future");
     if (!form.dob && form.age && +form.age > 120) return setErr("Age must be between 0 and 120");
+    if (bookingIsNewPatient) {
+      const problems = registrationProblems(identity, null, { withFiles: false });
+      setIdErrs(problems);
+      if (Object.keys(problems).length) return setErr(Object.values(problems)[0]);
+    }
 
     setErr("");
     setDup(null);
     try {
       const created = await createMutation.mutateAsync({
         ...form,
+        ...(bookingIsNewPatient ? { ...identityPayload(identity), registration: "desk" } : null),
         new_patient: bookingIsNewPatient,
         ...(allowDuplicate ? { allow_duplicate: true } : null),
       });
@@ -1249,6 +1272,7 @@ export function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, on
       });
     } catch (e) {
       const data = e?.response?.data;
+      if (data?.fields) setIdErrs(data.fields);
       if (data?.error === "duplicate_booking") return setDup(data.detail || {});
       if (data?.error === "already_visited") {
         const where = {
@@ -1501,6 +1525,22 @@ export function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, on
                   placeholder="House / street, area, city, pincode"
                 />
               </label>
+              {bookingIsNewPatient && (
+                <div className="fld--wide regid-ghm">
+                  <RegistrationIdentityFields
+                    value={identity}
+                    onChange={(v) => {
+                      setIdentity(v);
+                      setIdErrs({});
+                    }}
+                    errors={idErrs}
+                    withFiles={false}
+                  />
+                  <span className="capslot__hint">
+                    New patient: the ID or card scan is taken at reception on arrival.
+                  </span>
+                </div>
+              )}
               <label className="fld">
                 <span>Booked By</span>
                 <input
@@ -3078,6 +3118,7 @@ export default function GHMPage() {
       // whose follow-up is DUE on this date (matched on follow_up_date), not
       // appointments booked that day. Only "By Date" lists booked appointments.
       if (view === "tomorrow" || view === "fu3") p.set("mode", "followup");
+      if (view === "booked10") p.set("booked_before_days", String(BOOKED_LONG_AGO_DAYS));
       if (view === "lookup") {
         p.set("mode", "lookup");
         p.set("q", lookupQ);
@@ -3412,11 +3453,12 @@ export default function GHMPage() {
   // identical without this column: the follow-up rows carry their own (older)
   // visit date, so a date matching the tab means "booked that day". Only the
   // Today tab is one kind of row throughout, where it would repeat 50 times.
-  const showApptDate = view !== "by_date";
+  const showApptDate = view !== "by_date" && view !== "booked10";
   // Where the patient is in the day — the same states the OPD board shows.
   // Only once the day has arrived: on a future date nobody has checked in yet,
   // so every row would read "Pending".
   const showVisitStatus = view === "by_date" && date <= todayStr();
+  const showBookedOn = view === "booked10";
   // The table's columns in render order — the same order as the <thead> cells
   // and the row's <td>s below. Compact mode hides columns by position, and the
   // expander spans them, so both read this list instead of counting by hand.
@@ -3428,6 +3470,8 @@ export default function GHMPage() {
         isMissed && "missed",
         isMissed && "miss_history",
         showApptDate && "appt_date",
+        showBookedOn && "booked_on",
+        showBookedOn && "booking_gap",
         showVisitStatus && "visit_status",
         "patient",
         "biomarkers",
@@ -3454,6 +3498,7 @@ export default function GHMPage() {
     [
       isMissed,
       showApptDate,
+      showBookedOn,
       showVisitStatus,
       showShowNoShow,
       showCallStatus,
@@ -3765,6 +3810,7 @@ export default function GHMPage() {
                 key={t.id}
                 type="button"
                 className={`ghm__tab ${view === t.id ? "ghm__tab--active" : ""}`}
+                title={t.hint}
                 onClick={() => switchView(t)}
               >
                 <t.Icon size={14} aria-hidden="true" />
@@ -3976,7 +4022,9 @@ export default function GHMPage() {
                         ? "Every patient on this list is assigned"
                         : memberOfFilter(obtTeam, callsFilter)
                           ? `No patients assigned to ${memberOfFilter(obtTeam, callsFilter)} on this list`
-                          : `No appointments found for ${date}`}
+                          : view === "booked10"
+                            ? `No patients on ${prettyDate(date)} were booked ${BOOKED_LONG_AGO_DAYS} or more days ago`
+                            : `No appointments found for ${date}`}
                 </div>
                 <div className="ghm__empty-sub">
                   {searchQ
@@ -4014,6 +4062,15 @@ export default function GHMPage() {
                         </th>
                       )}
                       {showApptDate && <th style={{ width: 120 }}>Appointment</th>}
+                      {showBookedOn && <th style={{ width: 150 }}>Booked On</th>}
+                      {showBookedOn && (
+                        <th
+                          style={{ width: 110 }}
+                          title="Days between the booking and the appointment"
+                        >
+                          Gap (days) ↑
+                        </th>
+                      )}
                       {showVisitStatus && <th style={{ width: 120 }}>Visit Status</th>}
                       <th className="tl" style={{ minWidth: 170 }}>
                         Patient
@@ -4191,6 +4248,25 @@ export default function GHMPage() {
                                   <span className="muted">—</span>
                                 )}
                               </td>
+                            )}
+
+                            {showBookedOn && (
+                              <td
+                                title={
+                                  row.booking_source
+                                    ? `Booked by ${row.booked_by_name || row.booking_source}`
+                                    : "First seen in Scribe (HealthRay booking)"
+                                }
+                              >
+                                {row.booked_at ? (
+                                  fmtDateTime(row.booked_at)
+                                ) : (
+                                  <span className="muted">—</span>
+                                )}
+                              </td>
+                            )}
+                            {showBookedOn && (
+                              <td>{row.booking_gap_days ?? <span className="muted">—</span>}</td>
                             )}
 
                             {showVisitStatus && (

@@ -180,6 +180,7 @@ const ROUTE_CAPABILITIES = [
   ["/api/patients", CAP.PATIENT_READ],
   ["/api/patients/directory-export", CAP.ADMIN],
   ["/api/documents", CAP.PATIENT_CHART],
+  ["/api/registration-documents", CAP.PATIENT_CHART],
   ["/api/outcomes", CAP.PATIENT_CHART],
   ["/api/conversations", CAP.PATIENT_READ],
   ["/api/messages", CAP.PATIENT_READ],

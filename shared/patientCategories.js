@@ -19,8 +19,8 @@
 //     minute ago is accepted by the very next request.
 const SEED = [
   { value: "", label: "— General", color: "gray" },
-  { value: "cghs", label: "CGHS", color: "blue" },
-  { value: "echs", label: "ECHS", color: "teal" },
+  { value: "cghs", label: "CGHS", color: "blue", requiresRef: true },
+  { value: "echs", label: "ECHS", color: "teal", requiresRef: true },
   { value: "himachal_govt", label: "Himachal Government", color: "green" },
   { value: "senior_citizen", label: "Senior Citizen", color: "purple" },
   { value: "special_discount", label: "Special Discount", color: "amber" },
@@ -47,6 +47,8 @@ export function hydrateCategories(rows) {
       label: r.display_label || r.label,
       color: r.color || "gray",
       sub: Boolean(r.parent_code),
+      requiresRef: Boolean(r.requires_ref),
+      parent: r.parent_code || null,
     }));
   if (!next.length) return PATIENT_CATEGORIES;
   PATIENT_CATEGORIES.length = 0;

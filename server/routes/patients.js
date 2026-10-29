@@ -12,6 +12,11 @@ import { validate } from "../middleware/validate.js";
 import { patientCreateSchema, patientHealthrayFetchSchema } from "../schemas/index.js";
 import { fetchHealthrayPatientByUhid } from "../services/healthray/patientImport.js";
 import { recordReferralSource } from "../crm/registration.js";
+import {
+  checkNewPatientIdentity,
+  identityFailure,
+  sealIdentity,
+} from "../services/patients/identity.js";
 import { requireDoctor, requireCapability } from "../middleware/auth.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
 import { patientDirectory } from "../services/patientDirectory.js";
@@ -600,6 +605,16 @@ router.post("/patients", validate(patientCreateSchema), async (req, res) => {
       });
     }
 
+    if (p.scheme_code && !(await isKnownScheme(p.scheme_code))) {
+      return res.status(400).json({ error: `Unknown scheme: ${p.scheme_code}` });
+    }
+    let deskIdentity = null;
+    if (!existing && p.registration === "desk") {
+      const check = await checkNewPatientIdentity(p);
+      if (!check.identity) return identityFailure(res, check);
+      deskIdentity = check;
+    }
+
     // Auto-generate file_no if not provided and creating a new patient
     if (!existing && !n(p.file_no)) {
       const seq = await pool.query(
@@ -615,7 +630,8 @@ router.post("/patients", validate(patientCreateSchema), async (req, res) => {
          sex=COALESCE($5,sex), file_no=COALESCE($6,file_no), abha_id=COALESCE($7,abha_id),
          health_id=COALESCE($8,health_id), aadhaar=COALESCE($9,aadhaar),
          govt_id=COALESCE($10,govt_id), govt_id_type=COALESCE($11,govt_id_type),
-         email=COALESCE($12,email), phone=COALESCE($13,phone)
+         email=COALESCE($12,email), phone=COALESCE($13,phone),
+         scheme_code=COALESCE(NULLIF($14,''),scheme_code), scheme_ref=COALESCE($15,scheme_ref)
          WHERE id=$1 RETURNING *`,
         [
           existing.id,
@@ -631,15 +647,19 @@ router.post("/patients", validate(patientCreateSchema), async (req, res) => {
           n(p.govt_id_type),
           n(p.email),
           n(p.phone),
+          n(p.scheme_code),
+          sealIdentity(p.scheme_ref),
         ],
       );
       const row = result.rows[0];
       if (row.aadhaar) row.aadhaar = decryptAadhaar(row.aadhaar);
+      if (row.scheme_ref) row.scheme_ref = decryptAadhaarFull(row.scheme_ref);
       res.json({ ...row, _isNew: false });
     } else {
       const result = await pool.query(
-        `INSERT INTO patients (name, phone, dob, age, sex, file_no, abha_id, health_id, aadhaar, govt_id, govt_id_type, email, address)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+        `INSERT INTO patients (name, phone, dob, age, sex, file_no, abha_id, health_id, aadhaar, govt_id, govt_id_type, email, address,
+                               blood_group, scheme_code, scheme_ref, id_pending)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
         [
           n(p.name),
           n(p.phone),
@@ -649,15 +669,20 @@ router.post("/patients", validate(patientCreateSchema), async (req, res) => {
           n(p.file_no),
           n(p.abha_id),
           n(p.health_id),
-          encryptAadhaar(n(p.aadhaar)),
-          n(p.govt_id),
-          n(p.govt_id_type),
+          deskIdentity ? sealIdentity(deskIdentity.identity.aadhaar) : encryptAadhaar(n(p.aadhaar)),
+          deskIdentity ? n(deskIdentity.identity.govt_id) : n(p.govt_id),
+          deskIdentity ? n(deskIdentity.identity.govt_id_type) : n(p.govt_id_type),
           n(p.email),
           n(p.address),
+          n(p.blood_group),
+          n(p.scheme_code),
+          sealIdentity(p.scheme_ref),
+          Boolean(deskIdentity?.requiredScan),
         ],
       );
       const row = result.rows[0];
       if (row.aadhaar) row.aadhaar = decryptAadhaar(row.aadhaar);
+      if (row.scheme_ref) row.scheme_ref = decryptAadhaarFull(row.scheme_ref);
       if (p.referral_source) {
         await recordReferralSource(
           row.id,

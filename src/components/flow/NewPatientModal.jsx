@@ -12,6 +12,14 @@ import { useState } from "react";
 import api from "../../services/api";
 import ReferralSourcePicker, { referralSourcePayload } from "../ReferralSourcePicker.jsx";
 import { toast } from "../../stores/uiStore";
+import RegistrationIdentityFields, {
+  EMPTY_FILES,
+  EMPTY_IDENTITY,
+  FILE_LABELS,
+  identityPayload,
+  registrationProblems,
+  uploadRegistrationFiles,
+} from "../patient/RegistrationIdentityFields.jsx";
 
 const SEXES = ["Male", "Female", "Other"]; // patientCreateSchema is a strict enum
 
@@ -26,9 +34,6 @@ const EMPTY = {
   file_no: "",
   abha_id: "",
   health_id: "",
-  aadhaar: "",
-  govt_id: "",
-  govt_id_type: "",
 };
 
 export default function NewPatientModal({ onClose, onCreated, initial = {} }) {
@@ -40,6 +45,11 @@ export default function NewPatientModal({ onClose, onCreated, initial = {} }) {
   // switches to it rather than minting a second chart for the same person.
   const [dupe, setDupe] = useState(null);
   const [more, setMore] = useState(false);
+  const [identity, setIdentity] = useState(EMPTY_IDENTITY);
+  const [files, setFiles] = useState(EMPTY_FILES);
+  const [idErrs, setIdErrs] = useState({});
+  const [created, setCreated] = useState(null);
+  const [failedFiles, setFailedFiles] = useState([]);
 
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   const phoneOk = !f.phone || /^[6-9]\d{9}$/.test(f.phone);
@@ -74,6 +84,12 @@ export default function NewPatientModal({ onClose, onCreated, initial = {} }) {
   const save = async (force = false) => {
     setErr("");
     if (!canSave) return;
+    const problems = registrationProblems(identity, files);
+    setIdErrs(problems);
+    if (Object.keys(problems).length) {
+      setErr(Object.values(problems)[0]);
+      return;
+    }
     setSaving(true);
     try {
       if (!force) {
@@ -95,24 +111,38 @@ export default function NewPatientModal({ onClose, onCreated, initial = {} }) {
         file_no: f.file_no.trim() || undefined,
         abha_id: f.abha_id.trim() || undefined,
         health_id: f.health_id.trim() || undefined,
-        aadhaar: f.aadhaar.trim() || undefined,
-        govt_id: f.govt_id.trim() || undefined,
-        govt_id_type: f.govt_id_type.trim() || undefined,
+        ...identityPayload(identity),
         referral_source: referral,
+        registration: "desk",
       };
       const { data } = await api.post("/api/patients", body);
-      toast(
-        data._isNew === false
-          ? `Updated existing record · File ${data.file_no}`
-          : `Registered ${data.name} · File ${data.file_no}`,
-        "success",
-      );
-      onCreated(data);
+      if (data._isNew === false) {
+        toast(`Updated existing record · File ${data.file_no}`, "success");
+        onCreated(data);
+        return;
+      }
+      setCreated(data);
+      await saveFiles(data, files);
     } catch (e) {
+      if (e?.response?.data?.fields) setIdErrs(e.response.data.fields);
       setErr(e?.response?.data?.error || e.message || "Could not save the patient");
     } finally {
       setSaving(false);
     }
+  };
+
+  const saveFiles = async (patient, toSave) => {
+    const { failed } = await uploadRegistrationFiles(patient.id, toSave);
+    setFailedFiles(failed);
+    if (failed.length) return;
+    toast(`Registered ${patient.name} · File ${patient.file_no}`, "success");
+    onCreated(patient);
+  };
+
+  const retryFiles = async () => {
+    setSaving(true);
+    await saveFiles(created, Object.fromEntries(failedFiles.map((k) => [k, files[k]])));
+    setSaving(false);
   };
 
   return (
@@ -241,7 +271,7 @@ export default function NewPatientModal({ onClose, onCreated, initial = {} }) {
             style={{ marginTop: 10 }}
             onClick={() => setMore((m) => !m)}
           >
-            {more ? "− Fewer fields" : "+ File number, ABHA, ID proof, email"}
+            {more ? "− Fewer fields" : "+ File number, ABHA, email"}
           </button>
 
           {more && (
@@ -270,37 +300,57 @@ export default function NewPatientModal({ onClose, onCreated, initial = {} }) {
                 <label>Health id</label>
                 <input value={f.health_id} onChange={(e) => set("health_id", e.target.value)} />
               </div>
-              <div className="flow-field">
-                <label>Aadhaar</label>
-                <input value={f.aadhaar} onChange={(e) => set("aadhaar", e.target.value)} />
-              </div>
-              <div className="flow-field">
-                <label>Other govt ID</label>
-                <input
-                  placeholder="Number"
-                  value={f.govt_id}
-                  onChange={(e) => set("govt_id", e.target.value)}
-                />
-              </div>
-              <div className="flow-field">
-                <label>Govt ID type</label>
-                <input
-                  placeholder="PAN / Voter / Driving licence"
-                  value={f.govt_id_type}
-                  onChange={(e) => set("govt_id_type", e.target.value)}
-                />
-              </div>
             </div>
           )}
+
+          <div style={{ marginTop: 14 }}>
+            <RegistrationIdentityFields
+              value={identity}
+              onChange={(v) => {
+                setIdentity(v);
+                setIdErrs({});
+              }}
+              errors={idErrs}
+              files={files}
+              onFilesChange={(next) => {
+                setFiles(next);
+                setIdErrs((e) => ({ ...e, id_proof: null, scheme_card: null }));
+              }}
+            />
+          </div>
 
           <div style={{ marginTop: 14 }}>
             <ReferralSourcePicker value={referralSource} onChange={setReferralSource} />
           </div>
 
+          {created && failedFiles.length > 0 && (
+            <div className="flow-alert flow-alert-red" role="alert" style={{ marginTop: 14 }}>
+              <b>{created.name}</b> ({created.file_no}) is registered, but the{" "}
+              {failedFiles.map((k) => FILE_LABELS[k]).join(", ")} could not be saved. The patient
+              stays “ID pending” until it is.
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                <button
+                  className="flow-btn flow-btn-primary flow-btn-mini"
+                  onClick={retryFiles}
+                  disabled={saving}
+                >
+                  {saving ? "Retrying…" : "Retry upload"}
+                </button>
+                <button
+                  className="flow-btn flow-btn-ghost flow-btn-mini"
+                  onClick={() => onCreated(created)}
+                  disabled={saving}
+                >
+                  Continue without it
+                </button>
+              </div>
+            </div>
+          )}
+
           <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
             <button
               className="flow-btn flow-btn-primary"
-              disabled={!canSave || saving}
+              disabled={!canSave || saving || Boolean(created)}
               onClick={() => save(false)}
             >
               {saving ? "Saving…" : "Register & fill check-in"}

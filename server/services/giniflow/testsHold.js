@@ -1,6 +1,7 @@
 import { CANCELLABLE_ORDER_STATUSES } from "../../../shared/testCancelReasons.js";
 import pool from "../../config/db.js";
 import { LAB_ONLY_DOCTOR } from "../../../shared/labOnly.js";
+import { labOnlyPredicate } from "./labOnlyVisits.js";
 import { NURSE_RAPID_TESTS } from "../../../shared/nurseTests.js";
 
 export const DOCTOR_LEG_STATUSES = [
@@ -105,7 +106,8 @@ const visitCheckedInAt = (v) =>
               WHERE ce.visit_id = ${v}.id AND ce.status = 'checked_in'), NOW())`;
 
 export const caseFromEarlierLabOnlyVisit = (v) =>
-  `(EXISTS (SELECT 1 FROM appointments la
+  `(NOT ${labOnlyPredicate(v, `'${LAB_ONLY_DOCTOR}'`)}
+    AND EXISTS (SELECT 1 FROM appointments la
              WHERE la.patient_id = ${v}.patient_id
                AND la.appointment_date = ${v}.visit_date
                AND lower(btrim(la.doctor_name)) = lower('${LAB_ONLY_DOCTOR}'))
