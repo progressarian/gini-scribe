@@ -160,3 +160,49 @@ Manual check after deploy:
    a test off the bill, a Scribe order for the same patient and day, and the `lab_billing` step.
 2. **Background check:** only a safety sweep once an hour, not every minute.
 3. **30 s shared copy (plan 90):** kept in front of the list.
+
+## Built (30 Oct 2026)
+
+How "saved at the event" is done: **database triggers note every event, and the stage is worked
+out from that note.** Hooking each of the ~20 code paths that change a case by hand would miss
+some (scripts, the lab sync's many update paths). A trigger fires whichever code makes the change.
+
+- Migration `2026-12-24_lab_cases_outside_stage.sql`:
+  - `lab_cases.outside_stage`, `outside_uploaded_at`, `outside_stage_at`.
+  - `giniflow_outside_stage_queue`, a small change queue (case, or patient and day, or "every
+    case").
+  - Triggers that add one queue row per event:
+    - `lab_cases` insert, and updates of the columns that matter (dates, patient, HealthRay JSON,
+      status, tests, source, PDF, results)
+    - every `giniflow_lab_case_actions` change
+    - a `giniflow_patient_bills` insert, or a status or items change
+    - a `giniflow_lab_orders` insert, delete, or visit/kind/urgency change
+    - a `lab_billing` step insert or status change
+    - Settings → Services: outsourced tick, active, catalogue link, aliases, catalogue name
+  - A trigger only adds one small row. It never runs the stage check inside the station's
+    transaction.
+- Index migrations `…_outside_stage_index_pending.sql` and `…_outside_stage_index_uploaded.sql`
+  (`CONCURRENTLY`, one each).
+- `services/giniflow/outsideStage.js`:
+  - `refreshQueuedOutsideStages()` empties the queue and saves the stage of exactly those cases,
+    in one statement.
+  - `refreshOutsideStage(db, caseNos)` does the same for a given list of cases.
+  - `sweepOutsideStage()` re-checks the whole window in batches of 100. It has a dry-run mode.
+  - The predicate is today's, unchanged.
+- `outsidePending.js`: the list empties the queue first, then reads the stored stage. The
+  outsourced-name cache is gone, because the list no longer needs it.
+- `middleware/outsidePendingRefresh.js`: one rule. Billing master changes clear the shared copy
+  like lab actions do.
+- Worker (`cron/index.js`): the hourly check `sweepOutsideStage`, logged as "Outside reports stage
+  check: N of M case(s) corrected". `GINIFLOW_OUTSIDE_SWEEP_MS` overrides the hour.
+- `server/scripts/backfill-outside-stage.mjs`: dry run by default, `--commit` to save. Batches
+  of 100 with a short pause, rerunnable, stops on the first error.
+- Tests:
+  - `G131-outside-stage-stored` (11) passes.
+  - `G63`, `G64` and `G129` pass. G129 test 5 now checks that a billing master change clears the
+    shared copy (the name cache it used to test no longer exists). G129 also puts the 30 s window
+    back after it runs, so later specs aren't served its cached rows.
+
+Note found while building: "not on bill" only applies to a case whose sample was never taken, and
+such a case is never on this list. So the bill and `lab_billing` triggers rarely change a stage.
+They are kept because they cost one small row each.

@@ -29,6 +29,7 @@ import { getLoginCooldownMs } from "../healthray/client.js";
 import { BATCH_ENABLED, processBatchQueue } from "../batch/batchQueue.js";
 import { BATCH_HANDLERS } from "../batch/handlers.js";
 import { syncAppointmentsToFlow } from "../giniflow/appointmentSync.js";
+import { sweepOutsideStage } from "../giniflow/outsideStage.js";
 import { runMachineSync } from "../giniflow/machineSync.js";
 import { runRequestedHealthrayRefresh } from "../giniflow/healthrayRefresh.js";
 import { autoCategoriseDay } from "../giniflow/triage.js";
@@ -361,6 +362,27 @@ function scheduleNextTriagePrep(delayMs) {
   }, delayMs);
 }
 
+const OUTSIDE_SWEEP_BREAK_MS = Number(process.env.GINIFLOW_OUTSIDE_SWEEP_MS) || 60 * 60 * 1000;
+let outsideSweepRunning = false;
+let outsideSweepTimeoutId = null;
+
+function scheduleNextOutsideSweep(delayMs) {
+  if (!outsideSweepRunning) return;
+  outsideSweepTimeoutId = setTimeout(async () => {
+    outsideSweepTimeoutId = null;
+    if (!outsideSweepRunning) return;
+    try {
+      const r = await sweepOutsideStage();
+      console.log(
+        `[Cron] Outside reports stage check: ${r.fixed} of ${r.checked} case(s) corrected`,
+      );
+    } catch (e) {
+      console.error("[Cron] Outside reports stage check failed:", e.message);
+    }
+    scheduleNextOutsideSweep(OUTSIDE_SWEEP_BREAK_MS);
+  }, delayMs);
+}
+
 let recoveryIntervalId = null;
 let dailyBackfillIntervalId = null;
 let stuckStatusIntervalId = null;
@@ -463,6 +485,8 @@ export function startCronJobs() {
     }
     triageLoopRunning = true;
     scheduleNextTriagePrep(20_000);
+    outsideSweepRunning = true;
+    scheduleNextOutsideSweep(OUTSIDE_SWEEP_BREAK_MS);
     console.log(
       `[Cron] Gini Flow triage prep (tomorrow + categorisation) every ${Math.round(TRIAGE_LOOP_BREAK_MS / 60000)}m`,
     );
@@ -711,6 +735,11 @@ export function stopCronJobs() {
   if (triageLoopTimeoutId) {
     clearTimeout(triageLoopTimeoutId);
     triageLoopTimeoutId = null;
+  }
+  outsideSweepRunning = false;
+  if (outsideSweepTimeoutId) {
+    clearTimeout(outsideSweepTimeoutId);
+    outsideSweepTimeoutId = null;
   }
   if (healthrayLoopRunning || healthrayLoopTimeoutId) {
     healthrayLoopRunning = false;

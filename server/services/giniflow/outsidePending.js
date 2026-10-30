@@ -1,14 +1,16 @@
 import pool from "../../config/db.js";
 import { SENT_OUTSIDE } from "../../../shared/labStages.js";
-import { FLAT } from "./labCatalog.js";
 import { IST_TODAY } from "./statusEngine.js";
-import { LIVE_LAB_CASE_SQL } from "./testsHold.js";
+import {
+  CASE_PATIENT_JOIN,
+  IN_WINDOW_SQL,
+  caseAction,
+  refreshQueuedOutsideStages,
+} from "./outsideStage.js";
 
 export const OUTSIDE_PAGE_SIZE = 50;
 
 const STATUSES = ["collected", "sent", "uploaded"];
-
-const CASE_LOOKBACK_DAYS = 30;
 
 const istDay = (column) => `(${column} AT TIME ZONE 'Asia/Kolkata')::date`;
 
@@ -16,26 +18,9 @@ const pendingTtlMs = () => {
   const value = Number(process.env.GINIFLOW_OUTSIDE_PENDING_TTL_MS);
   return Number.isFinite(value) && value >= 0 ? value : 30_000;
 };
-const NAMES_TTL_MS = 10 * 60_000;
-
-const OUTSIDE_NAMES_SQL = `
-  SELECT ${FLAT("c.test_name")} AS flat
-    FROM service_items i JOIN giniflow_test_catalog c ON c.id = i.test_catalog_id
-   WHERE i.is_active AND i.is_outsourced
-  UNION
-  SELECT a.flat_name
-    FROM service_item_aliases a JOIN service_items i ON i.id = a.service_item_id
-   WHERE i.is_active AND i.is_outsourced`;
-
-const caseAction = (action, alias) => `
-  LEFT JOIN LATERAL (
-    SELECT a.created_at, a.actor_id FROM giniflow_lab_case_actions a
-     WHERE a.case_no = lc.case_no AND a.action = '${action}'
-  ) ${alias} ON TRUE`;
 
 const PENDING_CTE = `
-  WITH outside_names AS (SELECT unnest($1::text[]) AS flat),
-  pending AS (
+  WITH pending AS (
     SELECT 'order' AS kind, o.id::text AS ref, v.visit_date,
            CASE o.sample_status WHEN '${SENT_OUTSIDE}' THEN 'sent'
                                 WHEN 'uploaded' THEN 'uploaded'
@@ -72,10 +57,7 @@ const PENDING_CTE = `
        AND (o.sample_status IN ('sample_collected', '${SENT_OUTSIDE}')
             OR (o.sample_status = 'uploaded' AND ${istDay("o.uploaded_at")} = ${IST_TODAY}))
     UNION ALL
-    SELECT 'case', lc.case_no, lc.case_date,
-           CASE WHEN lc.pdf_storage_path IS NOT NULL THEN 'uploaded'
-                WHEN sent.created_at IS NOT NULL THEN 'sent'
-                ELSE 'collected' END,
+    SELECT 'case', lc.case_no, lc.case_date, lc.outside_stage,
            pt.id, COALESCE(pt.name, lc.raw_list_json->'patient'->>'patient_name'),
            COALESCE(pt.file_no, lc.raw_list_json->'patient'->>'healthray_uid'),
            pt.age, pt.sex,
@@ -84,48 +66,25 @@ const PENDING_CTE = `
                     (COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'collected_on')::timestamptz),
            sent.created_at,
            COALESCE(sender.short_name, sender.name),
-           doc.created_at,
+           lc.outside_uploaded_at,
            NULL,
            doc.id,
            lc.fetched_at
       FROM lab_cases lc
-      LEFT JOIN LATERAL (
-        SELECT u.id FROM patients u
-         WHERE u.file_no = lc.raw_list_json->'patient'->>'healthray_uid' LIMIT 1
-      ) uid ON TRUE
+      ${CASE_PATIENT_JOIN}
       LEFT JOIN patients pt ON pt.id = COALESCE(lc.patient_id, uid.id)
       ${caseAction(SENT_OUTSIDE, "sent")}
       ${caseAction("sample_taken", "taken")}
       LEFT JOIN doctors sender ON sender.id = sent.actor_id
       LEFT JOIN LATERAL (
-        SELECT d.id, d.created_at FROM documents d
-         WHERE lc.pdf_storage_path IS NOT NULL AND d.storage_path = lc.pdf_storage_path
+        SELECT d.id FROM documents d
+         WHERE lc.outside_stage = 'uploaded' AND d.storage_path = lc.pdf_storage_path
          ORDER BY d.id DESC LIMIT 1
       ) doc ON TRUE
-     WHERE lc.case_no IN (SELECT r.case_no FROM lab_cases r
-                           WHERE r.case_date >= ${IST_TODAY} - ${CASE_LOOKBACK_DAYS}
-                          UNION
-                          SELECT s.case_no FROM giniflow_lab_case_actions s
-                           WHERE s.action = '${SENT_OUTSIDE}')
-       AND ${LIVE_LAB_CASE_SQL("lc")}
-       AND ((lc.pdf_storage_path IS NULL
-             AND COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on' IS NULL
-             AND NOT EXISTS (SELECT 1 FROM giniflow_lab_case_actions a
-                              WHERE a.case_no = lc.case_no AND a.action = 'report_uploaded'))
-            OR (lc.pdf_storage_path IS NOT NULL AND ${istDay("doc.created_at")} = ${IST_TODAY}))
-       AND (sent.created_at IS NOT NULL OR taken.created_at IS NOT NULL
-            OR lc.raw_list_json->>'phlebotomy_status' = 'Completed'
-            OR COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'collected_on' IS NOT NULL)
-       AND (sent.created_at IS NOT NULL
-            OR lc.case_source = 'outsource'
-            OR (cardinality(lc.test_names) > 0
-                AND NOT EXISTS (SELECT 1 FROM unnest(lc.test_names) n
-                                 WHERE ${FLAT("n")} NOT IN (SELECT flat FROM outside_names))))
-       AND NOT EXISTS (
-         SELECT 1 FROM giniflow_lab_orders o
-           JOIN giniflow_visits gv ON gv.id = o.visit_id
-          WHERE gv.visit_date = lc.case_date AND o.kind = 'lab' AND o.urgency = 'today'
-            AND gv.patient_id = COALESCE(lc.patient_id, uid.id))
+     WHERE (lc.outside_stage IN ('collected', 'sent')
+            OR (lc.outside_stage = 'uploaded'
+                AND lc.outside_uploaded_at >= ${IST_TODAY}::timestamp AT TIME ZONE 'Asia/Kolkata'))
+       AND ${IN_WINDOW_SQL}
   )`;
 
 const PENDING_SQL = `
@@ -139,20 +98,11 @@ const PENDING_SQL = `
 const istDate = (when = new Date()) =>
   when.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 
-const cache = { names: null, namesAt: 0, rows: null, day: null, at: 0, building: null, epoch: 0 };
+const cache = { rows: null, day: null, at: 0, building: null, epoch: 0 };
 
-export function forgetOutsidePending({ names = false } = {}) {
+export function forgetOutsidePending() {
   cache.rows = null;
   cache.epoch += 1;
-  if (names) cache.names = null;
-}
-
-async function outsideNames(db, now) {
-  if (cache.names && now - cache.namesAt < NAMES_TTL_MS) return cache.names;
-  const { rows } = await db.query(OUTSIDE_NAMES_SQL);
-  cache.names = rows.map((row) => row.flat);
-  cache.namesAt = now;
-  return cache.names;
 }
 
 export async function pendingRows(db = pool, now = Date.now()) {
@@ -163,7 +113,8 @@ export async function pendingRows(db = pool, now = Date.now()) {
   }
   const epoch = cache.epoch;
   const promise = (async () => {
-    const { rows } = await db.query(PENDING_SQL, [await outsideNames(db, now)]);
+    await refreshQueuedOutsideStages(db);
+    const { rows } = await db.query(PENDING_SQL);
     if (cache.epoch === epoch) Object.assign(cache, { rows, day, at: now });
     return rows;
   })();

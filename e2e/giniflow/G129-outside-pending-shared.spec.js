@@ -7,6 +7,7 @@ import { assertTestDatabase } from "../setup/guard.mjs";
 import { extraVisit, newTag, setUp, tearDown } from "../billing/phase4/p4-bills-fixture.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
+const ttlBefore = process.env.GINIFLOW_OUTSIDE_PENDING_TTL_MS;
 process.env.GINIFLOW_OUTSIDE_PENDING_TTL_MS = "30000";
 const outside = await import("../../server/services/giniflow/outsidePending.js");
 const { default: refresh } = await import("../../server/middleware/outsidePendingRefresh.js");
@@ -18,11 +19,10 @@ let visit;
 let orderId;
 
 const counting = () => {
-  const counter = { builds: 0, names: 0 };
+  const counter = { builds: 0 };
   counter.db = {
     query(text, params) {
       if (/FROM pending/.test(text)) counter.builds += 1;
-      if (/is_outsourced/.test(text) && /service_item_aliases/.test(text)) counter.names += 1;
       return db.query(text, params);
     },
   };
@@ -67,10 +67,12 @@ test.describe.serial("G129 outside reports pending is shared, not rebuilt per po
     ids = await setUp(tag);
     visit = (await extraVisit(ids, "SharedOutside")).visit;
     orderId = await outsourcedOrder("sample_collected");
-    outside.forgetOutsidePending({ names: true });
+    outside.forgetOutsidePending();
   });
 
   test.afterAll(async () => {
+    process.env.GINIFLOW_OUTSIDE_PENDING_TTL_MS = ttlBefore;
+    outside.forgetOutsidePending();
     await tearDown(ids);
   });
 
@@ -136,15 +138,15 @@ test.describe.serial("G129 outside reports pending is shared, not rebuilt per po
     expect(counter.builds).toBe(6);
   });
 
-  test("5. a billing master change clears the outsourced-name list too", async () => {
+  test("5. a billing master change clears the shared set", async () => {
     outside.forgetOutsidePending();
     const counter = counting();
     await outside.pendingRows(counter.db);
-    await outside.pendingRows(counter.db, Date.now() + 31_000);
-    expect(counter.names).toBe(0);
+    await outside.pendingRows(counter.db);
+    expect(counter.builds).toBe(1);
     through("PATCH", "/api/billing/master/items/1", 200);
     await outside.pendingRows(counter.db);
-    expect(counter.names).toBe(1);
+    expect(counter.builds).toBe(2);
   });
 
   test("6. the badge count route matches the list's counts and is lab-only", async () => {
