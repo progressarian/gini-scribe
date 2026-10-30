@@ -168,7 +168,7 @@ export default function PlanPage() {
               }}
             >
               <div>
-                <div style={{ fontWeight: 800, color: "#94a3b8", marginBottom: 3 }}>
+                <div style={{ fontWeight: 800, color: "#64748b", marginBottom: 3 }}>
                   ORIGINAL AI
                 </div>
                 {(shadowOriginal.diagnoses || []).map((d, i) => (
@@ -482,7 +482,7 @@ export default function PlanPage() {
                           </span>
                         )}
                         <span
-                          style={{ fontSize: 8, color: "#94a3b8", fontWeight: 500, marginLeft: 4 }}
+                          style={{ fontSize: 8, color: "#64748b", fontWeight: 500, marginLeft: 4 }}
                         >
                           {f.category}
                         </span>
@@ -643,7 +643,7 @@ export default function PlanPage() {
                               borderRadius: 6,
                               border: `1px solid ${rxFbSeverity === v ? c : "#e2e8f0"}`,
                               background: rxFbSeverity === v ? c + "15" : "white",
-                              color: rxFbSeverity === v ? c : "#94a3b8",
+                              color: rxFbSeverity === v ? c : "#64748b",
                               cursor: "pointer",
                               fontWeight: 700,
                             }}
@@ -697,7 +697,7 @@ export default function PlanPage() {
       )}
 
       {!moData && !conData ? (
-        <div style={{ textAlign: "center", padding: 24, color: "#94a3b8" }}>
+        <div style={{ textAlign: "center", padding: 24, color: "#64748b" }}>
           Complete MO & Consultant first
         </div>
       ) : (
@@ -851,7 +851,7 @@ export default function PlanPage() {
                   opacity: 0.4,
                   cursor: "pointer",
                   fontSize: 10,
-                  color: "#94a3b8",
+                  color: "#64748b",
                 }}
                 onClick={() => toggleBlock("summary")}
               >
@@ -1241,7 +1241,7 @@ export default function PlanPage() {
                               </span>
                             )}
                             {m.composition && (
-                              <div style={{ fontSize: 9, color: "#94a3b8" }}>{m.composition}</div>
+                              <div style={{ fontSize: 9, color: "#64748b" }}>{m.composition}</div>
                             )}
                           </td>
                           <td style={{ padding: "4px 8px", textAlign: "center" }}>
@@ -1588,7 +1588,7 @@ export default function PlanPage() {
                             {group.hospital}
                           </div>
                         )}
-                        <div style={{ fontSize: 9, color: "#94a3b8" }}>
+                        <div style={{ fontSize: 9, color: "#64748b" }}>
                           {group.meds.length} medicine{group.meds.length > 1 ? "s" : ""}
                         </div>
                       </div>
@@ -1631,12 +1631,12 @@ export default function PlanPage() {
                                 style={{
                                   fontSize: 12,
                                   fontWeight: 700,
-                                  color: status === "stop" ? "#94a3b8" : "#1e293b",
+                                  color: status === "stop" ? "#64748b" : "#1e293b",
                                   textDecoration: status === "stop" ? "line-through" : "none",
                                 }}
                               >
                                 {m.name}{" "}
-                                <span style={{ fontSize: 10, fontWeight: 400, color: "#94a3b8" }}>
+                                <span style={{ fontSize: 10, fontWeight: 400, color: "#64748b" }}>
                                   {m.composition}
                                 </span>
                               </div>
@@ -1941,7 +1941,7 @@ export default function PlanPage() {
                                       </span>
                                     )}
                                   </div>
-                                  <div style={{ fontSize: 10, color: "#94a3b8" }}>
+                                  <div style={{ fontSize: 10, color: "#64748b" }}>
                                     {m.dose} {m.frequency}{" "}
                                     {m.timing && m.timing !== m.frequency ? `• ${m.timing}` : ""}{" "}
                                     {(m.forDiagnosis || []).length > 0
@@ -2159,7 +2159,7 @@ export default function PlanPage() {
                             background: "#f8fafc",
                             textAlign: "center",
                             fontSize: 9,
-                            color: "#94a3b8",
+                            color: "#64748b",
                             borderTop: "1px solid #e2e8f0",
                           }}
                         >
@@ -2960,7 +2960,7 @@ export default function PlanPage() {
                 display: "flex",
                 justifyContent: "space-between",
                 fontSize: 10,
-                color: "#94a3b8",
+                color: "#64748b",
               }}
             >
               <div>

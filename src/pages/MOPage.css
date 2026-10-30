@@ -198,7 +198,7 @@
   color: #9a3412;
 }
 .mo__brief-vital-prev {
-  color: #94a3b8;
+  color: #64748b;
   margin-left: 3px;
 }
 .mo__brief-new-labs {
@@ -363,7 +363,7 @@
 }
 .mo__data-med-composition {
   font-size: 9px;
-  color: #94a3b8;
+  color: #64748b;
 }
 .mo__data-inv-item {
   display: flex;
@@ -379,7 +379,7 @@
 }
 .mo__data-inv-date {
   font-size: 9px;
-  color: #94a3b8;
+  color: #64748b;
   margin-left: 4px;
 }
 .mo__data-inv-value-group {
@@ -401,7 +401,7 @@
 }
 .mo__data-inv-ref {
   font-size: 9px;
-  color: #94a3b8;
+  color: #64748b;
 }
 .mo__data-missing {
   background: #eff6ff;

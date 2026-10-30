@@ -401,7 +401,7 @@ export default function FindPage() {
                 border: "1px solid #e2e8f0",
                 borderRadius: 6,
                 fontSize: 11,
-                color: bookForm.tm ? "#1e293b" : "#94a3b8",
+                color: bookForm.tm ? "#1e293b" : "#64748b",
               }}
             >
               <option value="">{bookForm.doc ? "Time slot" : "Pick doctor first"}</option>
@@ -422,7 +422,7 @@ export default function FindPage() {
                 border: `1px solid ${bookErrors.doc ? "#ef4444" : "#e2e8f0"}`,
                 borderRadius: 6,
                 fontSize: 11,
-                color: bookForm.doc ? "#1e293b" : "#94a3b8",
+                color: bookForm.doc ? "#1e293b" : "#64748b",
               }}
             >
               <option value="" disabled>
@@ -542,7 +542,7 @@ export default function FindPage() {
               style={{
                 padding: 20,
                 textAlign: "center",
-                color: "#94a3b8",
+                color: "#64748b",
                 fontSize: 12,
                 background: "white",
                 borderRadius: "0 0 8px 8px",

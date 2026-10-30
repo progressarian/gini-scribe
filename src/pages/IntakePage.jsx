@@ -395,7 +395,7 @@ export default function IntakePage() {
                   }}
                 >
                   📋 Last Treatment Plan
-                  <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500 }}>
+                  <span style={{ fontSize: 11, color: "#64748b", fontWeight: 500 }}>
                     —{" "}
                     {lastDate
                       ? lastDate.toLocaleDateString("en-IN", {
@@ -467,7 +467,7 @@ export default function IntakePage() {
                             <td style={{ padding: "5px 8px", fontSize: 11, color: "#64748b" }}>
                               {m.timing || ""}
                             </td>
-                            <td style={{ padding: "5px 8px", fontSize: 10, color: "#94a3b8" }}>
+                            <td style={{ padding: "5px 8px", fontSize: 10, color: "#64748b" }}>
                               {(m.forDiagnosis || []).join(", ")}
                             </td>
                           </tr>
@@ -732,7 +732,7 @@ export default function IntakePage() {
                             >
                               <td style={{ padding: "8px", fontWeight: 700, color: "#1e293b" }}>
                                 <div style={{ fontSize: 12 }}>{mk.name}</div>
-                                <div style={{ fontSize: 9, color: "#94a3b8", fontWeight: 500 }}>
+                                <div style={{ fontSize: 9, color: "#64748b", fontWeight: 500 }}>
                                   {mk.dxLabels.join(", ")}
                                 </div>
                               </td>
@@ -761,7 +761,7 @@ export default function IntakePage() {
                                           style={{
                                             fontSize: isLast ? 14 : 10,
                                             fontWeight: isLast ? 800 : 500,
-                                            color: isLast ? st.bg : "#94a3b8",
+                                            color: isLast ? st.bg : "#64748b",
                                             background: isLast ? `${st.bg}12` : "none",
                                             padding: isLast ? "2px 6px" : "0",
                                             borderRadius: 4,
@@ -1384,7 +1384,7 @@ export default function IntakePage() {
             <div style={{ fontWeight: 600, color: "#7c3aed", fontSize: 11 }}>
               Upload Lab / Imaging Reports
             </div>
-            <div style={{ fontSize: 9, color: "#94a3b8" }}>Multiple files supported</div>
+            <div style={{ fontSize: 9, color: "#64748b" }}>Multiple files supported</div>
           </div>
           {/* Also keep old single upload for backward compat */}
           {labImageData && !labData && (

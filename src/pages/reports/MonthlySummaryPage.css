@@ -94,6 +94,11 @@
   color: var(--ui-accent);
   font-weight: 600;
 }
+@media (pointer: coarse) {
+  .fset.bill-ui .ms-pick {
+    min-height: 32px;
+  }
+}
 .fset.bill-ui .ms-pick:hover,
 .fset.bill-ui .ms-sort:hover {
   text-decoration: underline;

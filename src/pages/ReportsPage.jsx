@@ -276,7 +276,7 @@ export default function ReportsPage() {
                                   {pct}%
                                 </span>
                               </div>
-                              <div style={{ fontSize: 9, color: "#94a3b8" }}>
+                              <div style={{ fontSize: 9, color: "#64748b" }}>
                                 Target: {bio.target}
                               </div>
                             </div>
@@ -344,9 +344,9 @@ export default function ReportsPage() {
                             )}
                             <span style={{ color: "#dc2626" }}>❌ {bio.out_control}</span>
                             {bio.no_data > 0 && (
-                              <span style={{ color: "#94a3b8" }}>— {bio.no_data} no data</span>
+                              <span style={{ color: "#64748b" }}>— {bio.no_data} no data</span>
                             )}
-                            <span style={{ marginLeft: "auto", fontSize: 8, color: "#94a3b8" }}>
+                            <span style={{ marginLeft: "auto", fontSize: 8, color: "#64748b" }}>
                               {isExpanded ? "▲ Hide" : "▼ Details"}
                             </span>
                           </div>
@@ -401,7 +401,7 @@ export default function ReportsPage() {
               </button>
             </div>
           ) : reportDx.length === 0 ? (
-            <div style={{ textAlign: "center", padding: 30, color: "#94a3b8" }}>
+            <div style={{ textAlign: "center", padding: 30, color: "#64748b" }}>
               <div style={{ fontSize: 24, marginBottom: 4 }}>🏥</div>
               <div style={{ fontSize: 12 }}>
                 No diagnosis data yet. Import patient records to see distribution.

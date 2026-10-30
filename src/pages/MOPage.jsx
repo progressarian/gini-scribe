@@ -384,7 +384,7 @@ export default function MOPage() {
                           >
                             <strong style={{ color: "#9a3412" }}>{x.l}:</strong> {x.v}
                             {x.p && (
-                              <span style={{ color: "#94a3b8", marginLeft: 3 }}>(prev: {x.p})</span>
+                              <span style={{ color: "#64748b", marginLeft: 3 }}>(prev: {x.p})</span>
                             )}
                           </span>
                         ))}
@@ -642,7 +642,7 @@ export default function MOPage() {
                         <td style={{ padding: "3px 8px" }}>
                           <strong>{m.name}</strong>
                           {m.composition && (
-                            <div style={{ fontSize: 9, color: "#94a3b8" }}>{m.composition}</div>
+                            <div style={{ fontSize: 9, color: "#64748b" }}>{m.composition}</div>
                           )}
                         </td>
                         <td style={{ padding: "3px 8px", textAlign: "center" }}>{m.dose}</td>
@@ -683,7 +683,7 @@ export default function MOPage() {
                     <span style={{ fontSize: 12, fontWeight: 600 }}>
                       {inv.test}
                       {inv.date && (
-                        <span style={{ fontSize: 9, color: "#94a3b8", marginLeft: 4 }}>
+                        <span style={{ fontSize: 9, color: "#64748b", marginLeft: 4 }}>
                           ({inv.date})
                         </span>
                       )}
@@ -726,7 +726,7 @@ export default function MOPage() {
                       )}
                       {!inv.flag && <span style={{ color: "#059669", fontSize: 10 }}>✅</span>}
                       {inv.ref && (
-                        <span style={{ fontSize: 9, color: "#94a3b8" }}>({inv.ref})</span>
+                        <span style={{ fontSize: 9, color: "#64748b" }}>({inv.ref})</span>
                       )}
                     </span>
                   </div>

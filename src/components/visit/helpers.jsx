@@ -726,7 +726,7 @@ export const BiomarkerCard = memo(function BiomarkerCard({
           >
             {displayValue}
           </span>
-          {unit && <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>{unit}</span>}
+          {unit && <span style={{ fontSize: 10, color: "#64748b", fontWeight: 500 }}>{unit}</span>}
           {trendArrow && (
             <span style={{ fontSize: 12, fontWeight: 700, color: stateColor }}>{trendArrow}</span>
           )}
@@ -748,7 +748,7 @@ export const BiomarkerCard = memo(function BiomarkerCard({
             justifyContent: "space-between",
             padding: "3px 14px 6px",
             fontSize: 8,
-            color: "#94a3b8",
+            color: "#64748b",
           }}
         >
           <span>{shortDate(firstDate)}</span>
@@ -783,7 +783,7 @@ export const BiomarkerCard = memo(function BiomarkerCard({
             fontSize: 10,
           }}
         >
-          <span style={{ color: "#94a3b8", fontWeight: 600 }}>{goalLabel || "Goal"}</span>
+          <span style={{ color: "#64748b", fontWeight: 600 }}>{goalLabel || "Goal"}</span>
           <span style={{ fontWeight: 700, color: stateColor }}>{goal}</span>
         </div>
       )}

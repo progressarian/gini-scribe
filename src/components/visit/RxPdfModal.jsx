@@ -338,7 +338,7 @@ const RxPdfModal = memo(function RxPdfModal({
               <div style={{ fontSize: 13, fontWeight: 600 }}>
                 {status || "Generating prescription PDF…"}
               </div>
-              <div style={{ fontSize: 11, color: "#94a3b8" }}>
+              <div style={{ fontSize: 11, color: "#64748b" }}>
                 This usually takes a few seconds.
               </div>
               <style>{`@keyframes rxspin{to{transform:rotate(360deg)}}`}</style>

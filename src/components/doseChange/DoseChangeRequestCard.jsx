@@ -142,7 +142,7 @@ export default function DoseChangeRequestCard({ request: r, onDecide, compact = 
           {r.patient_reason}
         </div>
       ) : (
-        <div style={{ fontSize: 12, color: "#94a3b8", fontStyle: "italic", marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: "#64748b", fontStyle: "italic", marginBottom: 8 }}>
           (Patient did not include a note)
         </div>
       )}

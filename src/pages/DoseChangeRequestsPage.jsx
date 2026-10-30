@@ -284,7 +284,7 @@ export default function DoseChangeRequestsPage() {
         </div>
       )}
 
-      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6, textAlign: "right" }}>
+      <div style={{ fontSize: 11, color: "#64748b", marginTop: 6, textAlign: "right" }}>
         {rows.length} of {total} request{total === 1 ? "" : "s"}
       </div>
     </div>

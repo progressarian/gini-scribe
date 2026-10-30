@@ -103,7 +103,7 @@
 }
 .intake__fu-plan-date {
   font-size: 11px;
-  color: #94a3b8;
+  color: #64748b;
   font-weight: 500;
 }
 .intake__fu-med-title {
@@ -138,7 +138,7 @@
 .intake__fu-med-dx {
   padding: 5px 8px;
   font-size: 10px;
-  color: #94a3b8;
+  color: #64748b;
 }
 .intake__fu-med-badge {
   font-size: 8px;
@@ -296,7 +296,7 @@
 }
 .intake__fu-bio-marker-dx {
   font-size: 9px;
-  color: #94a3b8;
+  color: #64748b;
   font-weight: 500;
 }
 .intake__fu-bio-today {
@@ -625,7 +625,7 @@
 }
 .intake__upload-hint {
   font-size: 9px;
-  color: #94a3b8;
+  color: #64748b;
 }
 .intake__extract-single-btn {
   align-self: stretch;

@@ -990,7 +990,7 @@
 }
 .fset.bill-ui .bill-src--base {
   opacity: 1;
-  color: #94a3b8;
+  color: #64748b;
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--ui-line);
 }
@@ -1655,7 +1655,7 @@
   user-select: none;
 }
 .fset.bill-ui.flow-set-page .fset__toggle:has(input:checked) {
-  color: var(--ui-accent);
+  color: #00766a;
   background: var(--ui-accent-soft);
   border-color: var(--ui-accent);
 }
@@ -1694,7 +1694,7 @@
   height: 28px;
   padding: 0;
   font-size: 13px;
-  color: #94a3b8;
+  color: #64748b;
   background: none;
   border: 0;
   border-radius: 7px;

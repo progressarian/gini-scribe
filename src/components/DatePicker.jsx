@@ -128,7 +128,7 @@ export default function DatePicker({
     border: "1px solid #e2e8f0",
     borderRadius: 10,
     fontSize: 13,
-    color: value ? "#0f172a" : "#94a3b8",
+    color: value ? "#0f172a" : "#64748b",
     background: "#fff",
     outline: "none",
     WebkitAppearance: "none",
@@ -178,7 +178,7 @@ export default function DatePicker({
               top: "50%",
               transform: "translateY(-50%)",
               fontSize: 14,
-              color: "#94a3b8",
+              color: "#64748b",
               pointerEvents: "none",
               lineHeight: 1,
             }}
@@ -293,7 +293,7 @@ export default function DatePicker({
                   style={{
                     fontSize: 10,
                     fontWeight: 800,
-                    color: "#94a3b8",
+                    color: "#64748b",
                     textAlign: "center",
                     padding: "4px 0",
                     letterSpacing: 0.4,

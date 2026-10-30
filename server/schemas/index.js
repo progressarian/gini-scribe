@@ -1027,6 +1027,7 @@ export const giniflowCancelSchema = z.object({
 });
 
 export const homeSampleRecordSchema = z.object({
+  brief: z.boolean().optional(),
   sample: z.enum(["collected", "not_collected"]),
   collectedTime: z.string().trim().max(5).nullish(),
   collectedBy: z.string().trim().max(60).nullish(),

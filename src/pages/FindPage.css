@@ -8,6 +8,7 @@
 /* Header row */
 .find__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin-bottom: 10px;
@@ -56,7 +57,7 @@
 
 .find__stat-label {
   font-size: 9px;
-  color: #94a3b8;
+  color: #64748b;
   font-weight: 600;
 }
 
@@ -88,7 +89,7 @@
   top: 50%;
   transform: translateY(-50%);
   font-size: 14px;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 /* Filters */
@@ -149,7 +150,7 @@
   margin-left: auto;
   background: none;
   border: none;
-  color: #94a3b8;
+  color: #64748b;
   cursor: pointer;
   font-size: 13px;
 }
@@ -191,7 +192,7 @@
 
 .find__appt-type {
   font-size: 9px;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .find__appt-name {
@@ -203,7 +204,7 @@
 
 .find__appt-detail {
   font-size: 10px;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .find__appt-status {
@@ -329,7 +330,7 @@
 
 .find__patient-phone {
   font-size: 10px;
-  color: #94a3b8;
+  color: #64748b;
   margin-top: 1px;
 }
 
@@ -346,12 +347,12 @@
 
 .find__patient-last {
   font-size: 9px;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .find__patient-doctor {
   font-size: 9px;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 /* Load more / sentinel */
@@ -384,7 +385,7 @@
 .find__empty {
   text-align: center;
   padding: 40px 20px;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .find__empty-icon {

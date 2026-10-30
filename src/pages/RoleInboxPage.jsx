@@ -1164,7 +1164,7 @@ export default function RoleInboxPage({ role, title, senderLabel, defaultSenderN
                             style={{
                               background: "transparent",
                               border: "none",
-                              color: "#94A3B8",
+                              color: "#64748b",
                               cursor: "pointer",
                               fontSize: 16,
                               fontWeight: 700,

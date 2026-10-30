@@ -303,7 +303,7 @@ export default function RefillsPage() {
               marginBottom: 14,
               boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 4px 12px rgba(15,23,42,0.04)",
               display: "grid",
-              gridTemplateColumns: "1.6fr 1fr 1fr auto",
+              gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
               gap: 12,
               alignItems: "end",
             }}
@@ -333,7 +333,7 @@ export default function RefillsPage() {
                   left: 12,
                   top: 30,
                   fontSize: 14,
-                  color: "#94a3b8",
+                  color: "#64748b",
                   pointerEvents: "none",
                 }}
               >
@@ -401,7 +401,7 @@ export default function RefillsPage() {
                 border: "1px solid",
                 borderColor: activeCount > 0 ? "#fecaca" : "#e2e8f0",
                 background: activeCount > 0 ? "#fef2f2" : "#f8fafc",
-                color: activeCount > 0 ? "#b91c1c" : "#94a3b8",
+                color: activeCount > 0 ? "#b91c1c" : "#64748b",
                 borderRadius: 10,
                 fontSize: 12,
                 fontWeight: 700,
@@ -598,7 +598,7 @@ export default function RefillsPage() {
                 <div
                   style={{
                     padding: "12px 16px",
-                    color: "#94a3b8",
+                    color: "#64748b",
                     fontSize: 12,
                     fontStyle: "italic",
                   }}
@@ -638,7 +638,7 @@ export default function RefillsPage() {
                     <span>
                       {isOpen ? "▼ Hide" : "▶ Show"} previous history ({g.history.length})
                     </span>
-                    <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 600 }}>
+                    <span style={{ fontSize: 10, color: "#64748b", fontWeight: 600 }}>
                       Fulfilled / rejected requests
                     </span>
                   </button>
@@ -680,7 +680,7 @@ export default function RefillsPage() {
         ) : null}
       </div>
 
-      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6, textAlign: "right" }}>
+      <div style={{ fontSize: 11, color: "#64748b", marginTop: 6, textAlign: "right" }}>
         {grouped.length} patient{grouped.length === 1 ? "" : "s"} · {requests.length} of {total}{" "}
         request{total === 1 ? "" : "s"}
       </div>
@@ -761,7 +761,7 @@ function RequestRow({ r, isLast, onAction, muted = false }) {
             </div>
           )}
           {r.status_updated_at && r.status !== "pending" && (
-            <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
+            <div style={{ fontSize: 10, color: "#64748b", marginTop: 4 }}>
               {r.status} {fmtTime(r.status_updated_at)}
             </div>
           )}

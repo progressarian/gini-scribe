@@ -53,7 +53,7 @@
 }
 .ci__loading-text {
   font-size: 13px;
-  color: #94a3b8;
+  color: #64748b;
 }
 .ci__empty {
   text-align: center;
@@ -92,7 +92,7 @@
 }
 .ci__overview-sub {
   font-size: 9px;
-  color: #94a3b8;
+  color: #64748b;
 }
 .ci__panel {
   background: white;
@@ -185,7 +185,7 @@
 .ci__feed-empty {
   text-align: center;
   padding: 20px;
-  color: #94a3b8;
+  color: #64748b;
   font-size: 12px;
 }
 .ci__feed-item {
@@ -216,7 +216,7 @@
 }
 .ci__feed-doctor {
   font-size: 9px;
-  color: #94a3b8;
+  color: #64748b;
 }
 .ci__feed-date-group {
   display: flex;
@@ -228,7 +228,7 @@
 }
 .ci__feed-date {
   font-size: 9px;
-  color: #94a3b8;
+  color: #64748b;
 }
 .ci__feed-expanded {
   margin-top: 6px;
@@ -297,7 +297,7 @@
 }
 .ci__rx-date {
   font-size: 9px;
-  color: #94a3b8;
+  color: #64748b;
 }
 .ci__rx-expanded {
   margin-top: 6px;

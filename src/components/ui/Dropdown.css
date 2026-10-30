@@ -47,7 +47,7 @@
 }
 
 .doc-dd__arrow {
-  color: #94a3b8;
+  color: #64748b;
   flex-shrink: 0;
   transition: transform 0.15s;
 }
@@ -135,7 +135,7 @@
 }
 
 .doc-dd__item:disabled {
-  color: #94a3b8;
+  color: #64748b;
   cursor: not-allowed;
   background: none;
 }

@@ -485,7 +485,7 @@ export default function SideEffectsPage() {
                       padding: "3px 8px",
                       borderRadius: 999,
                       background: g.activeCount > 0 ? "#fef3c7" : "#f1f5f9",
-                      color: g.activeCount > 0 ? "#92400e" : "#94a3b8",
+                      color: g.activeCount > 0 ? "#92400e" : "#64748b",
                     }}
                   >
                     {g.activeCount} CURRENT
@@ -636,7 +636,7 @@ export default function SideEffectsPage() {
         })
       )}
 
-      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6, textAlign: "right" }}>
+      <div style={{ fontSize: 11, color: "#64748b", marginTop: 6, textAlign: "right" }}>
         {groups.length} patient{groups.length === 1 ? "" : "s"} · {raw.length} side effect
         {raw.length === 1 ? "" : "s"}
       </div>

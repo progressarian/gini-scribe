@@ -350,7 +350,7 @@ export default function FUReviewPage() {
                                       <div
                                         className="fu-review__goal-bar-val"
                                         style={{
-                                          color: v._isNew ? st.bg : "#94a3b8",
+                                          color: v._isNew ? st.bg : "#64748b",
                                           fontWeight: v._isNew ? 800 : 600,
                                         }}
                                       >
@@ -366,7 +366,7 @@ export default function FUReviewPage() {
                                       <div
                                         className="fu-review__goal-bar-date"
                                         style={{
-                                          color: v._isNew ? st.bg : "#94a3b8",
+                                          color: v._isNew ? st.bg : "#64748b",
                                           fontWeight: v._isNew ? 800 : 400,
                                         }}
                                       >

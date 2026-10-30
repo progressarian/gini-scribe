@@ -86,7 +86,7 @@ function LogsPanel({ logs }) {
   if (!logs) return <div style={{ color: "#64748b", fontSize: 13, padding: 8 }}>Loading…</div>;
   const sections = Object.entries(SECTION_TITLES).filter(([k]) => (logs[k] || []).length > 0);
   if (sections.length === 0) {
-    return <div style={{ color: "#94a3b8", fontSize: 13, padding: 8 }}>No data logged yet.</div>;
+    return <div style={{ color: "#64748b", fontSize: 13, padding: 8 }}>No data logged yet.</div>;
   }
   return (
     <div
@@ -104,7 +104,7 @@ function LogsPanel({ logs }) {
         >
           <div style={{ fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 6 }}>
             {title}{" "}
-            <span style={{ color: "#94a3b8", fontWeight: 500 }}>
+            <span style={{ color: "#64748b", fontWeight: 500 }}>
               ({logs[key].length}
               {logs[key].length === 30 ? "+" : ""})
             </span>
@@ -122,7 +122,7 @@ function LogsPanel({ logs }) {
               <span style={{ fontWeight: 500 }}>{rowTitle(r)}</span>
               {rowMeta(r) ? <span style={{ color: "#64748b" }}> — {rowMeta(r)}</span> : null}
               {rowDate(r) ? (
-                <span style={{ color: "#94a3b8", fontSize: 11 }}>
+                <span style={{ color: "#64748b", fontSize: 11 }}>
                   {"  "}
                   {new Date(rowDate(r)).toLocaleString("en-IN", {
                     day: "2-digit",
@@ -135,7 +135,7 @@ function LogsPanel({ logs }) {
             </div>
           ))}
           {logs[key].length > 10 && (
-            <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
+            <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
               … and {logs[key].length - 10} more
             </div>
           )}
@@ -148,7 +148,7 @@ function LogsPanel({ logs }) {
 function DataChips({ counts }) {
   const chips = COUNT_LABELS.filter(([k]) => (counts?.[k] || 0) > 0);
   if (chips.length === 0) {
-    return <span style={{ color: "#94a3b8", fontSize: 12 }}>No data yet</span>;
+    return <span style={{ color: "#64748b", fontSize: 12 }}>No data yet</span>;
   }
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 4, maxWidth: 320 }}>
@@ -489,7 +489,7 @@ export default function AppPatientsPage() {
                         ▸
                       </button>
                     </td>
-                    <td style={{ ...cellStyle, color: "#94a3b8" }}>{from + i}</td>
+                    <td style={{ ...cellStyle, color: "#64748b" }}>{from + i}</td>
                     <td style={{ ...cellStyle, fontWeight: 600 }}>{r.name || "—"}</td>
                     <td style={cellStyle}>{r.phone || "—"}</td>
                     <td style={cellStyle}>

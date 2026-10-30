@@ -397,7 +397,7 @@ function LabHistoryChart({ series, displayRange, unit, currentDate, testName }) 
               {fmtVal(last.value)}
             </span>
             {unit && (
-              <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>{unit}</span>
+              <span style={{ fontSize: 10, color: "#64748b", fontWeight: 500 }}>{unit}</span>
             )}
             {arrow && <span style={{ fontSize: 12, fontWeight: 700, color: accent }}>{arrow}</span>}
           </div>
@@ -541,7 +541,7 @@ function LabHistoryChart({ series, displayRange, unit, currentDate, testName }) 
                   zIndex: 9999,
                 }}
               >
-                <div style={{ color: "#94a3b8", fontWeight: 500, fontSize: 9.5 }}>
+                <div style={{ color: "#64748b", fontWeight: 500, fontSize: 9.5 }}>
                   {fmtDate(hover.p.date)}
                 </div>
                 <div>
@@ -572,7 +572,7 @@ function LabHistoryChart({ series, displayRange, unit, currentDate, testName }) 
             justifyContent: "space-between",
             padding: "3px 14px 6px",
             fontSize: 8,
-            color: "#94a3b8",
+            color: "#64748b",
           }}
         >
           <span>{fmtDate(series[0].date)}</span>
@@ -605,7 +605,7 @@ function LabHistoryChart({ series, displayRange, unit, currentDate, testName }) 
             fontSize: 10,
           }}
         >
-          <span style={{ color: "#94a3b8", fontWeight: 600 }}>Goal</span>
+          <span style={{ color: "#64748b", fontWeight: 600 }}>Goal</span>
           <span style={{ fontWeight: 700, color: accent }}>{goalText}</span>
         </div>
       </div>
@@ -1218,7 +1218,7 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                       left: 10,
                       top: "50%",
                       transform: "translateY(-50%)",
-                      color: "#94a3b8",
+                      color: "#64748b",
                       pointerEvents: "none",
                       fontSize: 12,
                       lineHeight: 1,
@@ -1354,7 +1354,7 @@ const VisitLabsPanel = memo(function VisitLabsPanel({
                                 : matchCount > 0
                                   ? "#dcfce7"
                                   : "#f1f5f9",
-                              color: isActive ? "white" : matchCount > 0 ? "#15803d" : "#94a3b8",
+                              color: isActive ? "white" : matchCount > 0 ? "#15803d" : "#64748b",
                             }}
                           >
                             {matchCount}

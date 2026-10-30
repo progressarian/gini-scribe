@@ -102,7 +102,7 @@ export default function BiomarkerDrill({ bio, period, doctor, onOpenPatient }) {
       ) : !data ? (
         <Shimmer type="list" count={4} />
       ) : !data.total ? (
-        <div style={{ fontSize: 10, color: "#94a3b8", padding: "4px 6px" }}>
+        <div style={{ fontSize: 10, color: "#64748b", padding: "4px 6px" }}>
           No patients match{q ? ` “${q}”` : ""}.
         </div>
       ) : (
@@ -140,14 +140,14 @@ export default function BiomarkerDrill({ bio, period, doctor, onOpenPatient }) {
               </span>
               <span style={{ flex: 1 }}>
                 <strong>{p.name}</strong>
-                <span style={{ color: "#94a3b8", marginLeft: 4 }}>
+                <span style={{ color: "#64748b", marginLeft: 4 }}>
                   {p.age}Y/{p.sex?.charAt(0)}
                 </span>
               </span>
               <span style={{ fontWeight: 700, fontSize: 11, color: statusColor(p.status) }}>
                 {p.display || "—"}
               </span>
-              <span style={{ fontSize: 8, color: "#94a3b8" }}>{p.con_name}</span>
+              <span style={{ fontSize: 8, color: "#64748b" }}>{p.con_name}</span>
             </button>
           ))}
         </div>
@@ -163,7 +163,7 @@ export default function BiomarkerDrill({ bio, period, doctor, onOpenPatient }) {
         />
       ) : null}
       {bio.no_data > 0 && (
-        <div style={{ fontSize: 9, color: "#94a3b8", padding: "4px 6px", fontStyle: "italic" }}>
+        <div style={{ fontSize: 9, color: "#64748b", padding: "4px 6px", fontStyle: "italic" }}>
           + {bio.no_data} patients with no {bio.label} data
         </div>
       )}

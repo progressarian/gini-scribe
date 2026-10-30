@@ -66,6 +66,7 @@ import OrderedServicesPanel from "../../components/billing/OrderedServicesPanel"
 import StationNotice from "../../components/giniflow/StationNotice";
 import JourneyBuilder, { TestPicker } from "../../components/giniflow/JourneyBuilder";
 import ArrivalBill, {
+  arrivalBlocker,
   arrivalButtonText,
   arrivalPayload,
   arrivalReady,
@@ -1336,7 +1337,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const [homeAnswer, setHomeAnswer] = useState(emptyHomeAnswer);
   const [homeSaved, setHomeSaved] = useState(false);
   const [homeTouched, setHomeTouched] = useState(false);
-  const homeProblems = asksHome && !homeSaved ? homeProblemsNow(homeAnswer) : {};
+  const homeProblems = asksHome && !homeSaved ? homeProblemsNow(homeAnswer, { brief: true }) : {};
   const homeMissing = Object.keys(homeProblems).length > 0;
   const billVisitId = billFor || arrival.visitId;
   const journeyPlan = useDebounced(
@@ -1493,6 +1494,19 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
     !list.length ||
     consultantMissing ||
     (billsAtArrival && !arrivalReady(arrivalPreview, arrivalChoices, shiftOpen));
+  const laterBlocked = saving || homeMissing || arrivalBusy || !list.length || consultantMissing;
+  const lockedBecause = ({ withBill = true } = {}) => {
+    if (saving) return "Checking in…";
+    if (saveHome.isPending) return "Saving the home sample…";
+    if (homeMissing)
+      return `Home sample — still needed: ${homeStillNeeded(homeProblems).join(", ")}`;
+    if (arrivalBusy || billPending) return "Working out the bill — wait a moment";
+    if (!list.length) return "Add at least one step to the journey";
+    if (consultantMissing) return "Choose the consultant on the consultation step";
+    if (withBill && billsAtArrival)
+      return arrivalBlocker(arrivalPreview, arrivalChoices, shiftOpen);
+    return null;
+  };
   const minutes = list.reduce((sum, s) => sum + (Number(s.minutes) || 0), 0);
   const doneBy = new Date(Date.now() + minutes * 60000).toLocaleTimeString("en-IN", {
     hour: "numeric",
@@ -1502,7 +1516,10 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const submit = async (sendWhatsapp, { bill: withBill = true } = {}) => {
     try {
       if (asksHome && !homeSaved) {
-        await saveHome.mutateAsync({ visitId: arrival.visitId, ...homePayload(homeAnswer) });
+        await saveHome.mutateAsync({
+          visitId: arrival.visitId,
+          ...homePayload(homeAnswer, { brief: true }),
+        });
         setHomeSaved(true);
       }
       let visitId = arrival.visitId;
@@ -1603,6 +1620,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
                     problems={homeProblems}
                     showErrors={homeTouched}
                     withNote={false}
+                    sampleOnly
                   />
                 )}
               </section>
@@ -1770,6 +1788,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
             <button
               className="btn-full st-btn st-btn-grn"
               disabled={blocked}
+              title={blocked ? lockedBecause() || undefined : undefined}
               onClick={() => submit(false)}
             >
               {saving || commitArrivalBill.isPending
@@ -1785,7 +1804,12 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
                         : "✓ Check in"}
             </button>
             {arrival.phone && !forAppointment && (
-              <button className="st-btn st-btn-g" disabled={blocked} onClick={() => submit(true)}>
+              <button
+                className="st-btn st-btn-g"
+                disabled={blocked}
+                title={blocked ? lockedBecause() || undefined : undefined}
+                onClick={() => submit(true)}
+              >
                 {billsAtArrival ? "Same + send WhatsApp" : "Check in + send WhatsApp"}
               </button>
             )}
@@ -1793,7 +1817,8 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
               <button
                 type="button"
                 className="st-btn st-btn-g"
-                disabled={saving || homeMissing || arrivalBusy || !list.length || consultantMissing}
+                disabled={laterBlocked}
+                title={laterBlocked ? lockedBecause({ withBill: false }) || undefined : undefined}
                 onClick={() => submit(false, { bill: false })}
               >
                 Check in only — bill later

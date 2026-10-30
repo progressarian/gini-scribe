@@ -16,17 +16,19 @@ const minutesOf = (clock) => {
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 };
 
-export function homeSampleProblems(answer, nowClock) {
+export function homeSampleProblems(answer, nowClock, { brief = false } = {}) {
   const problems = {};
   if (!["collected", "not_collected"].includes(answer?.sample)) {
     problems.sample = "Choose whether the sample was collected at home";
     return problems;
   }
-  if (answer.sample === "not_collected") return problems;
-  const at = minutesOf(answer.collectedTime);
-  if (at === null) problems.collectedTime = "Enter the time the sample was collected";
-  else if (nowClock && at > minutesOf(nowClock) + CLOCK_SKEW_MIN)
-    problems.collectedTime = FUTURE_TIME;
+  if (answer.sample === "not_collected" || brief) return problems;
+  if (answer.collectedTime) {
+    const at = minutesOf(answer.collectedTime);
+    if (at === null) problems.collectedTime = "Enter the time as HH:MM, or leave it empty";
+    else if (nowClock && at > minutesOf(nowClock) + CLOCK_SKEW_MIN)
+      problems.collectedTime = FUTURE_TIME;
+  }
   if (!HOME_COLLECTORS.includes(answer.collectedBy))
     problems.collectedBy = `Choose who collected it: ${HOME_COLLECTORS.join(" or ")}`;
   if (!["paid", "pending"].includes(answer.payment)) {
@@ -67,12 +69,14 @@ export function homeRecordText(record, clockOf) {
   if (!record) return { sample: "Not recorded", payment: "Not recorded", pending: false };
   if (record.sample === "not_collected")
     return { sample: "Not collected", payment: null, pending: false };
-  const sample = `Collected at home ${[clockOf(record.collectedAt), record.collectedBy && `(${record.collectedBy})`].filter(Boolean).join(" ")}`;
+  const sample =
+    `Collected at home ${[clockOf(record.collectedAt), record.collectedBy && `(${record.collectedBy})`].filter(Boolean).join(" ")}`.trim();
   if (record.payment === "paid")
     return {
       sample,
       payment: `Paid at home (reported) ₹${Number(record.amount).toLocaleString("en-IN")} · ${modeLabel(record.mode)}`,
       pending: false,
     };
-  return { sample, payment: "Payment pending", pending: true };
+  if (record.payment === "pending") return { sample, payment: "Payment pending", pending: true };
+  return { sample, payment: null, pending: false };
 }

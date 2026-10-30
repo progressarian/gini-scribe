@@ -76,7 +76,7 @@
 
 .audio-input__engine-btn--inactive {
   background: transparent;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .audio-input__cleanup-btn {
@@ -95,7 +95,7 @@
 
 .audio-input__cleanup-btn--off {
   background: #f1f5f9;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .audio-input__lang-group {
@@ -238,7 +238,7 @@
 
 .audio-input__listening {
   font-size: 11px;
-  color: #94a3b8;
+  color: #64748b;
   text-align: center;
   padding: 6px;
 }

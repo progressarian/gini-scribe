@@ -53,7 +53,7 @@
   align-items: center;
   gap: 7px;
   font-size: 13px;
-  color: #94a3b8;
+  color: #64748b;
 }
 .dimp__step-n {
   display: grid;
@@ -163,7 +163,7 @@
   font-size: 12px;
 }
 .dimp__muted {
-  color: #94a3b8;
+  color: #64748b;
 }
 .dimp__sub {
   display: block;
@@ -569,7 +569,7 @@ a.dimp__btn {
 .rep__loading {
   padding: 40px 0;
   text-align: center;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .rep__stats {
@@ -743,7 +743,7 @@ a.dimp__btn {
 .rep__empty {
   padding: 28px 12px;
   text-align: center;
-  color: #94a3b8;
+  color: #64748b;
   font-size: 14px;
 }
 
@@ -836,7 +836,7 @@ a.dimp__btn {
   font-weight: 500;
   text-transform: none;
   letter-spacing: 0;
-  color: #94a3b8;
+  color: #64748b;
 }
 .rep__input,
 .rep__notes {
@@ -878,7 +878,7 @@ a.dimp__btn {
 }
 .rep__hint {
   font-size: 12px;
-  color: #94a3b8;
+  color: #64748b;
 }
 .rep__hint--center {
   display: block;
@@ -1179,7 +1179,7 @@ a.dimp__btn {
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #94a3b8;
+  color: #64748b;
 }
 .d360__event-tags {
   display: flex;
@@ -1215,7 +1215,7 @@ a.dimp__btn {
   white-space: pre-wrap;
 }
 .d360__notes--none {
-  color: #94a3b8;
+  color: #64748b;
   font-style: italic;
   font-size: 13px;
 }
@@ -1379,7 +1379,7 @@ a.dimp__btn {
   flex: none;
   font-size: 20px;
   line-height: 1;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 /* The entry a tap arrived at. Fades rather than blinks — it marks where you

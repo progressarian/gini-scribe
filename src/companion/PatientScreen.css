@@ -158,7 +158,7 @@
 .patient__empty {
   text-align: center;
   padding: 30px;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .patient__empty-icon {
@@ -185,7 +185,7 @@
 .patient__empty-inline {
   padding: 20px;
   text-align: center;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .patient__doc-card {
@@ -363,7 +363,7 @@
 .patient__lab-date {
   font-size: 10px;
   font-weight: 600;
-  color: #94a3b8;
+  color: #64748b;
   margin-left: 6px;
 }
 
@@ -373,7 +373,7 @@
 }
 
 .patient__lab-unit {
-  color: #94a3b8;
+  color: #64748b;
   font-weight: 600;
   margin-left: 3px;
   font-size: 11px;

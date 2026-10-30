@@ -58,7 +58,7 @@ function ScoreRow({ p, open, onToggle, onOpenPatient }) {
         <span style={{ flex: 1, minWidth: 0 }}>
           <span style={{ display: "block" }}>
             <strong>{p.name}</strong>{" "}
-            <span style={{ color: "#94a3b8" }}>
+            <span style={{ color: "#64748b" }}>
               {p.age}Y/{p.sex?.charAt(0)} {p.file_no && `| ${p.file_no}`}
             </span>
           </span>
@@ -92,7 +92,7 @@ function ScoreRow({ p, open, onToggle, onOpenPatient }) {
             />
           ))}
         </span>
-        <span style={{ fontSize: 9, color: "#94a3b8" }}>{open ? "▲" : "▼"}</span>
+        <span style={{ fontSize: 9, color: "#64748b" }}>{open ? "▲" : "▼"}</span>
       </button>
 
       {open && (
@@ -135,7 +135,7 @@ function ScoreRow({ p, open, onToggle, onOpenPatient }) {
                 >
                   {c.val}
                 </div>
-                <div style={{ fontSize: 8, color: "#94a3b8" }}>Target: {c.target}</div>
+                <div style={{ fontSize: 8, color: "#64748b" }}>Target: {c.target}</div>
               </div>
             ))}
           </div>
@@ -238,7 +238,7 @@ export default function PatientScorecard({ period, doctor, onOpenPatient }) {
       ) : !data ? (
         <Shimmer type="list" count={5} />
       ) : !data.total ? (
-        <div style={{ fontSize: 11, color: "#94a3b8", padding: 8 }}>
+        <div style={{ fontSize: 11, color: "#64748b", padding: 8 }}>
           {q ? `No patients match “${q}”.` : "No patients in this period."}
         </div>
       ) : (

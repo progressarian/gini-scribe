@@ -392,7 +392,7 @@ export default function ConsultantPage() {
                 >
                   <span style={{ flex: 1 }}>
                     <b>{d.label}</b> — {d.status}{" "}
-                    <span style={{ color: "#94a3b8" }}>({d.reason})</span>
+                    <span style={{ color: "#64748b" }}>({d.reason})</span>
                   </span>
                   <button
                     onClick={() => {
@@ -444,7 +444,7 @@ export default function ConsultantPage() {
                     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       <div style={{ flex: 1 }}>
                         <b>{t.action}</b>: {t.drug} {t.detail}{" "}
-                        <span style={{ color: "#94a3b8" }}>— {t.reason}</span>
+                        <span style={{ color: "#64748b" }}>— {t.reason}</span>
                       </div>
                       <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
                         <button
@@ -646,7 +646,7 @@ export default function ConsultantPage() {
                       fontSize: 9,
                       background: rejected ? "#fef2f2" : "white",
                       textDecoration: rejected ? "line-through" : "none",
-                      color: rejected ? "#94a3b8" : "#374151",
+                      color: rejected ? "#64748b" : "#374151",
                       borderLeft: `3px solid ${rejected ? "#fca5a5" : t.action === "ADD" ? "#059669" : t.action === "STOP" ? "#dc2626" : "#f59e0b"}`,
                     }}
                   >
@@ -986,7 +986,7 @@ export default function ConsultantPage() {
                     />
                   </div>
                   {m.suggested_options?.length > 0 && (
-                    <div style={{ fontSize: 9, color: "#94a3b8", marginTop: 2 }}>
+                    <div style={{ fontSize: 9, color: "#64748b", marginTop: 2 }}>
                       Options: {m.suggested_options.join(" • ")}
                     </div>
                   )}

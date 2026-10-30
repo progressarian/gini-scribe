@@ -338,7 +338,7 @@ export default function AudioInput({ onTranscript, dgKey, whisperKey, label, col
                 className="audio-input__lang-btn"
                 style={{
                   background: lang === x.v ? color : "white",
-                  color: lang === x.v ? "white" : "#94a3b8",
+                  color: lang === x.v ? "white" : "#64748b",
                   border: `1px solid ${lang === x.v ? color : "#e2e8f0"}`,
                 }}
               >

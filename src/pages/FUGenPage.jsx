@@ -1137,7 +1137,7 @@ export default function FUGenPage() {
                               {t.dose || ""} {t.frequency || ""}
                             </span>
                             {t.reason && (
-                              <div style={{ fontSize: 9, color: "#94a3b8" }}>{t.reason}</div>
+                              <div style={{ fontSize: 9, color: "#64748b" }}>{t.reason}</div>
                             )}
                           </div>
                           <div className="no-print" style={{ display: "flex", gap: 2 }}>

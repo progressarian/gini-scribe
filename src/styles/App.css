@@ -94,7 +94,7 @@
 
 .header__draft {
   font-size: 9px;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .header__save-status {
@@ -472,7 +472,7 @@
 .search-stat__label {
   font-size: 9px;
   font-weight: 600;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .search-input {
@@ -600,7 +600,7 @@
 .today-appt__type {
   font-size: 8px;
   font-weight: 700;
-  color: #94a3b8;
+  color: #64748b;
   text-transform: uppercase;
 }
 
@@ -684,7 +684,7 @@
 .today-appts__empty {
   text-align: center;
   padding: 16px;
-  color: #94a3b8;
+  color: #64748b;
   font-size: 12px;
 }
 
@@ -714,7 +714,7 @@
   border: none;
   cursor: pointer;
   font-size: 14px;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .quick-book__grid {
@@ -793,7 +793,7 @@
 .patient-list__count {
   font-size: 11px;
   font-weight: 700;
-  color: #94a3b8;
+  color: #64748b;
   padding: 8px 4px;
   border-bottom: 1px solid #f1f5f9;
 }
@@ -843,7 +843,7 @@
 
 .patient-list__age {
   font-size: 12px;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .patient-list__fileno {
@@ -866,7 +866,7 @@
 
 .patient-list__phone {
   font-size: 11px;
-  color: #94a3b8;
+  color: #64748b;
   margin-top: 1px;
 }
 
@@ -883,7 +883,7 @@
 
 .patient-list__last-visit {
   font-size: 11px;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .patient-list__last-doctor {
@@ -895,7 +895,7 @@
 .patient-list__empty {
   text-align: center;
   padding: 40px;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .patient-list__empty-icon {
@@ -965,6 +965,12 @@
   color: #64748b;
 }
 
+@media (pointer: coarse) {
+  .tab-btn {
+    min-height: 44px;
+  }
+}
+
 .tab-section-sep {
   display: inline-flex;
   align-items: center;
@@ -974,7 +980,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.6px;
-  color: #94a3b8;
+  color: #64748b;
   background: #f1f5f9;
   border-radius: 4px;
   white-space: nowrap;
@@ -1091,7 +1097,7 @@
 
 .dup-blocker__hint {
   font-size: 11px;
-  color: #94a3b8;
+  color: #64748b;
   margin-top: 10px;
 }
 

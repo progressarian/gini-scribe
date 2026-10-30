@@ -95,7 +95,7 @@ export default function FULoadPage() {
 
       {/* Patient Concerns from Mobile App */}
       {patientAlertsLoading ? (
-        <div style={{ padding: "8px 16px", color: "#94a3b8", fontSize: 13 }}>
+        <div style={{ padding: "8px 16px", color: "#64748b", fontSize: 13 }}>
           Loading patient alerts...
         </div>
       ) : (

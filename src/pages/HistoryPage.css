@@ -65,7 +65,7 @@
 }
 .history__visit-arrow {
   font-size: 10px;
-  color: #94a3b8;
+  color: #64748b;
 }
 .history__visit-body {
   padding: 10px 14px;
@@ -74,7 +74,7 @@
 .history__empty {
   text-align: center;
   padding: 30px;
-  color: #94a3b8;
+  color: #64748b;
 }
 .history__empty-icon {
   font-size: 28px;

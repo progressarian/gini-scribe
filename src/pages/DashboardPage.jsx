@@ -471,7 +471,7 @@ export default function DashboardPage() {
                       {lab.unit ? " " + lab.unit : ""}{" "}
                       {lab.flag === "H" ? "↑" : lab.flag === "L" ? "↓" : ""}
                       {lab.test_date && (
-                        <span style={{ color: "#94a3b8", fontSize: 8, marginLeft: 2 }}>
+                        <span style={{ color: "#64748b", fontSize: 8, marginLeft: 2 }}>
                           {new Date(lab.test_date).toLocaleDateString("en-IN", {
                             day: "2-digit",
                             month: "short",
@@ -564,12 +564,12 @@ export default function DashboardPage() {
                                 {l.result}
                                 {l.result_text || ""}
                               </b>
-                              <span style={{ color: "#94a3b8", fontSize: 9, marginLeft: 2 }}>
+                              <span style={{ color: "#64748b", fontSize: 9, marginLeft: 2 }}>
                                 {l.unit || ""}
                               </span>
                               {l.flag === "H" ? " ↑" : l.flag === "L" ? " ↓" : ""}
                               {l.test_date && (
-                                <span style={{ color: "#94a3b8", fontSize: 8, marginLeft: 3 }}>
+                                <span style={{ color: "#64748b", fontSize: 8, marginLeft: 3 }}>
                                   {`(${new Date(l.test_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })})`}
                                 </span>
                               )}
@@ -679,7 +679,7 @@ export default function DashboardPage() {
                       {d.title || d.doc_type}
                     </span>
                     {status.label && <DocStatusPill doc={d} patientId={dbPatientId} size="sm" />}
-                    <span style={{ fontSize: 9, color: "#94a3b8" }}>
+                    <span style={{ fontSize: 9, color: "#64748b" }}>
                       {d.doc_date
                         ? new Date(d.doc_date).toLocaleDateString("en-IN", {
                             day: "2-digit",
@@ -822,7 +822,7 @@ export default function DashboardPage() {
                 border: "none",
                 cursor: "pointer",
                 fontSize: 14,
-                color: "#94a3b8",
+                color: "#64748b",
               }}
             >
               ✕
@@ -873,7 +873,7 @@ export default function DashboardPage() {
                   borderRadius: 6,
                   fontSize: 12,
                   boxSizing: "border-box",
-                  color: bookForm.tm ? "#1e293b" : "#94a3b8",
+                  color: bookForm.tm ? "#1e293b" : "#64748b",
                 }}
               >
                 <option value="">{bookForm.doc ? "Time slot" : "Pick doctor first"}</option>
@@ -1166,7 +1166,7 @@ export default function DashboardPage() {
             style={{
               fontSize: 11,
               fontWeight: 700,
-              color: "#94a3b8",
+              color: "#64748b",
               marginBottom: 6,
               letterSpacing: ".5px",
             }}
@@ -1429,7 +1429,7 @@ export default function DashboardPage() {
         style={{
           fontSize: 11,
           fontWeight: 700,
-          color: "#94a3b8",
+          color: "#64748b",
           marginBottom: 8,
           letterSpacing: ".5px",
           // Every destination can be filtered out by capability; don't leave a
@@ -1541,7 +1541,7 @@ export default function DashboardPage() {
                   <span style={{ fontSize: 12, fontWeight: 700, color: "#1e293b" }}>
                     {m.patient_name}
                   </span>
-                  <span style={{ fontSize: 10, color: "#94a3b8" }}>
+                  <span style={{ fontSize: 10, color: "#64748b" }}>
                     {new Date(m.created_at).toLocaleTimeString("en-IN", {
                       hour: "2-digit",
                       minute: "2-digit",
@@ -1572,7 +1572,7 @@ export default function DashboardPage() {
             style={{
               fontSize: 11,
               fontWeight: 700,
-              color: "#94a3b8",
+              color: "#64748b",
               marginBottom: 6,
               letterSpacing: ".5px",
             }}
@@ -1686,7 +1686,7 @@ export default function DashboardPage() {
                       </span>
                     ))}
                     {meds.length > 6 && (
-                      <span style={{ fontSize: 9, color: "#94a3b8", padding: "1px 4px" }}>
+                      <span style={{ fontSize: 9, color: "#64748b", padding: "1px 4px" }}>
                         +{meds.length - 6} more
                       </span>
                     )}

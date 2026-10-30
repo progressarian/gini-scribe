@@ -105,26 +105,26 @@
 
 .home__phone {
   font-size: 8px;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .home__empty {
   text-align: center;
   padding: 30px;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .home__loading-more {
   text-align: center;
   padding: 16px;
-  color: #94a3b8;
+  color: #64748b;
   font-size: 12px;
 }
 
 .home__end {
   text-align: center;
   padding: 12px;
-  color: #94a3b8;
+  color: #64748b;
   font-size: 11px;
 }
 
@@ -245,7 +245,7 @@
 
 .home__appt-today-btn:disabled {
   background: #f1f5f9;
-  color: #94a3b8;
+  color: #64748b;
   border-color: #e2e8f0;
   cursor: not-allowed;
 }

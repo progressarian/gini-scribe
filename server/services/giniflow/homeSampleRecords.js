@@ -98,11 +98,12 @@ async function homeVisitFor(db, visitId) {
 }
 
 const cleanAnswer = (body) => {
-  const collected = body.sample === "collected";
+  const collected = body.sample === "collected" && !body.brief;
   const paid = collected && body.payment === "paid";
   return {
+    brief: Boolean(body.brief),
     sample: body.sample,
-    collectedTime: collected ? body.collectedTime : null,
+    collectedTime: collected ? body.collectedTime || null : null,
     collectedBy: collected ? body.collectedBy : null,
     payment: collected ? body.payment : null,
     amount: paid ? Number(body.amount) : null,
@@ -129,7 +130,7 @@ export async function saveHomeSample(
     throw fail(409, "This visit is marked no-show or cancelled — undo that first");
   }
   const answer = cleanAnswer(body);
-  const problems = homeSampleProblems(answer, istClock(new Date()));
+  const problems = homeSampleProblems(answer, istClock(new Date()), { brief: answer.brief });
   const first = Object.values(problems)[0];
   if (first) throw Object.assign(fail(400, first), { code: "invalid_home_sample", problems });
 

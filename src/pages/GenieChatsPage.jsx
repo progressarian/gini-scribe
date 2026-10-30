@@ -389,9 +389,9 @@ const styles = {
     marginBottom: 12,
   },
   searchInput: { flex: 1, border: "none", outline: "none", fontSize: 14, color: "#0f172a" },
-  searchClear: { background: "none", border: "none", color: "#94a3b8", cursor: "pointer" },
-  center: { textAlign: "center", color: "#94a3b8", padding: 30, fontSize: 13 },
-  empty: { textAlign: "center", color: "#94a3b8", padding: 30, fontSize: 14, lineHeight: 1.8 },
+  searchClear: { background: "none", border: "none", color: "#64748b", cursor: "pointer" },
+  center: { textAlign: "center", color: "#64748b", padding: 30, fontSize: 13 },
+  empty: { textAlign: "center", color: "#64748b", padding: 30, fontSize: 14, lineHeight: 1.8 },
   errorBox: {
     fontSize: 13,
     color: "#b91c1c",
@@ -424,8 +424,8 @@ const styles = {
     fontWeight: 700,
   },
   threadName: { fontSize: 14, fontWeight: 700, color: "#0f172a" },
-  threadFile: { fontSize: 12, color: "#94a3b8" },
-  threadDate: { fontSize: 11, color: "#94a3b8" },
+  threadFile: { fontSize: 12, color: "#64748b" },
+  threadDate: { fontSize: 11, color: "#64748b" },
   threadPreview: {
     fontSize: 12,
     color: "#64748b",
@@ -457,7 +457,7 @@ const styles = {
     fontSize: 18,
   },
   patientName: { fontSize: 15, fontWeight: 700, color: "#0f172a" },
-  patientFile: { fontSize: 12, color: "#94a3b8" },
+  patientFile: { fontSize: 12, color: "#64748b" },
   threadScroll: {
     height: "calc(100vh - 230px)",
     overflowY: "auto",
@@ -474,7 +474,7 @@ const styles = {
     borderRadius: 999,
     padding: "2px 10px",
   },
-  olderLoader: { textAlign: "center", color: "#94a3b8", fontSize: 12, padding: 6 },
+  olderLoader: { textAlign: "center", color: "#64748b", fontSize: 12, padding: 6 },
   olderEnd: { textAlign: "center", color: "#cbd5e1", fontSize: 11, padding: 6 },
   loadMoreBtn: {
     display: "block",

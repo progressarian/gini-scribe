@@ -53,7 +53,7 @@ export default function OutcomesPage() {
   return (
     <div style={{ margin: "0 auto" }}>
       {!dbPatientId ? (
-        <div style={{ textAlign: "center", padding: 50, color: "#94a3b8" }}>
+        <div style={{ textAlign: "center", padding: 50, color: "#64748b" }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
           <div style={{ fontSize: 15, fontWeight: 600, color: "#64748b" }}>
             Load a patient first
@@ -519,7 +519,7 @@ export default function OutcomesPage() {
                                               {c.unit}
                                             </span>
                                             {ctx.doctor && (
-                                              <span style={{ fontSize: 10, color: "#94a3b8" }}>
+                                              <span style={{ fontSize: 10, color: "#64748b" }}>
                                                 👨‍⚕️{" "}
                                                 {ctx.doctor.startsWith("Dr")
                                                   ? ctx.doctor
@@ -569,7 +569,7 @@ export default function OutcomesPage() {
                                             <div
                                               style={{
                                                 fontSize: 9,
-                                                color: "#94a3b8",
+                                                color: "#64748b",
                                                 fontWeight: 600,
                                                 marginBottom: 2,
                                               }}
@@ -1135,7 +1135,7 @@ export default function OutcomesPage() {
                                     {dateStr}
                                   </div>
                                   {v.doctor && (
-                                    <div style={{ fontSize: 8, color: "#94a3b8" }}>{v.doctor}</div>
+                                    <div style={{ fontSize: 8, color: "#64748b" }}>{v.doctor}</div>
                                   )}
                                 </div>
                                 <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
@@ -1518,7 +1518,7 @@ export default function OutcomesPage() {
                     <div
                       style={{ display: "flex", gap: 3, marginBottom: 12, alignItems: "center" }}
                     >
-                      <span style={{ fontSize: 9, color: "#94a3b8", fontWeight: 600 }}>
+                      <span style={{ fontSize: 9, color: "#64748b", fontWeight: 600 }}>
                         Doctor:
                       </span>
                       <button
@@ -1916,7 +1916,7 @@ export default function OutcomesPage() {
                     <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>
                       Diagnosis Journey
                     </span>
-                    <span style={{ fontSize: 10, color: "#94a3b8", marginLeft: "auto" }}>
+                    <span style={{ fontSize: 10, color: "#64748b", marginLeft: "auto" }}>
                       Click to expand
                     </span>
                   </div>
@@ -1987,7 +1987,7 @@ export default function OutcomesPage() {
                             <span style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>
                               {info.label}
                             </span>
-                            <span style={{ fontSize: 10, color: "#94a3b8" }}>
+                            <span style={{ fontSize: 10, color: "#64748b" }}>
                               {isExpanded ? "▼" : "▶"}
                             </span>
                           </div>
@@ -2126,7 +2126,7 @@ export default function OutcomesPage() {
                                         }}
                                       >
                                         <div
-                                          style={{ fontSize: 9, color: "#94a3b8", fontWeight: 600 }}
+                                          style={{ fontSize: 9, color: "#64748b", fontWeight: 600 }}
                                         >
                                           {rd.label}
                                         </div>
@@ -2197,7 +2197,7 @@ export default function OutcomesPage() {
                                           padding: "2px 8px",
                                           borderRadius: 8,
                                           background: m.is_active ? "#f0fdf4" : "#f8fafc",
-                                          color: m.is_active ? "#059669" : "#94a3b8",
+                                          color: m.is_active ? "#059669" : "#64748b",
                                           border: `1px solid ${m.is_active ? "#bbf7d0" : "#e2e8f0"}`,
                                           fontWeight: 600,
                                           textDecoration: m.is_active ? "none" : "line-through",
@@ -2279,7 +2279,7 @@ export default function OutcomesPage() {
                     <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>
                       Medications
                     </span>
-                    <span style={{ fontSize: 10, color: "#94a3b8", marginLeft: "auto" }}>
+                    <span style={{ fontSize: 10, color: "#64748b", marginLeft: "auto" }}>
                       {activeMeds.length} active
                       {stoppedMeds.length > 0 ? ` · ${stoppedMeds.length} stopped` : ""}
                     </span>
@@ -2331,7 +2331,7 @@ export default function OutcomesPage() {
                           <div style={{ fontSize: 10, color: "#64748b", marginTop: 1 }}>
                             {latest.dose} · {latest.frequency}
                             {latest.timing ? ` · ${latest.timing}` : ""} ·{" "}
-                            <span style={{ color: "#94a3b8" }}>
+                            <span style={{ color: "#64748b" }}>
                               since {fmtD(first.started_date || first.visit_date)}
                             </span>
                           </div>
@@ -2344,7 +2344,7 @@ export default function OutcomesPage() {
                       <div
                         style={{
                           fontSize: 10,
-                          color: "#94a3b8",
+                          color: "#64748b",
                           fontWeight: 700,
                           marginBottom: 4,
                           textTransform: "uppercase",
@@ -2375,7 +2375,7 @@ export default function OutcomesPage() {
                           <span
                             style={{
                               fontSize: 11,
-                              color: "#94a3b8",
+                              color: "#64748b",
                               textDecoration: "line-through",
                             }}
                           >
@@ -2456,7 +2456,7 @@ export default function OutcomesPage() {
                               textAlign: "left",
                               padding: "6px 8px",
                               fontSize: 10,
-                              color: "#94a3b8",
+                              color: "#64748b",
                               fontWeight: 700,
                               position: "sticky",
                               left: 0,
@@ -2470,7 +2470,7 @@ export default function OutcomesPage() {
                             style={{
                               padding: "6px 4px",
                               fontSize: 9,
-                              color: "#94a3b8",
+                              color: "#64748b",
                               fontWeight: 600,
                               minWidth: 40,
                             }}
@@ -2519,7 +2519,7 @@ export default function OutcomesPage() {
                               style={{
                                 padding: "5px 4px",
                                 fontSize: 9,
-                                color: "#94a3b8",
+                                color: "#64748b",
                                 textAlign: "center",
                               }}
                             >
@@ -2550,7 +2550,7 @@ export default function OutcomesPage() {
                                         style={{
                                           fontSize: 8,
                                           fontWeight: 400,
-                                          color: "#94a3b8",
+                                          color: "#64748b",
                                           marginLeft: 1,
                                         }}
                                       >

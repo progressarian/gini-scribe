@@ -41,11 +41,13 @@ export const answerFromRecord = (record) =>
       }
     : emptyHomeAnswer;
 
-export const homeProblemsNow = (answer) => homeSampleProblems(answer, istClock(new Date()));
+export const homeProblemsNow = (answer, { brief = false } = {}) =>
+  homeSampleProblems(answer, istClock(new Date()), { brief });
 
-export const homePayload = (answer) => ({
+export const homePayload = (answer, { brief = false } = {}) => ({
+  ...(brief ? { brief: true } : {}),
   sample: answer.sample,
-  collectedTime: answer.sample === "collected" ? answer.collectedTime : null,
+  collectedTime: answer.sample === "collected" ? answer.collectedTime || null : null,
   collectedBy: answer.sample === "collected" ? answer.collectedBy : null,
   payment: answer.sample === "collected" ? answer.payment : null,
   amount: answer.sample === "collected" && answer.payment === "paid" ? answer.amount : null,
@@ -61,14 +63,22 @@ function FieldError({ id, text }) {
   ) : null;
 }
 
-export function HomeSampleFields({ value, onChange, problems, showErrors, withNote = true }) {
+export function HomeSampleFields({
+  value,
+  onChange,
+  problems,
+  showErrors,
+  withNote = true,
+  sampleOnly = false,
+}) {
   const uid = useId();
   const set = (patch) => onChange({ ...value, ...patch });
   const err = (key) => (showErrors ? problems[key] : "");
   const ids = (key) => ({ id: `${uid}-${key}`, err: `${uid}-${key}-err` });
   const described = (key) => (err(key) ? ids(key).err : undefined);
   const collected = value.sample === "collected";
-  const paid = collected && value.payment === "paid";
+  const details = collected && !sampleOnly;
+  const paid = details && value.payment === "paid";
 
   return (
     <>
@@ -95,10 +105,10 @@ export function HomeSampleFields({ value, onChange, problems, showErrors, withNo
           </label>
         </div>
         <FieldError id={ids("sample").err} text={err("sample")} />
-        {collected && (
+        {details && (
           <div className="hs-row">
             <div className="fset__field">
-              <label htmlFor={ids("collectedTime").id}>Time (required)</label>
+              <label htmlFor={ids("collectedTime").id}>Time (optional)</label>
               <input
                 id={ids("collectedTime").id}
                 type="time"
@@ -133,7 +143,7 @@ export function HomeSampleFields({ value, onChange, problems, showErrors, withNo
         )}
       </fieldset>
 
-      {collected && (
+      {details && (
         <fieldset className="cxl-charge hs-set">
           <legend>Payment</legend>
           <div className="hs-choices" role="radiogroup" aria-describedby={described("payment")}>

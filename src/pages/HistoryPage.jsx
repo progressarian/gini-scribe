@@ -50,7 +50,7 @@ export default function HistoryPage() {
   return (
     <div>
       {!dbPatientId ? (
-        <div style={{ textAlign: "center", padding: 30, color: "#94a3b8" }}>
+        <div style={{ textAlign: "center", padding: 30, color: "#64748b" }}>
           <div style={{ fontSize: 28, marginBottom: 8 }}>📜</div>
           <div style={{ fontSize: 13, fontWeight: 600 }}>
             Load a patient from the database first
@@ -294,7 +294,7 @@ export default function HistoryPage() {
               <div style={{ fontSize: 10, fontWeight: 700, color: "#2563eb", marginBottom: 4 }}>
                 📝 PASTE OR DICTATE OLD PRESCRIPTION
               </div>
-              <div style={{ fontSize: 9, color: "#94a3b8", marginBottom: 6 }}>
+              <div style={{ fontSize: 9, color: "#64748b", marginBottom: 6 }}>
                 Paste prescription text, type from the slip, or use voice recording. Claude will
                 auto-extract diagnoses, medications, vitals.
               </div>
@@ -380,7 +380,7 @@ export default function HistoryPage() {
               <div style={{ fontSize: 10, fontWeight: 700, color: "#7c3aed", marginBottom: 4 }}>
                 🧪 UPLOAD TEST REPORTS
               </div>
-              <div style={{ fontSize: 9, color: "#94a3b8", marginBottom: 8 }}>
+              <div style={{ fontSize: 9, color: "#64748b", marginBottom: 8 }}>
                 Upload photos or PDFs of test reports. Claude will extract values automatically.
               </div>
 
@@ -828,7 +828,7 @@ export default function HistoryPage() {
               </div>
 
               {/* Vitals */}
-              <div style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8", marginBottom: 3 }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color: "#64748b", marginBottom: 3 }}>
                 VITALS
               </div>
               <div
@@ -847,7 +847,7 @@ export default function HistoryPage() {
                   ["height", "Ht (cm)"],
                 ].map(([k, l]) => (
                   <div key={k}>
-                    <label style={{ fontSize: 7, color: "#94a3b8" }}>{l}</label>
+                    <label style={{ fontSize: 7, color: "#64748b" }}>{l}</label>
                     <input
                       value={historyForm.vitals[k] || ""}
                       onChange={(e) =>
@@ -878,7 +878,7 @@ export default function HistoryPage() {
                   marginBottom: 3,
                 }}
               >
-                <div style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8" }}>DIAGNOSES</div>
+                <div style={{ fontSize: 9, fontWeight: 700, color: "#64748b" }}>DIAGNOSES</div>
                 <button
                   onClick={() => addHistoryRow("diagnoses")}
                   style={{
@@ -992,7 +992,7 @@ export default function HistoryPage() {
                   marginTop: 6,
                 }}
               >
-                <div style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8" }}>MEDICATIONS</div>
+                <div style={{ fontSize: 9, fontWeight: 700, color: "#64748b" }}>MEDICATIONS</div>
                 <button
                   onClick={() => addHistoryRow("medications")}
                   style={{
@@ -1123,7 +1123,7 @@ export default function HistoryPage() {
                   marginTop: 6,
                 }}
               >
-                <div style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8" }}>LAB RESULTS</div>
+                <div style={{ fontSize: 9, fontWeight: 700, color: "#64748b" }}>LAB RESULTS</div>
                 <button
                   onClick={() => addHistoryRow("labs")}
                   style={{
@@ -1279,7 +1279,7 @@ export default function HistoryPage() {
                 width: "100%",
                 padding: "10px",
                 background: historyForm.visit_date ? "#2563eb" : "#e2e8f0",
-                color: historyForm.visit_date ? "white" : "#94a3b8",
+                color: historyForm.visit_date ? "white" : "#64748b",
                 border: "none",
                 borderRadius: 6,
                 fontWeight: 700,

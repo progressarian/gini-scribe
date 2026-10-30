@@ -86,7 +86,7 @@ export default function HistoryClinicalPage() {
             style={{
               border: `1.5px solid ${hxConditions.includes("Other") ? "#64748b" : "#e2e8f0"}`,
               background: hxConditions.includes("Other") ? "#64748b12" : "white",
-              color: hxConditions.includes("Other") ? "#64748b" : "#94a3b8",
+              color: hxConditions.includes("Other") ? "#64748b" : "#64748b",
             }}
           >
             + Other
@@ -456,7 +456,7 @@ export default function HistoryClinicalPage() {
                 }}
               >
                 {labRequisition.includes(m.test) ? "✅" : "+"} {m.test}{" "}
-                <span style={{ fontSize: 8, color: "#94a3b8" }}>({m.forCondition})</span>
+                <span style={{ fontSize: 8, color: "#64748b" }}>({m.forCondition})</span>
               </button>
             ))}
           </div>

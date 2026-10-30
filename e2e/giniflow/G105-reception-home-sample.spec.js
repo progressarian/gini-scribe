@@ -102,7 +102,7 @@ test.describe.serial("G105 reception records the home sample", () => {
     await rowOf(page, made.name).getByRole("button", { name: "🏠 Home sample" }).click();
     const dialog = page.getByRole("dialog", { name: `🏠 Home sample — ${made.name}` });
     await dialog.getByRole("radio", { name: "Collected at home" }).check();
-    await dialog.getByLabel("Time (required)").fill(time);
+    await dialog.getByLabel("Time (optional)").fill(time);
     await dialog.getByLabel("Collected by (required)").selectOption("Harwinder");
     await dialog.getByRole("radio", { name: "Paid at home" }).check();
     await dialog.getByLabel("Amount in ₹ (required)").fill("1260");
@@ -138,7 +138,7 @@ test.describe.serial("G105 reception records the home sample", () => {
     expect(billed).toEqual({ bills: 0, payments: 0 });
   });
 
-  test("3. ✓ Arrived with nothing recorded asks first, saves the answer, then checks in", async ({
+  test("3. ✓ Arrived asks only whether the sample was collected, saves it, then checks in", async ({
     page,
   }) => {
     const made = await homeVisit("HsArrive");
@@ -161,18 +161,9 @@ test.describe.serial("G105 reception records the home sample", () => {
     await expect(arrive).toBeDisabled();
 
     await box.getByRole("radio", { name: "Collected at home" }).check();
-    await box.getByLabel("Collected by (required)").focus();
-    await expect(box.getByText("Enter the time the sample was collected")).toHaveCount(0);
-    await expect(box.getByText(/Choose who collected it/)).toHaveCount(0);
-    await expect(box.getByText("Choose whether the payment was made at home")).toHaveCount(0);
-    await expect(need).toHaveText(
-      "Home sample — still needed: collection time, collected by, paid at home or pending",
-    );
-    await box.getByLabel("Time (required)").fill(pastClock());
-    await box.getByLabel("Collected by (required)").selectOption("Pratham");
-    await expect(need).toHaveText("Home sample — still needed: paid at home or pending");
-    await expect(arrive).toBeDisabled();
-    await box.getByRole("radio", { name: "Pending" }).check();
+    await expect(box.getByLabel("Time (optional)")).toHaveCount(0);
+    await expect(box.getByLabel("Collected by (required)")).toHaveCount(0);
+    await expect(box.getByRole("group", { name: "Payment" })).toHaveCount(0);
     await expect(need).toHaveCount(0);
     await expect(arrive).toBeEnabled({ timeout: 15000 });
     await arrive.click();
@@ -180,7 +171,7 @@ test.describe.serial("G105 reception records the home sample", () => {
     await expect.poll(() => checkedIn).toBe(1);
     const rows = await savedRows(made.visit);
     expect(rows.map((r) => [r.sample, r.collected_by, r.payment])).toEqual([
-      ["collected", "Pratham", "pending"],
+      ["collected", null, null],
     ]);
   });
 
@@ -226,7 +217,7 @@ test.describe.serial("G105 reception records the home sample", () => {
 
     await row.getByRole("button", { name: "🏠 Home sample" }).click();
     const dialog = page.getByRole("dialog", { name: `🏠 Home sample — ${made.name}` });
-    await expect(dialog.getByLabel("Time (required)")).toHaveValue(time);
+    await expect(dialog.getByLabel("Time (optional)")).toHaveValue(time);
     await dialog.getByRole("radio", { name: "Paid at home" }).check();
     await dialog.getByLabel("Amount in ₹ (required)").fill("900");
     await dialog.getByLabel("Mode (required)").selectOption("upi");
@@ -321,7 +312,6 @@ test.describe.serial("G105 reception records the home sample", () => {
     await dialog.getByRole("radio", { name: "Paid at home" }).check();
     await dialog.getByLabel("Amount in ₹ (required)").fill("0");
     await dialog.getByRole("button", { name: "Save" }).click();
-    await expect(dialog.getByText("Enter the time the sample was collected")).toBeVisible();
     await expect(dialog.getByText("Choose who collected it: Harwinder or Pratham")).toBeVisible();
     await expect(
       dialog.getByText("Enter the amount in whole rupees, from ₹1 to ₹1,00,000"),

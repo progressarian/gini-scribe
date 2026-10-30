@@ -413,7 +413,7 @@ export default function DoctorSummarySection({ patientId, appointmentId }) {
         <div
           style={{
             fontSize: 13,
-            color: "#94a3b8",
+            color: "#64748b",
             fontStyle: "italic",
             padding: "8px 10px",
             background: "#fafbfc",

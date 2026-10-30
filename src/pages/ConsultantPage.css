@@ -240,7 +240,7 @@
   flex: 1;
 }
 .consultant__shadow-dx-reason {
-  color: #94a3b8;
+  color: #64748b;
 }
 .consultant__shadow-adopt-btn {
   font-size: 8px;
@@ -264,7 +264,7 @@
   flex: 1;
 }
 .consultant__shadow-tx-reason {
-  color: #94a3b8;
+  color: #64748b;
 }
 .consultant__shadow-tx-btns {
   display: flex;
@@ -562,6 +562,6 @@
 }
 .consultant__result-clarify-options {
   font-size: 9px;
-  color: #94a3b8;
+  color: #64748b;
   margin-top: 2px;
 }

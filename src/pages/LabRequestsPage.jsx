@@ -164,7 +164,7 @@ export default function LabRequestsPage() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(4, 1fr)",
+              gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
               gap: 10,
               marginBottom: 14,
             }}
@@ -218,7 +218,7 @@ export default function LabRequestsPage() {
               style={{
                 padding: 40,
                 textAlign: "center",
-                color: "#94a3b8",
+                color: "#64748b",
                 fontSize: 13,
                 background: "#f8fafc",
                 border: "1px dashed #e2e8f0",
@@ -285,7 +285,7 @@ function LabRequestCard({ req, onDecide }) {
               </span>
             ) : null}
           </div>
-          <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
+          <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
             Requested {fmtDate(req.created_at)}
           </div>
         </div>

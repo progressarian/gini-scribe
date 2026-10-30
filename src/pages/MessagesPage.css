@@ -62,7 +62,7 @@
 }
 .messages__search-icon {
   font-size: 13px;
-  color: #94a3b8;
+  color: #64748b;
 }
 .messages__search-input {
   flex: 1;
@@ -133,14 +133,14 @@
 .messages__older-end {
   text-align: center;
   font-size: 10px;
-  color: #94a3b8;
+  color: #64748b;
   padding: 4px 0 8px;
   letter-spacing: 0.5px;
 }
 .messages__empty {
   text-align: center;
   padding: 40px;
-  color: #94a3b8;
+  color: #64748b;
 }
 .messages__empty-icon {
   font-size: 40px;
@@ -184,7 +184,7 @@
   padding: 16px;
   text-align: center;
   font-size: 12px;
-  color: #94a3b8;
+  color: #64748b;
   background: #f8fafc;
   border: 1px dashed #e2e8f0;
   border-radius: 8px;
@@ -247,7 +247,7 @@
 }
 .messages__thread-file {
   font-size: 10px;
-  color: #94a3b8;
+  color: #64748b;
 }
 .messages__thread-meta {
   text-align: right;
@@ -263,7 +263,7 @@
 }
 .messages__thread-date {
   font-size: 10px;
-  color: #94a3b8;
+  color: #64748b;
 }
 .messages__thread-preview {
   font-size: 11px;
@@ -336,7 +336,7 @@
 }
 .messages__thread-empty {
   text-align: center;
-  color: #94a3b8;
+  color: #64748b;
   padding: 20px;
   font-size: 12px;
 }

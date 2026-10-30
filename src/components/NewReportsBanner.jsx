@@ -165,7 +165,7 @@ export default function NewReportsBanner() {
                       padding: "3px 6px",
                       textAlign: "center",
                       fontSize: 9,
-                      color: "#94a3b8",
+                      color: "#64748b",
                     }}
                   >
                     {l.ref_range || "—"}
