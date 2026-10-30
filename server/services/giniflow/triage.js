@@ -533,7 +533,9 @@ export async function getTriageDay(
       coordinatorSet: cards.filter((c) => c.categorySource === "coordinator").length,
     },
     ensured: ensured
-      ? { created: ensured.created, advanced: ensured.advanced, considered: ensured.considered }
+      ? ensured.skippedRun
+        ? { skipped: ensured.skippedRun }
+        : { created: ensured.created, advanced: ensured.advanced, considered: ensured.considered }
       : null,
   };
 }

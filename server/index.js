@@ -79,6 +79,7 @@ import giniflowRoutes from "./routes/giniflow.js";
 import settingsRoutes from "./routes/settings.js";
 import { startEventTailer } from "./services/giniflow/eventTailer.js";
 import giniflowStationRoutes from "./routes/giniflowStations.js";
+import outsidePendingRefresh from "./middleware/outsidePendingRefresh.js";
 import testCancelRequestRoutes from "./routes/testCancelRequests.js";
 import approvalRoutes from "./routes/approvals.js";
 import careFollowupRoutes from "./routes/careFollowups.js";
@@ -152,6 +153,7 @@ app.use("/api", extractRoutes);
 app.use(authMiddleware);
 app.use(requireAuth);
 app.use(assistedPatientGuard);
+app.use(outsidePendingRefresh);
 
 // Rate limiting — IP-based for unauthenticated, user-based for authenticated
 app.use("/api", ipLimiter);

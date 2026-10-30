@@ -10,11 +10,15 @@ const STATUSES = ["collected", "sent", "uploaded"];
 
 const CASE_LOOKBACK_DAYS = 30;
 
-const likeOf = (text) => `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-
 const istDay = (column) => `(${column} AT TIME ZONE 'Asia/Kolkata')::date`;
 
-const OUTSIDE_NAMES = `
+const pendingTtlMs = () => {
+  const value = Number(process.env.GINIFLOW_OUTSIDE_PENDING_TTL_MS);
+  return Number.isFinite(value) && value >= 0 ? value : 30_000;
+};
+const NAMES_TTL_MS = 10 * 60_000;
+
+const OUTSIDE_NAMES_SQL = `
   SELECT ${FLAT("c.test_name")} AS flat
     FROM service_items i JOIN giniflow_test_catalog c ON c.id = i.test_catalog_id
    WHERE i.is_active AND i.is_outsourced
@@ -30,7 +34,7 @@ const caseAction = (action, alias) => `
   ) ${alias} ON TRUE`;
 
 const PENDING_CTE = `
-  WITH outside_names AS (${OUTSIDE_NAMES}),
+  WITH outside_names AS (SELECT unnest($1::text[]) AS flat),
   pending AS (
     SELECT 'order' AS kind, o.id::text AS ref, v.visit_date,
            CASE o.sample_status WHEN '${SENT_OUTSIDE}' THEN 'sent'
@@ -124,25 +128,81 @@ const PENDING_CTE = `
             AND gv.patient_id = COALESCE(lc.patient_id, uid.id))
   )`;
 
-const LIST_SQL = `
+const PENDING_SQL = `
   ${PENDING_CTE}
   SELECT kind, ref, visit_date::text AS visit_date, status,
          (${IST_TODAY} - visit_date)::int AS days_waiting,
          patient_id, name, file_no, age, sex, tests,
-         collected_at, sent_at, sent_by, uploaded_at, uploaded_by, doc_id,
-         count(*) OVER ()::int AS total
-    FROM pending
-   WHERE status = ANY($1::text[])
-     AND ($2::date IS NULL OR visit_date >= $2::date)
-     AND ($3::date IS NULL OR visit_date <= $3::date)
-     AND ($4::text IS NULL OR name ILIKE $4 OR file_no ILIKE $4
-          OR array_to_string(tests, ' ') ILIKE $4)
-   ORDER BY status = 'uploaded', visit_date, created, ref
-   LIMIT $5 OFFSET $6`;
+         collected_at, sent_at, sent_by, uploaded_at, uploaded_by, doc_id, created
+    FROM pending`;
 
-const COUNT_SQL = `
-  ${PENDING_CTE}
-  SELECT status, count(*)::int AS n FROM pending GROUP BY status`;
+const istDate = (when = new Date()) =>
+  when.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+
+const cache = { names: null, namesAt: 0, rows: null, day: null, at: 0, building: null, epoch: 0 };
+
+export function forgetOutsidePending({ names = false } = {}) {
+  cache.rows = null;
+  cache.epoch += 1;
+  if (names) cache.names = null;
+}
+
+async function outsideNames(db, now) {
+  if (cache.names && now - cache.namesAt < NAMES_TTL_MS) return cache.names;
+  const { rows } = await db.query(OUTSIDE_NAMES_SQL);
+  cache.names = rows.map((row) => row.flat);
+  cache.namesAt = now;
+  return cache.names;
+}
+
+export async function pendingRows(db = pool, now = Date.now()) {
+  const day = istDate(new Date(now));
+  if (cache.rows && cache.day === day && now - cache.at < pendingTtlMs()) return cache.rows;
+  if (cache.building?.day === day && cache.building.epoch === cache.epoch) {
+    return cache.building.promise;
+  }
+  const epoch = cache.epoch;
+  const promise = (async () => {
+    const { rows } = await db.query(PENDING_SQL, [await outsideNames(db, now)]);
+    if (cache.epoch === epoch) Object.assign(cache, { rows, day, at: now });
+    return rows;
+  })();
+  cache.building = { day, epoch, promise };
+  try {
+    return await promise;
+  } finally {
+    if (cache.building?.promise === promise) cache.building = null;
+  }
+}
+
+const countsOf = (rows) => {
+  const by = (status) => rows.filter((row) => row.status === status).length;
+  const collected = by("collected");
+  const sent = by("sent");
+  const uploaded = by("uploaded");
+  return {
+    pending: collected + sent,
+    all: collected + sent + uploaded,
+    collected,
+    sent,
+    uploaded,
+  };
+};
+
+const time = (value) => (value ? new Date(value).getTime() : 0);
+
+const listOrder = (a, b) =>
+  Number(a.status === "uploaded") - Number(b.status === "uploaded") ||
+  a.visit_date.localeCompare(b.visit_date) ||
+  time(a.created) - time(b.created) ||
+  (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0);
+
+const matches = (row, term) =>
+  [row.name, row.file_no, (row.tests || []).join(" ")].some((text) =>
+    String(text || "")
+      .toLowerCase()
+      .includes(term),
+  );
 
 const shape = (row) => ({
   key: `${row.kind}:${row.ref}`,
@@ -172,36 +232,32 @@ export async function listOutsidePending(
   { q = "", from = null, to = null, status = "all", page = 1 } = {},
   db = pool,
 ) {
-  const term = String(q || "").trim();
+  const term = String(q || "")
+    .trim()
+    .toLowerCase();
   const pageNo = Math.max(1, Math.floor(Number(page)) || 1);
-  const [{ rows }, { rows: counted }] = await Promise.all([
-    db.query(LIST_SQL, [
-      STATUSES.includes(status) ? [status] : STATUSES,
-      from || null,
-      to || null,
-      term ? likeOf(term) : null,
-      OUTSIDE_PAGE_SIZE,
-      (pageNo - 1) * OUTSIDE_PAGE_SIZE,
-    ]),
-    db.query(COUNT_SQL),
-  ]);
-  const byStatus = Object.fromEntries(counted.map((row) => [row.status, row.n]));
-  const collected = byStatus.collected ?? 0;
-  const sent = byStatus.sent ?? 0;
-  const uploaded = byStatus.uploaded ?? 0;
-  const total = rows[0]?.total ?? 0;
+  const all = await pendingRows(db);
+  const wanted = STATUSES.includes(status) ? [status] : STATUSES;
+  const shown = all
+    .filter(
+      (row) =>
+        wanted.includes(row.status) &&
+        (!from || row.visit_date >= from) &&
+        (!to || row.visit_date <= to) &&
+        (!term || matches(row, term)),
+    )
+    .sort(listOrder);
+  const start = (pageNo - 1) * OUTSIDE_PAGE_SIZE;
   return {
-    rows: rows.map(shape),
-    total,
+    rows: shown.slice(start, start + OUTSIDE_PAGE_SIZE).map(shape),
+    total: shown.length,
     page: pageNo,
-    pages: Math.max(1, Math.ceil(total / OUTSIDE_PAGE_SIZE)),
+    pages: Math.max(1, Math.ceil(shown.length / OUTSIDE_PAGE_SIZE)),
     pageSize: OUTSIDE_PAGE_SIZE,
-    counts: {
-      pending: collected + sent,
-      all: collected + sent + uploaded,
-      collected,
-      sent,
-      uploaded,
-    },
+    counts: countsOf(all),
   };
+}
+
+export async function countOutsidePending(db = pool) {
+  return countsOf(await pendingRows(db));
 }

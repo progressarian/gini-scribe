@@ -28,6 +28,7 @@ import { directConsultSql } from "../../../shared/directConsult.js";
 import { reassignConsultant } from "./reassign.js";
 import { sweepLateTestExits } from "./lateTests.js";
 import { syncDayHolds } from "./coordinatorHold.js";
+import { finishSyncLease, takeSyncLease } from "./syncLease.js";
 
 const DIRECT_CONSULT_HEALTHRAY_WRITES = ["no_show", "cancelled"];
 
@@ -459,7 +460,21 @@ async function followAppointmentDoctors(client, day, db) {
   return followed;
 }
 
-export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
+export async function syncAppointmentsToFlow({ date = null, db = pool, reuseRecent = true } = {}) {
+  const day = date || (await db.query(`SELECT ${IST_TODAY}::text AS d`)).rows[0].d;
+  const lease = await takeSyncLease(db, day, { reuseRecent });
+  if (lease.skipped) return { date: day, skippedRun: lease.skipped };
+  let ok = false;
+  try {
+    const result = await syncDay(day, db);
+    ok = true;
+    return result;
+  } finally {
+    await finishSyncLease(db, day, lease.holder, { ok });
+  }
+}
+
+async function syncDay(day, db) {
   const client = await db.connect();
   const result = {
     created: 0,
@@ -475,8 +490,6 @@ export async function syncAppointmentsToFlow({ date = null, db = pool } = {}) {
     advancedIds: [],
   };
   try {
-    const day = date || (await client.query(`SELECT ${IST_TODAY}::text AS d`)).rows[0].d;
-
     const { rows: appts } = await client.query(
       `SELECT DISTINCT ON (a.patient_id)
               a.id, a.patient_id, a.status, a.time_slot,

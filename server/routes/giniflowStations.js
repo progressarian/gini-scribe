@@ -128,7 +128,7 @@ import {
   skipVitals,
 } from "../services/giniflow/vitalsStation.js";
 import { labelOutsourcedPayments } from "../services/giniflow/outsourcedLabels.js";
-import { listOutsidePending } from "../services/giniflow/outsidePending.js";
+import { countOutsidePending, listOutsidePending } from "../services/giniflow/outsidePending.js";
 import {
   getPaymentQueue,
   clearPayment,
@@ -2022,6 +2022,14 @@ router.post(
     }
   },
 );
+
+router.get("/giniflow/stations/lab/outside-pending/count", labGate, async (req, res) => {
+  try {
+    res.json(await countOutsidePending());
+  } catch (e) {
+    handleError(res, e, "Gini Flow outside reports pending count");
+  }
+});
 
 router.get(
   "/giniflow/stations/lab/outside-pending",

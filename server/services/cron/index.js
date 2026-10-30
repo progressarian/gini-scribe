@@ -267,7 +267,7 @@ function scheduleNextReceptionRefresh(delayMs) {
       const r = await runRequestedHealthrayRefresh({
         syncToday: () =>
           withWatchdog(syncTodayWalkingAppointments(), HEALTHRAY_WATCHDOG_MS, "Reception refresh"),
-        syncFlow: () => syncAppointmentsToFlow(),
+        syncFlow: () => syncAppointmentsToFlow({ reuseRecent: false }),
       });
       if (r) console.log(`[Cron] Reception HealthRay refresh: ${JSON.stringify(r)}`);
     } catch (e) {

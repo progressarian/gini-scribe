@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS giniflow_sync_leases (
+  day DATE PRIMARY KEY,
+  holder TEXT NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  until TIMESTAMPTZ NOT NULL,
+  finished_at TIMESTAMPTZ
+);

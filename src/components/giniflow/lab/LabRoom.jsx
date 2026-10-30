@@ -12,7 +12,7 @@ import {
   useUploadLabCaseReport,
   useDeleteLabCaseReport,
   reportHref,
-  useOutsidePending,
+  useOutsidePendingCount,
 } from "../../../queries/hooks/useGiniflowLab";
 import { useGiniflowLive } from "../../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../LiveBadge";
@@ -1489,7 +1489,7 @@ export default function LabRoom({ room = null }) {
       },
       { replace: true },
     );
-  const outsideCount = useOutsidePending().data?.counts?.pending;
+  const outsideCount = useOutsidePendingCount().data?.pending;
   const cancelled = useCancelledTests("lab").data;
   const cancelledCount = cancelled ? cancelled.filter((row) => !row.restoredAt).length : null;
   const [confirmUpload, setConfirmUpload] = useState(null);

@@ -23,6 +23,16 @@ export function useLabQueue(date, q = "", group = "all", room = null) {
   });
 }
 
+export function useOutsidePendingCount() {
+  return useQuery({
+    queryKey: ["giniflow", "lab", "outside-pending", "count"],
+    queryFn: async () => (await api.get("/api/giniflow/stations/lab/outside-pending/count")).data,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+    placeholderData: (prev) => prev,
+  });
+}
+
 export function useOutsidePending({ q = "", status = "all", from = "", to = "", page = 1 } = {}) {
   const search = q.trim().length >= 2 ? q.trim() : "";
   const params = {
