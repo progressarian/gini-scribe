@@ -17,6 +17,7 @@ import {
 import { httpError, inTransaction } from "./transaction.js";
 import { cleanManualDiscount, manualAmount } from "./manualDiscounts.js";
 import { allocate } from "./priceBill.js";
+import { activePackages, listPriceOf } from "./packages.js";
 
 const BILL_COLUMNS = `id, bill_no, series, fy, bill_type, original_bill_id, patient_id, visit_id,
   appointment_id, bill_date::text AS bill_date, status, scheme_code, scheme_label, payer_name,
@@ -44,6 +45,7 @@ const COPIED = [
   "tax_rate_pct",
   "payment_rule_id",
   "payment_rule",
+  "package_item_id",
 ];
 
 const PARTS = [
@@ -64,10 +66,11 @@ const CREDITED = ["quantity", ...PARTS];
 
 const LINES_SQL = `
   SELECT l.id, l.line_no, l.is_live, l.quantity, ${[...COPIED, ...PARTS].map((key) => `l.${key}`).join(", ")},
-         o.id AS order_id, o.sample_status,
+         o.id AS order_id, o.sample_status, pk.name AS package_name,
          ${CREDITED.map((key) => `c.${key} AS credited_${key}`).join(", ")}
     FROM bill_lines l
     LEFT JOIN giniflow_lab_orders o ON o.id = l.lab_order_id
+    LEFT JOIN service_items pk ON pk.id = l.package_item_id
     LEFT JOIN LATERAL (
       SELECT ${CREDITED.map((key) => `COALESCE(SUM(x.${key}), 0) AS ${key}`).join(", ")}
         FROM bill_lines x WHERE x.credited_line_id = l.id
@@ -77,7 +80,8 @@ const LINES_SQL = `
 
 const NOTE_LINE_COLUMNS = `id, line_no, credited_line_id, service_item_id, source, lab_order_id,
   item_code, bill_code, bill_name, quantity, rate, actual_amount, discount, taxable, cgst, sgst,
-  tax_code, sac_hsn, tax_rate_pct, payment_rule, patient_payable, claim_amount, adjustment_amount`;
+  tax_code, sac_hsn, tax_rate_pct, payment_rule, patient_payable, claim_amount, adjustment_amount,
+  package_item_id`;
 
 export const REFUND_LINES_MAX = 100;
 export const FLOOR_CANCEL_WAITING = "floor_cancel_waiting_on";
@@ -211,14 +215,23 @@ async function loadCredit(db, billId, { lock }) {
   return {
     bill,
     lines: rows.map(lineOf),
+    packages: rows.some((row) => row.package_item_id) ? await activePackages(db) : [],
     priorRoundOff: paise(prior[0].round_off),
     priorClaim: paise(prior[0].claim),
   };
 }
 
 function creditPiece(line, quantity) {
-  const whole = line.quantity;
-  const after = line.credited_quantity + quantity;
+  return scaledPiece(line, quantity, line.credited_quantity + quantity, line.quantity);
+}
+
+function amountPiece(line, quantity, amount) {
+  const paid = line.original.patient_payable;
+  if (!paid) return scaledPiece(line, quantity, 0, 1);
+  return scaledPiece(line, quantity, line.credited.patient_payable + amount, paid);
+}
+
+function scaledPiece(line, quantity, after, whole) {
   const o = line.original;
   const c = line.credited;
   const upTo = (key) => share(o[key], after, whole) - c[key];
@@ -286,12 +299,62 @@ function chooseLine(bill, byId, entry) {
   return { line, quantity, piece: creditPiece(line, quantity), frees: quantity === left };
 }
 
+const leftToPay = (line) => line.original.patient_payable - line.credited.patient_payable;
+
+function packageCredit(packages, lines, chosen) {
+  const groups = new Map();
+  for (const entry of chosen) {
+    const packageId = entry.line.row.package_item_id;
+    if (packageId && entry.frees) groups.set(packageId, [...(groups.get(packageId) ?? []), entry]);
+  }
+  for (const [packageId, entries] of groups) {
+    const members = lines.filter((line) => line.row.package_item_id === packageId);
+    const open = members.filter((line) => line.credited_quantity < line.quantity);
+    const taking = new Set(entries.map((entry) => entry.line.id));
+    const staying = open.filter((line) => !taking.has(line.id));
+    const listed = members.reduce(
+      (sum, line) => sum + Math.round((paise(line.row.rate) * line.quantity) / 100),
+      0,
+    );
+    const paid = members.reduce((sum, line) => sum + line.original.patient_payable, 0);
+    const stayingList = listPriceOf(
+      packages,
+      staying.map((line) => ({
+        item_id: line.row.service_item_id,
+        base: paise(line.row.base_rate),
+      })),
+    );
+    const keep = listed ? Math.round((stayingList * paid) / listed) : 0;
+    const most = entries.reduce((sum, entry) => sum + leftToPay(entry.line), 0);
+    const owedBack = Math.min(
+      most,
+      Math.max(0, open.reduce((sum, line) => sum + leftToPay(line), 0) - keep),
+    );
+    const base = entries.map((entry) => leftToPay(entry.line));
+    const amounts = new Map(
+      allocate(
+        owedBack,
+        base.map((_, index) => index),
+        base,
+      ).map(({ index, share: part }) => [index, part]),
+    );
+    entries.forEach((entry, index) => {
+      entry.piece = amountPiece(entry.line, entry.quantity, amounts.get(index) ?? 0);
+    });
+  }
+  return chosen;
+}
+
 function planCredit(loaded, wanted) {
   const { bill, lines } = loaded;
   const byId = new Map(lines.map((line) => [line.id, line]));
-  const chosen = wanted
-    .map((entry) => chooseLine(bill, byId, entry))
-    .sort((a, b) => a.line.line_no - b.line.line_no);
+  const chosen = packageCredit(
+    loaded.packages ?? [],
+    lines,
+    wanted
+      .map((entry) => chooseLine(bill, byId, entry))
+      .sort((a, b) => a.line.line_no - b.line.line_no),
+  );
   const sum = (key) => chosen.reduce((total, entry) => total + entry.piece[key], 0);
   const taken = new Map(chosen.map((entry) => [entry.line.id, entry.quantity]));
   const creditsEverything = lines.every(
@@ -403,6 +466,8 @@ export async function creditableLines(billId, db = pool) {
       credited_claim: line.credited.claim_amount,
       claim_cleared: bill.claim_status === "cleared" && line.original.claim_amount > 0,
       test: line.order ? { lab_order_id: line.order.id, done: line.order.done } : null,
+      package_item_id: line.row.package_item_id ?? null,
+      package_name: line.row.package_name ?? null,
     })),
   };
 }

@@ -386,12 +386,14 @@ const normName = (s) =>
     .replace(/\s+/g, " ")
     .trim();
 
+const joinedName = (s) => normName(s).replace(/ /g, "");
+
 function personLooksSame(existing, incomingName, incomingSex) {
   if (existing.sex && incomingSex && existing.sex !== incomingSex) return false;
   const a = normName(existing.name);
   const b = normName(incomingName);
   if (!a || !b) return true; // can't compare names — rely on the sex gate above
-  if (a === b) return true;
+  if (a === b || joinedName(a) === joinedName(b)) return true;
   const ta = a.split(" ");
   const tb = b.split(" ");
   if (ta[0] === tb[0]) return true; // same given name
@@ -416,7 +418,7 @@ async function matchIdentitylessByPhone(phone, name, sex) {
     personLooksSame({ name: row.name, sex: row.sex === "Other" ? null : row.sex }, name, sex),
   );
   if (alike.length === 1) return alike[0].id;
-  const sameName = alike.filter((row) => normName(row.name) === normName(name));
+  const sameName = alike.filter((row) => joinedName(row.name) === joinedName(name));
   return sameName.length === 1 ? sameName[0].id : null;
 }
 

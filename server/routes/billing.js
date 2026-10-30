@@ -375,6 +375,24 @@ router.post(
 );
 
 router.post(
+  `${BASE}/bills/:billId/packages/:packageItemId/remove`,
+  desk,
+  validate(billingLineRemoveSchema, BILLING_DESK_LABELS),
+  run("Remove bill package", 200, (req) =>
+    bills.removePackage(req.params.billId, req.params.packageItemId, req.body, ctx(req)),
+  ),
+);
+
+router.post(
+  `${BASE}/bills/:billId/packages/:packageItemId/discount`,
+  desk,
+  validate(billingManualDiscountSchema, BILLING_DESK_LABELS),
+  run("Set a package discount", 200, (req) =>
+    bills.setPackageDiscount(req.params.billId, req.params.packageItemId, req.body, ctx(req)),
+  ),
+);
+
+router.post(
   `${BASE}/bills/:billId/codes`,
   desk,
   validate(billingCodeAddSchema, BILLING_DESK_LABELS),

@@ -62,6 +62,76 @@ function PreviewText({ preview, error, loading }) {
   );
 }
 
+const blockedLine = (line) => line.left <= 0 || line.claim_cleared;
+
+function refundEntries(lines) {
+  const packages = new Map();
+  const entries = [];
+  for (const line of lines) {
+    if (!line.package_item_id) {
+      entries.push({ key: line.line_id, line });
+      continue;
+    }
+    const known = packages.get(line.package_item_id);
+    if (known) {
+      known.parts.push(line);
+      continue;
+    }
+    const entry = {
+      key: `package-${line.package_item_id}`,
+      name: line.package_name,
+      parts: [line],
+    };
+    packages.set(line.package_item_id, entry);
+    entries.push(entry);
+  }
+  return entries.map((entry) =>
+    entry.parts?.length === 1 ? { key: entry.parts[0].line_id, line: entry.parts[0] } : entry,
+  );
+}
+
+function LineChoice({ line, picked, setPicked, toggle, inPackage = false }) {
+  const blocked = blockedLine(line);
+  const on = picked[line.line_id] !== undefined;
+  return (
+    <li className="bc-refund__line">
+      <label className="bc-refund__choice">
+        <input
+          type="checkbox"
+          checked={on}
+          disabled={blocked}
+          onChange={(e) => toggle(line, e.target.checked)}
+        />
+        <span>
+          {line.bill_name}
+          <span className="bc-head__meta">
+            {" "}
+            · {inPackage ? "part of the package" : fromPaise(line.patient_payable)}
+            {line.left <= 0
+              ? " · already credited"
+              : line.claim_cleared
+                ? " · claim paid by the payer"
+                : line.credited_quantity > 0
+                  ? ` · ${line.left} left`
+                  : ""}
+          </span>
+        </span>
+      </label>
+      {on && line.quantity !== 1 && (
+        <label className="bc-field bc-refund__qty">
+          <span className="bc-field__lbl">Quantity (up to {line.left})</span>
+          <input
+            className="bc-field__in"
+            inputMode="decimal"
+            value={picked[line.line_id]}
+            onChange={(e) => setPicked({ ...picked, [line.line_id]: moneyTyped(e.target.value) })}
+          />
+        </label>
+      )}
+    </li>
+  );
+}
+
 const pickedFrom = (prefill) =>
   Object.fromEntries(
     (prefill?.lines || []).map((line) => [line.line_id, quantityText(Number(line.quantity))]),
@@ -162,49 +232,60 @@ export default function RefundDialog({ bill, prefill = null, onClose, onSent }) 
 
           {!whole && (
             <ul className="bc-refund__lines" aria-label="Lines to refund">
-              {lines.map((line) => {
-                const blocked = line.left <= 0 || line.claim_cleared;
-                const on = picked[line.line_id] !== undefined;
-                return (
-                  <li key={line.line_id} className="bc-refund__line">
+              {refundEntries(lines).map((entry) =>
+                entry.parts ? (
+                  <li key={entry.key} className="bc-refund__line">
                     <label className="bc-refund__choice">
                       <input
                         type="checkbox"
-                        checked={on}
-                        disabled={blocked}
-                        onChange={(e) => toggle(line, e.target.checked)}
+                        checked={entry.parts.every((line) => picked[line.line_id] !== undefined)}
+                        ref={(input) => {
+                          if (input)
+                            input.indeterminate =
+                              entry.parts.some((line) => picked[line.line_id] !== undefined) &&
+                              !entry.parts.every((line) => picked[line.line_id] !== undefined);
+                        }}
+                        disabled={entry.parts.every(blockedLine)}
+                        onChange={(e) =>
+                          entry.parts
+                            .filter((line) => !blockedLine(line))
+                            .forEach((line) => toggle(line, e.target.checked))
+                        }
                       />
                       <span>
-                        {line.bill_name}
+                        {entry.name}
                         <span className="bc-head__meta">
                           {" "}
-                          · {fromPaise(line.patient_payable)}
-                          {line.left <= 0
-                            ? " · already credited"
-                            : line.claim_cleared
-                              ? " · claim paid by the payer"
-                              : line.credited_quantity > 0
-                                ? ` · ${line.left} left`
-                                : ""}
+                          · {fromPaise(
+                            entry.parts.reduce((sum, l) => sum + l.patient_payable, 0),
+                          )}{" "}
+                          · package
                         </span>
                       </span>
                     </label>
-                    {on && line.quantity !== 1 && (
-                      <label className="bc-field bc-refund__qty">
-                        <span className="bc-field__lbl">Quantity (up to {line.left})</span>
-                        <input
-                          className="bc-field__in"
-                          inputMode="decimal"
-                          value={picked[line.line_id]}
-                          onChange={(e) =>
-                            setPicked({ ...picked, [line.line_id]: moneyTyped(e.target.value) })
-                          }
+                    <ul className="bc-refund__parts" aria-label={`Tests in ${entry.name}`}>
+                      {entry.parts.map((line) => (
+                        <LineChoice
+                          key={line.line_id}
+                          line={line}
+                          picked={picked}
+                          setPicked={setPicked}
+                          toggle={toggle}
+                          inPackage
                         />
-                      </label>
-                    )}
+                      ))}
+                    </ul>
                   </li>
-                );
-              })}
+                ) : (
+                  <LineChoice
+                    key={entry.key}
+                    line={entry.line}
+                    picked={picked}
+                    setPicked={setPicked}
+                    toggle={toggle}
+                  />
+                ),
+              )}
             </ul>
           )}
           {tooMuch && <div className="bc-err">A quantity is more than is left to refund.</div>}

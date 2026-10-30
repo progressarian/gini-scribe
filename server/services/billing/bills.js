@@ -32,7 +32,7 @@ import {
   releaseTestOrders,
   settleTestOrders,
 } from "./payments.js";
-import { priceBill } from "./priceBill.js";
+import { allocate, priceBill } from "./priceBill.js";
 import { priceChangeText, priceChanges, takenAboveText } from "./priceDrift.js";
 import { seenRecentlyBy, visitConsultationType } from "./serviceItems.js";
 import { refuseRemoved, removedDoctor } from "./removedDoctors.js";
@@ -76,7 +76,7 @@ const LINE_COLUMNS = `id, bill_id, visit_id, line_no, service_item_id, source, l
   payable_discount, bill_discount, tax_code, sac_hsn, tax_rate_pct, taxable, cgst, sgst,
   payment_rule_id, payment_rule, patient_payable, claim_amount, adjustment_amount,
   agreed_rate, agreed_by, agreed_at, created_by, manual_discount_kind, manual_discount_value, manual_discount_reason,
-  manual_discount_by, manual_discount_at`;
+  manual_discount_by, manual_discount_at, package_item_id`;
 
 export const LINE_SOURCES = ["visit", "lab_order", "added", "lab_case", "ordered"];
 
@@ -215,6 +215,8 @@ function shapeLine(row) {
     added_by: row.created_by ?? null,
     added_by_name: row.created_by_name ?? null,
     manual_discount: shapeManual(row, row.manual_discount_by_name),
+    package_item_id: row.package_item_id ?? null,
+    package_name: row.package_name ?? null,
   };
 }
 
@@ -367,8 +369,9 @@ async function liveLines(client, billId, { all = false } = {}) {
                  THEN json_build_object('id', rd.id, 'name', rd.name) END AS removed_doctor,
             setter.name AS agreed_by_name, adder.name AS created_by_name,
             discounter.name AS manual_discount_by_name,
-            sg.name AS group_name, i.kind AS item_kind
+            sg.name AS group_name, i.kind AS item_kind, pk.name AS package_name
        FROM bill_lines l LEFT JOIN service_items i ON i.id = l.service_item_id
+       LEFT JOIN service_items pk ON pk.id = l.package_item_id
        LEFT JOIN service_subgroups ssg ON ssg.id = i.subgroup_id
        LEFT JOIN service_groups sg ON sg.id = ssg.group_id
        LEFT JOIN doctors rd ON rd.id = COALESCE(i.doctor_id, l.doctor_id)
@@ -434,6 +437,7 @@ const LINE_VALUES = (line, lineNo) => ({
   patient_payable: rupees(line.patient_payable),
   claim_amount: rupees(line.claim),
   adjustment_amount: rupees(line.adjustment),
+  package_item_id: line.package_item_id ?? null,
 });
 
 async function saveLines(client, saved, ctx, billManualBy = null) {
@@ -1544,6 +1548,89 @@ export async function setLineDiscount(billId, lineId, input, ctx, db = pool) {
       },
       ...auditFields(ctx),
     });
+    return withLines(client, saved.bill, { codes: await billCodes(client, bill.id) });
+  }, db);
+}
+
+async function packageLinesOf(client, bill, packageItemId) {
+  const id = cleanItemId(packageItemId);
+  const { rows } = await client.query(
+    `SELECT ${LINE_COLUMNS} FROM bill_lines
+      WHERE bill_id = $1 AND is_live AND package_item_id = $2
+      ORDER BY line_no FOR UPDATE`,
+    [bill.id, id],
+  );
+  if (!rows.length) throw httpError(404, "That package is no longer on this bill");
+  return rows;
+}
+
+export async function removePackage(billId, packageItemId, input, ctx, db = pool) {
+  const reason = optionalReason(input?.reason, "The reason for removing this package");
+  return inTransaction(async (client) => {
+    const bill = assertDraft(await lockBill(client, billId));
+    const lines = await packageLinesOf(client, bill, packageItemId);
+    const locked = lines.find((line) => !mayChangeOrderedLine(line, ctx));
+    if (locked) {
+      throw httpError(
+        403,
+        `${locked.bill_name} was ordered for this patient; only whoever ordered it or an admin can remove it`,
+      );
+    }
+    if (lines.some((line) => line.source === "ordered") && !reason) {
+      throw httpError(400, "Say why this ordered service is being removed");
+    }
+    for (const line of lines) {
+      await dropLineIn(client, bill, line, { removed: true, reason, package: true }, ctx);
+    }
+    const saved = await reprice(client, bill, await billCodes(client, bill.id), ctx);
+    await resettleTestOrders(client, saved.bill, ctx);
+    return withLines(client, saved.bill, { codes: await billCodes(client, bill.id) });
+  }, db);
+}
+
+const packageShares = (discount, lines) => {
+  if (!discount || discount.kind !== "flat") return lines.map(() => discount);
+  const listed = lines.map((line) => paise(line.rate) * Number(line.quantity));
+  const parts = new Map(
+    allocate(
+      paise(discount.value),
+      lines.map((_, index) => index),
+      listed,
+    ).map(({ index, share }) => [index, share]),
+  );
+  return lines.map((_, index) =>
+    parts.get(index) ? { ...discount, value: (parts.get(index) / 100).toFixed(2) } : null,
+  );
+};
+
+export async function setPackageDiscount(billId, packageItemId, input, ctx, db = pool) {
+  const reason = optionalReason(input?.reason, "The reason for this discount");
+  return inTransaction(async (client) => {
+    const bill = assertDraft(await lockBill(client, billId));
+    const lines = await packageLinesOf(client, bill, packageItemId);
+    const discount = readManualInput(input, "The package's discount");
+    const shares = packageShares(discount, lines);
+    for (const [index, before] of lines.entries()) {
+      const { rows } = await client.query(
+        `UPDATE bill_lines SET ${SET_MANUAL}, updated_at = NOW(), updated_by = $6
+          WHERE id = $1 RETURNING ${LINE_COLUMNS}`,
+        [before.id, ...manualValues(shares[index], reason, ctx), ctx?.actorId ?? null],
+      );
+      await writeAudit(client, {
+        entity: "bill_lines",
+        entityId: before.id,
+        action: "update",
+        before: { manual_discount: manualSnapshot(before) },
+        after: {
+          manual_discount: manualSnapshot(rows[0]),
+          package_discount: discount,
+          role: ctx?.role ?? null,
+        },
+        ...auditFields(ctx),
+      });
+    }
+    const saved = await reprice(client, bill, await billCodes(client, bill.id), ctx);
+    await resettleTestOrders(client, saved.bill, ctx);
     return withLines(client, saved.bill, { codes: await billCodes(client, bill.id) });
   }, db);
 }

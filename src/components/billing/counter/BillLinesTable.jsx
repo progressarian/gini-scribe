@@ -1,11 +1,13 @@
 import { Fragment, useEffect, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
 import ConfirmModal from "../../ui/ConfirmModal";
 import {
   useChangeLineQuantity,
   useRemoveBillLine,
+  useRemoveBillPackage,
   useSetLineDiscount,
   useSetLinePrice,
+  useSetPackageDiscount,
 } from "../../../queries/hooks/useBilling";
 import useAuthStore from "../../../stores/authStore";
 import { CAPABILITIES, hasCapability } from "../../../../shared/permissions.js";
@@ -79,6 +81,43 @@ const manualValue = (line) => (line.manual_discount ? String(line.manual_discoun
 
 function DiscountCell({ bill, line, onBill, onError }) {
   const save = useSetLineDiscount();
+  return (
+    <ManualDiscountCell
+      bill={bill}
+      line={line}
+      pending={save.isPending}
+      save={(kind, value) =>
+        save.mutateAsync({ billId: bill.id, visitId: bill.visit_id, lineId: line.id, kind, value })
+      }
+      onBill={onBill}
+      onError={onError}
+    />
+  );
+}
+
+function PackageDiscountCell({ bill, pkg, onBill, onError }) {
+  const save = useSetPackageDiscount();
+  return (
+    <ManualDiscountCell
+      bill={bill}
+      line={pkg.line}
+      pending={save.isPending}
+      save={(kind, value) =>
+        save.mutateAsync({
+          billId: bill.id,
+          visitId: bill.visit_id,
+          packageItemId: pkg.id,
+          kind,
+          value,
+        })
+      }
+      onBill={onBill}
+      onError={onError}
+    />
+  );
+}
+
+function ManualDiscountCell({ bill, line, pending, save, onBill, onError }) {
   const [kind, setKind] = useState(line.manual_discount?.kind ?? "percent");
   const [value, setValue] = useState(manualValue(line));
 
@@ -113,15 +152,7 @@ function DiscountCell({ bill, line, onBill, onError }) {
       return;
     }
     try {
-      onBill(
-        await save.mutateAsync({
-          billId: bill.id,
-          visitId: bill.visit_id,
-          lineId: line.id,
-          kind: nextKind,
-          value: number,
-        }),
-      );
+      onBill(await save(nextKind, number));
     } catch (e) {
       setKind(current?.kind ?? "percent");
       setValue(manualValue(line));
@@ -136,7 +167,7 @@ function DiscountCell({ bill, line, onBill, onError }) {
           className="bc-ldisc__kind"
           aria-label={`Discount type for ${line.bill_name}`}
           value={kind}
-          disabled={save.isPending}
+          disabled={pending}
           onChange={(e) => {
             setKind(e.target.value);
             if (value.trim()) commit(e.target.value, value);
@@ -151,7 +182,7 @@ function DiscountCell({ bill, line, onBill, onError }) {
           placeholder="0"
           aria-label={`Discount for ${line.bill_name}`}
           value={value}
-          disabled={save.isPending}
+          disabled={pending}
           onChange={(e) => setValue(moneyTyped(e.target.value))}
           onBlur={() => commit(kind, value)}
           onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
@@ -180,6 +211,51 @@ function categoryOf(line) {
   if (line.item_kind === "procedure")
     return { tone: "proc", label: "Procedure", noun: "procedure" };
   return { tone: "other", label: "Other", noun: "other item" };
+}
+
+const sumOf = (lines, key) => lines.reduce((sum, line) => sum + line[key], 0);
+
+function packageManual(parts) {
+  const manuals = parts.map((line) => line.manual_discount).filter(Boolean);
+  if (!manuals.length) return null;
+  if (manuals[0].kind === "percent") return manuals[0];
+  return {
+    ...manuals[0],
+    value: Math.round(manuals.reduce((sum, manual) => sum + manual.value, 0) * 100) / 100,
+  };
+}
+
+function withPackages(lines) {
+  const packages = new Map();
+  const entries = [];
+  for (const line of lines) {
+    if (!line.package_item_id) {
+      entries.push({ key: line.id, line });
+      continue;
+    }
+    const known = packages.get(line.package_item_id);
+    if (known) {
+      known.parts.push(line);
+      continue;
+    }
+    const pkg = { id: line.package_item_id, name: line.package_name, parts: [line] };
+    packages.set(line.package_item_id, pkg);
+    entries.push({ key: `package-${line.package_item_id}`, pkg });
+  }
+  for (const pkg of packages.values()) {
+    pkg.line = {
+      ...pkg.parts[0],
+      id: `package-${pkg.id}`,
+      bill_name: pkg.name,
+      quantity: 1,
+      rate: pkg.parts.reduce((sum, line) => sum + line.rate * line.quantity, 0),
+      discount: sumOf(pkg.parts, "discount"),
+      patient_payable: sumOf(pkg.parts, "patient_payable"),
+      manual_discount: packageManual(pkg.parts),
+      source: pkg.parts.some((line) => line.source === "ordered") ? "ordered" : pkg.parts[0].source,
+    };
+  }
+  return entries;
 }
 
 const counted = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -260,7 +336,9 @@ const openItemSearch = (form) => {
 
 export default function BillLinesTable({ bill, onBill, form }) {
   const remove = useRemoveBillLine();
+  const removeGroup = useRemoveBillPackage();
   const setPrice = useSetLinePrice();
+  const [expanded, setExpanded] = useState(() => new Set());
   const me = useAuthStore((st) => st.currentDoctor);
   const admin = hasCapability(me?.role, CAPABILITIES.ADMIN);
   const [pricing, setPricing] = useState(null);
@@ -269,14 +347,29 @@ export default function BillLinesTable({ bill, onBill, form }) {
   const mayRemove = (line) => line.source !== "ordered" || line.added_by === me?.id || admin;
   const ordered = (line) => line?.source === "ordered";
   const removing = form.value.removing;
-  const going = removing ? bill.lines.find((line) => line.id === removing.lineId) || null : null;
+  const laterTests = bill.lines.filter((line) => line.after_consult);
+  const rows = [...bill.lines.filter((line) => !line.after_consult), ...laterTests];
+  const entries = withPackages(rows);
+  const goingPackage = removing?.packageId
+    ? entries.find((entry) => entry.pkg?.id === removing.packageId)?.pkg || null
+    : null;
+  const going = goingPackage
+    ? goingPackage.line
+    : removing
+      ? bill.lines.find((line) => line.id === removing.lineId) || null
+      : null;
   const reason = going ? removing.reason : "";
   const setReason = (next) => form.set("removing", (was) => was && { ...was, reason: next });
   const [error, setError] = useState(null);
   const final = bill.status !== "draft";
   const atReception = final ? bill.lines.filter((line) => line.order_state) : [];
-  const laterTests = bill.lines.filter((line) => line.after_consult);
-  const rows = [...bill.lines.filter((line) => !line.after_consult), ...laterTests];
+  const toggle = (id) =>
+    setExpanded((was) => {
+      const next = new Set(was);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const savePrice = async () => {
     setError(null);
@@ -300,12 +393,19 @@ export default function BillLinesTable({ bill, onBill, form }) {
     setError(null);
     try {
       onBill(
-        await remove.mutateAsync({
-          billId: bill.id,
-          visitId: bill.visit_id,
-          lineId: going.id,
-          reason: reason.trim(),
-        }),
+        goingPackage
+          ? await removeGroup.mutateAsync({
+              billId: bill.id,
+              visitId: bill.visit_id,
+              packageItemId: goingPackage.id,
+              reason: reason.trim(),
+            })
+          : await remove.mutateAsync({
+              billId: bill.id,
+              visitId: bill.visit_id,
+              lineId: going.id,
+              reason: reason.trim(),
+            }),
       );
       form.drop("removing");
     } catch (e) {
@@ -313,11 +413,28 @@ export default function BillLinesTable({ bill, onBill, form }) {
     }
   };
 
-  const actionsFor = (line) =>
+  const packageActions = (pkg) =>
+    bill.status !== "draft" || !pkg.parts.every(mayRemove)
+      ? []
+      : [
+          {
+            label: "Remove package",
+            Icon: Trash2,
+            aria: `Remove ${pkg.name}`,
+            danger: true,
+            run: () => {
+              setError(null);
+              form.set("removing", { packageId: pkg.id, reason: "" });
+            },
+          },
+        ];
+
+  const actionsFor = (line, { inPackage = false } = {}) =>
     bill.status !== "draft"
       ? []
       : [
-          (line.price_per_patient || line.agreed_rate !== null) &&
+          !inPackage &&
+            (line.price_per_patient || line.agreed_rate !== null) &&
             mayChangePrice(line) && {
               label: "Change price",
               Icon: Pencil,
@@ -378,40 +495,70 @@ export default function BillLinesTable({ bill, onBill, form }) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((line, index) => {
+                {entries.map((entry, index) => {
+                  const line = entry.pkg ? entry.pkg.line : entry.line;
+                  const lines = entry.pkg ? entry.pkg.parts : [entry.line];
                   const category = categoryOf(line);
+                  const open = entry.pkg && expanded.has(entry.pkg.id);
                   return (
-                    <Fragment key={line.id}>
-                      {line === laterTests[0] && <AfterConsultHeading lines={laterTests} />}
+                    <Fragment key={entry.key}>
+                      {lines.includes(laterTests[0]) && <AfterConsultHeading lines={laterTests} />}
                       <tr className={line.after_consult ? "bc-later-line" : undefined}>
                         <th scope="row" className="bc-lineno">
                           {index + 1}
                         </th>
                         <td data-label="Service / Test">
-                          <div className="bc-item__name">{line.bill_name}</div>
+                          {entry.pkg ? (
+                            <button
+                              type="button"
+                              className="bc-pkg__toggle"
+                              aria-expanded={open}
+                              aria-controls={entry.pkg.parts
+                                .map((part) => `bc-pkg-part-${part.id}`)
+                                .join(" ")}
+                              onClick={() => toggle(entry.pkg.id)}
+                            >
+                              {open ? (
+                                <ChevronDown size={15} aria-hidden="true" />
+                              ) : (
+                                <ChevronRight size={15} aria-hidden="true" />
+                              )}
+                              <span className="bc-item__name">{line.bill_name}</span>
+                            </button>
+                          ) : (
+                            <div className="bc-item__name">{line.bill_name}</div>
+                          )}
                           <div className="bc-item__sub">
-                            {[
-                              line.bill_code,
-                              line.payment_rule &&
-                                line.payment_rule !== "full" &&
-                                paymentRuleText(line.payment_rule),
-                            ]
-                              .filter(Boolean)
-                              .join(" · ")}
+                            {entry.pkg
+                              ? `Package · ${entry.pkg.parts.map((part) => part.bill_name).join(", ")}`
+                              : [
+                                  line.bill_code,
+                                  line.payment_rule &&
+                                    line.payment_rule !== "full" &&
+                                    paymentRuleText(line.payment_rule),
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ")}
                           </div>
                           {line.is_outsourced && <span className="badge b-pu">Outsourced</span>}
                           {line.source === "lab_case" && (
                             <span className="badge b-blu">from lab report</span>
                           )}
-                          {final && line.order_state && (
-                            <span className="badge b-amb">{orderStateText(line.order_state)}</span>
-                          )}
+                          {final &&
+                            lines
+                              .filter((part) => part.order_state)
+                              .map((part) => (
+                                <span className="badge b-amb" key={part.id}>
+                                  {entry.pkg ? `${part.bill_name}: ` : ""}
+                                  {orderStateText(part.order_state)}
+                                </span>
+                              ))}
                           {ordered(line) && (
                             <span className="badge b-blu">
                               ordered{line.added_by_name ? ` by ${line.added_by_name}` : ""}
                             </span>
                           )}
-                          <PriceNote line={line} />
+                          {!entry.pkg && <PriceNote line={line} />}
                           {line.manual_discount && (
                             <div className="bc-hint bc-line-price">
                               Discount {discountNote(line.manual_discount)}
@@ -423,24 +570,78 @@ export default function BillLinesTable({ bill, onBill, form }) {
                             {category.label}
                           </span>
                         </td>
-                        <QuantityCell
-                          bill={bill}
-                          line={line}
-                          locked={!mayRemove(line)}
-                          onBill={onBill}
-                          onError={setError}
-                        />
+                        {entry.pkg ? (
+                          <td data-label="Qty" className="bc-num">
+                            1
+                          </td>
+                        ) : (
+                          <QuantityCell
+                            bill={bill}
+                            line={line}
+                            locked={!mayRemove(line)}
+                            onBill={onBill}
+                            onError={setError}
+                          />
+                        )}
                         <td data-label="Rate" className="bc-num">
                           {fromPaise(line.rate)}
                         </td>
-                        <DiscountCell bill={bill} line={line} onBill={onBill} onError={setError} />
+                        {entry.pkg ? (
+                          <PackageDiscountCell
+                            bill={bill}
+                            pkg={entry.pkg}
+                            onBill={onBill}
+                            onError={setError}
+                          />
+                        ) : (
+                          <DiscountCell
+                            bill={bill}
+                            line={line}
+                            onBill={onBill}
+                            onError={setError}
+                          />
+                        )}
                         <td data-label="Patient pays" className="bc-num bc-num--strong">
                           {fromPaise(line.patient_payable)}
                         </td>
                         <td data-label="" className="bc-cell-actions">
-                          <LineActions actions={actionsFor(line)} />
+                          <LineActions
+                            actions={entry.pkg ? packageActions(entry.pkg) : actionsFor(line)}
+                          />
                         </td>
                       </tr>
+                      {open &&
+                        entry.pkg.parts.map((part) => (
+                          <tr key={part.id} id={`bc-pkg-part-${part.id}`} className="bc-pkg__part">
+                            <th scope="row" className="bc-lineno">
+                              <span className="sr-only">Part of {entry.pkg.name}</span>
+                            </th>
+                            <td data-label="Service / Test">
+                              <div className="bc-item__name">{part.bill_name}</div>
+                              <div className="bc-item__sub">Part of {entry.pkg.name}</div>
+                            </td>
+                            <td data-label="Category">
+                              <span className={`bc-cat bc-cat--${categoryOf(part).tone}`}>
+                                {categoryOf(part).label}
+                              </span>
+                            </td>
+                            <td data-label="Qty" className="bc-num">
+                              {part.quantity}
+                            </td>
+                            <td data-label="Rate" className="bc-num">
+                              {fromPaise(part.rate)}
+                            </td>
+                            <td data-label="Discount" className="bc-num">
+                              {part.discount > 0 ? `−${fromPaise(part.discount)}` : "—"}
+                            </td>
+                            <td data-label="Patient pays" className="bc-num">
+                              {fromPaise(part.patient_payable)}
+                            </td>
+                            <td data-label="" className="bc-cell-actions">
+                              <LineActions actions={actionsFor(part, { inPackage: true })} />
+                            </td>
+                          </tr>
+                        ))}
                     </Fragment>
                   );
                 })}
@@ -465,13 +666,16 @@ export default function BillLinesTable({ bill, onBill, form }) {
       <ConfirmModal
         open={!!going}
         title={going ? `Remove ${going.bill_name}?` : ""}
-        confirmLabel="Remove line"
-        busy={remove.isPending}
+        confirmLabel={goingPackage ? "Remove package" : "Remove line"}
+        busy={remove.isPending || removeGroup.isPending}
         error={error}
         message={
           <label className="bc-field">
             <span className="bc-field__lbl">
-              Why is this line being removed? {ordered(going) ? "(required)" : "(optional)"}
+              {goingPackage
+                ? `This removes ${goingPackage.parts.map((part) => part.bill_name).join(", ")}. Why is it being removed?`
+                : "Why is this line being removed?"}{" "}
+              {ordered(going) ? "(required)" : "(optional)"}
             </span>
             <textarea
               className="bc-field__in"

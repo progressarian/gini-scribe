@@ -22,6 +22,7 @@ import {
   manualAmount,
   manualRule,
 } from "./manualDiscounts.js";
+import { activePackages, choosePackages } from "./packages.js";
 import { primeLineItems, priceLine } from "./priceLine.js";
 import { httpError } from "./transaction.js";
 
@@ -334,6 +335,37 @@ async function settleLineCodes({ priced, lineInputs, lineCodes, admitted }, db) 
   return lines;
 }
 
+const packagePart = (line) =>
+  line.quantity === 1 && line.rate_source === "base" && line.remainder === null;
+
+async function withPackages(lines, lineInputs, db) {
+  const groups = choosePackages(await activePackages(db), lines, packagePart);
+  const priced = lines.map((line) => ({ ...line, package_item_id: null, package_name: null }));
+  for (const { package: pkg, scope } of groups) {
+    const listed = lines.map((line) => line.listed_actual);
+    for (const { index, share } of allocate(pkg.price, scope, listed)) {
+      const line = await priceOne(
+        {
+          ...lineInputs[index],
+          agreedRate: share / 100,
+          codes: lines[index].discounts.map((step) => step.code).filter(Boolean),
+          codesOnBill: 0,
+        },
+        index,
+        db,
+      );
+      priced[index] = { ...line, package_item_id: pkg.id, package_name: pkg.name };
+    }
+  }
+  return {
+    lines: priced,
+    items: new Set(groups.flatMap(({ scope }) => scope.map((index) => lines[index].item_id))),
+  };
+}
+
+const coveredByPackage = (items) => (rule) =>
+  rule.requires_all_items && rule.service_item_ids.every((id) => items.has(id));
+
 const byPriority = (a, b) =>
   Number(a.priority ?? 0) - Number(b.priority ?? 0) || Number(a.id) - Number(b.id);
 
@@ -595,14 +627,21 @@ export async function priceBill(input = {}, source = pool) {
     { codes, context, lineInputs, settings },
     db,
   );
-  const settled = await settleLineCodes({ priced, lineInputs, lineCodes, admitted }, db);
+  const packaged = await withPackages(
+    await settleLineCodes({ priced, lineInputs, lineCodes, admitted }, db),
+    lineInputs,
+    db,
+  );
+  const settled = packaged.lines;
   const billRules = [
     ...(await autoRulesFor(null, context, db)),
     ...admitted.filter(({ rule }) => rule.applies_per === "bill").map(({ rule }) => rule),
   ];
   const unique = [
     ...new Map(
-      billRules.filter((rule) => !wholeBillPrice(rule)).map((rule) => [rule.id, rule]),
+      billRules
+        .filter((rule) => !wholeBillPrice(rule) && !coveredByPackage(packaged.items)(rule))
+        .map((rule) => [rule.id, rule]),
     ).values(),
   ];
   const ruleSteps = billSteps(unique, settled, settings.discount_stacking);

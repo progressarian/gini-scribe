@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pool from "../../config/db.js";
+import { withPrintedPackages } from "./packages.js";
 import { escapeHtml } from "../../templates/prescriptionTemplate.js";
 import { getPrescriptionFooter, normalizeHospital } from "../prescriptionFooter.js";
 import { getPrescriptionLogo } from "../prescriptionLogo.js";
@@ -395,11 +396,14 @@ export async function billView(billId, db = pool) {
   return {
     bill: {
       ...bill,
-      lines: bill.lines.map((line) => ({
-        ...line,
-        sac_hsn: byLine.get(line.id)?.sac_hsn ?? null,
-        tax_rate_pct: byLine.get(line.id)?.tax_rate_pct ?? null,
-      })),
+      lines: await withPrintedPackages(
+        db,
+        bill.lines.map((line) => ({
+          ...line,
+          sac_hsn: byLine.get(line.id)?.sac_hsn ?? null,
+          tax_rate_pct: byLine.get(line.id)?.tax_rate_pct ?? null,
+        })),
+      ),
     },
     patient: patients.rows[0] ?? null,
     category: categories.rows[0] ?? null,

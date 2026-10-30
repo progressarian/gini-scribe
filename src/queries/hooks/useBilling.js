@@ -166,6 +166,26 @@ export function useRemoveBillLine() {
   );
 }
 
+export function useRemoveBillPackage() {
+  return useVisitMutation(
+    async ({ billId, packageItemId, reason }) =>
+      (await api.post(`${DESK}/bills/${billId}/packages/${packageItemId}/remove`, { reason })).data,
+  );
+}
+
+export function useSetPackageDiscount() {
+  return useVisitMutation(
+    async ({ billId, packageItemId, kind, value, reason }) =>
+      (
+        await api.post(`${DESK}/bills/${billId}/packages/${packageItemId}/discount`, {
+          kind,
+          value,
+          reason,
+        })
+      ).data,
+  );
+}
+
 export function usePatientSchemeList() {
   return useQuery({
     queryKey: ["patient-schemes"],
