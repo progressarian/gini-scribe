@@ -299,18 +299,23 @@ const billableDue = (found) =>
     .map(({ line, item }) => ({ line, item, priced: needsHealthrayPrice(item) }))
     .filter(({ line, priced }) => !priced || Number(line.amount) > 0);
 
-export async function healthrayBillWaiting(db, visitId) {
-  const { rows } = await db.query(
-    `SELECT EXISTS (
-       SELECT 1 FROM giniflow_visits v
-         JOIN giniflow_patient_bills b
-           ON b.patient_id = v.patient_id AND b.bill_date = v.visit_date AND b.status = 'billed'
-         CROSS JOIN LATERAL jsonb_array_elements(COALESCE(b.items, '[]'::jsonb)) AS line
-        WHERE v.id = $1 AND line->>'category' IS DISTINCT FROM 'consultation'
-     ) AS waiting`,
-    [visitId],
-  );
-  return rows[0].waiting;
+export async function healthrayQuoteLines(db, visitId, visit) {
+  const found = await candidatesFor(db, {
+    id: null,
+    visit_id: visitId,
+    patient_id: visit.patient_id,
+    visit_date: visit.visit_date,
+  });
+  if (!found) return { due: [], notMatched: [] };
+  const unmatched = found.notMatched.filter((line) => line.amount > 0);
+  const atReception = unmatched.length ? await namesPaidAtReception(db, visitId) : new Set();
+  return {
+    due: billableDue(found).map(({ line, item, priced }) => ({
+      itemId: item.id,
+      agreedRate: priced ? String(line.amount) : null,
+    })),
+    notMatched: unmatched.filter((line) => !atReception.has(nameKey(line.desc))),
+  };
 }
 
 export async function healthrayLinesAtArrivalIn(client, visitId, ctx) {

@@ -12,6 +12,7 @@ import { getMachines } from "../giniflow/machineCatalog.js";
 import { stepsAllowedByBill, storedBill } from "../giniflow/patientBill.js";
 import { schemeForVisit, testPricesFor, testPricesForVisit } from "../pricing.js";
 import { priceUnsavedDraft } from "./bills.js";
+import { healthrayQuoteLines } from "./healthrayBillLines.js";
 import { outsourcedTestNames, TEST_MATCHES_SQL } from "./testMatch.js";
 import { consultationItem } from "./visitLines.js";
 
@@ -88,7 +89,7 @@ async function journeyTests(db, visitId, visit, steps) {
     }
     if (!tests.includes(machine.tests[0])) tests.push(machine.tests[0]);
   }
-  return { tests, steps: routed };
+  return { tests, billed: new Set(billed.keys()), steps: routed };
 }
 
 async function journeyDoctor(db, steps) {
@@ -131,7 +132,7 @@ async function testItems(db, names) {
     [names],
   );
   const byName = new Map(rows.map((row) => [row.test_name, row.id]));
-  return names.map((name) => byName.get(name)).filter(Boolean);
+  return names.map((name) => ({ name, id: byName.get(name) })).filter((test) => test.id);
 }
 
 async function itemFacts(db, ids) {
@@ -143,7 +144,7 @@ async function itemFacts(db, ids) {
 }
 
 async function plannedLines(db, visitId, visit, { plan, add, remove }) {
-  let journey = { tests: [], steps: [] };
+  let journey = { tests: [], billed: new Set(), steps: [] };
   let journeyNote = null;
   if (plan) {
     try {
@@ -165,14 +166,35 @@ async function plannedLines(db, visitId, visit, { plan, add, remove }) {
 
   const lines = [];
   const has = (itemId) => lines.some((line) => line.service_item_id === itemId);
-  for (const itemId of await testItems(db, journey.tests)) {
-    if (!has(itemId)) lines.push({ service_item_id: itemId, doctor_id: null, test: true });
+  for (const { name, id } of await testItems(db, journey.tests)) {
+    if (!has(id)) {
+      lines.push({
+        service_item_id: id,
+        doctor_id: null,
+        test: true,
+        billed: journey.billed.has(name),
+      });
+    }
   }
   if (consultation && !has(consultation.id)) {
     lines.push({
       service_item_id: consultation.id,
       doctor_id: consultation.doctor_id ?? consultation.chosen_doctor_id,
     });
+  }
+  const healthray = await healthrayQuoteLines(db, visitId, visit);
+  for (const due of healthray.due) {
+    const at = lines.findIndex((line) => line.service_item_id === due.itemId);
+    if (at < 0) {
+      lines.push({
+        service_item_id: due.itemId,
+        doctor_id: null,
+        agreed_rate: due.agreedRate,
+        fromHealthray: true,
+      });
+    } else if (lines[at].billed) {
+      lines[at] = { ...lines[at], agreed_rate: due.agreedRate };
+    }
   }
   const dropped = new Set(itemIds(remove));
   const kept = lines.filter((line) => !dropped.has(line.service_item_id));
@@ -182,7 +204,12 @@ async function plannedLines(db, visitId, visit, { plan, add, remove }) {
     }
   }
   const deskChanged = kept.length !== lines.length || kept.some((line) => line.added);
-  return { lines: kept, journeyNote, byDesk: Boolean(consultation) || deskChanged };
+  return {
+    lines: kept,
+    journeyNote,
+    notMatched: healthray.notMatched,
+    byDesk: Boolean(consultation) || deskChanged,
+  };
 }
 
 export async function journeyAddsTests(db, steps) {
@@ -215,7 +242,7 @@ const asPricing = (lines) =>
     service_item_id: line.service_item_id,
     quantity: 1,
     doctor_id: line.doctor_id,
-    agreed_rate: null,
+    agreed_rate: line.agreed_rate ?? null,
   }));
 
 export async function arrivalQuote(visitId, { add, remove, plan } = {}, ctx = {}, db = pool) {
@@ -230,7 +257,9 @@ export async function arrivalQuote(visitId, { add, remove, plan } = {}, ctx = {}
   if (
     planned.lines.some((line) => {
       const item = facts.get(line.service_item_id);
-      return !item?.is_active || (line.added && item.kind === "consultation");
+      return (
+        !item?.is_active || ((line.added || line.fromHealthray) && item.kind === "consultation")
+      );
     })
   ) {
     return null;
@@ -256,10 +285,12 @@ export async function arrivalQuote(visitId, { add, remove, plan } = {}, ctx = {}
       kind: facts.get(line.service_item_id).kind,
       orderId: null,
       carried: false,
+      fromHealthray: Boolean(line.fromHealthray),
       amount: priced.lines[index].patient_payable,
     })),
     outstanding: priced ? priced.totals.payable : 0,
     carry: [],
+    notMatched: planned.notMatched,
     quoted: true,
     ...(planned.journeyNote ? { journeyNote: planned.journeyNote } : {}),
   };

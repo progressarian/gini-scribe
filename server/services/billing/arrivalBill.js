@@ -10,7 +10,7 @@ import { collectPlannedIn, moneyOn } from "./payments.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { arrivalConsultationIn, testsForDesk } from "./visitLines.js";
 import { arrivalQuote, journeyAddsTests, journeyConsultation } from "./arrivalQuote.js";
-import { healthrayBillWaiting, healthrayLinesAtArrivalIn } from "./healthrayBillLines.js";
+import { healthrayLinesAtArrivalIn } from "./healthrayBillLines.js";
 
 export const ALREADY_PAID_SOURCES = [HEALTHRAY_MODE, PREPAID_MODE];
 const NOT_ARRIVED = ["booked", "no_show", "cancelled"];
@@ -130,7 +130,7 @@ export async function arrivalBillPreview(
   ctx = {},
   db = pool,
 ) {
-  if (!asList(skip).length && !(await healthrayBillWaiting(db, visitId))) {
+  if (!asList(skip).length) {
     const quote = await arrivalQuote(visitId, { add, remove, plan }, ctx, db).catch((error) => {
       console.warn(`[billing] arrival quote fell back for visit ${visitId}: ${error.message}`);
       return null;

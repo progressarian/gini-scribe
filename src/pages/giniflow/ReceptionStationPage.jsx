@@ -1484,7 +1484,8 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
     !list.some((s) => s.chainStatus === "with_doctor" && s.staffId);
   const arrivalPreview = canBill ? arrivalBill.data : null;
   const billsAtArrival = Boolean(arrivalPreview?.outstanding);
-  const arrivalBusy = commitArrivalBill.isPending || arrivalBill.isFetching;
+  const arrivalBusy =
+    commitArrivalBill.isPending || (arrivalBill.isFetching && arrivalBill.isPlaceholderData);
   const billPending = canBill && Boolean(billVisitId) && !arrivalBill.data && !arrivalBill.isError;
   const blocked =
     saving ||

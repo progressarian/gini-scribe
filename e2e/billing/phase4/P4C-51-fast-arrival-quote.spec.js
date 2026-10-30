@@ -38,10 +38,17 @@ const pickedLab = (tests) => ({
 
 const shape = (view) => ({
   lines: view.lines
-    .map(({ itemId, name, kind, amount }) => ({ itemId, name, kind, amount }))
+    .map(({ itemId, name, kind, amount, fromHealthray }) => ({
+      itemId,
+      name,
+      kind,
+      amount,
+      fromHealthray: Boolean(fromHealthray),
+    }))
     .sort((a, b) => a.itemId - b.itemId),
   outstanding: view.outstanding,
   journeyNote: view.journeyNote ?? null,
+  notMatched: view.notMatched ?? [],
 });
 
 const counting = () => {
@@ -149,6 +156,51 @@ test.describe.serial("P4C-51 the arrival bill is quoted fast and matches the reh
     const made = await extraVisit(ids, "QFollow", { visitType: "Follow Up", healthray: false });
     const quote = await sameAsRehearsal(made.visit, { plan: { steps: [vitals, consultant] } });
     expect(quote.lines.map((l) => l.itemId)).toEqual([ids.consultFu]);
+  });
+
+  test("9. a lab-only visit whose tests are all on the HealthRay bill is quoted, not rehearsed", async () => {
+    const made = await extraVisit(ids, "QHrOnly", { healthray: false });
+    await healthrayBill(ids, made.patient, [
+      { desc: ids.hba1cName, amount: 225, category: "lab" },
+      { desc: ids.looseName, amount: 270, category: "lab" },
+    ]);
+    const steps = [
+      {
+        catalogId: "blood_sample",
+        name: "Lab Collection",
+        minutes: 5,
+        billedIn: "healthray",
+        tests: [ids.hba1cName, ids.looseName],
+        billedTests: [
+          { name: ids.hba1cName, amount: 225 },
+          { name: ids.looseName, amount: 270 },
+        ],
+      },
+    ];
+    const quote = await sameAsRehearsal(made.visit, { plan: { steps } });
+    expect(quote.quoted).toBe(true);
+    const preview = await arrival.arrivalBillPreview(made.visit, { plan: { steps } }, desk, db);
+    expect(preview.quoted).toBe(true);
+  });
+
+  test("10. a procedure on the HealthRay bill that the journey does not name is quoted", async () => {
+    const made = await extraVisit(ids, "QHrProc", { healthray: false });
+    await healthrayBill(ids, made.patient, [
+      { desc: "Consultation", amount: 1000, category: "consultation" },
+      { desc: `Dressing ${tag}`, amount: 500, category: "procedure" },
+    ]);
+    const quote = await sameAsRehearsal(made.visit, { plan: { steps: [vitals, consultant] } });
+    expect(quote.lines.find((l) => l.itemId === ids.dressing)?.fromHealthray).toBe(true);
+  });
+
+  test("11. a HealthRay line with no matching service comes back as not matched", async () => {
+    const made = await extraVisit(ids, "QHrNone", { healthray: false });
+    await healthrayBill(ids, made.patient, [
+      { desc: "Consultation", amount: 1000, category: "consultation" },
+      { desc: `Nothing like this ${tag}`, amount: 300, category: "lab" },
+    ]);
+    const quote = await sameAsRehearsal(made.visit, { plan: { steps: [vitals, consultant] } });
+    expect(quote.notMatched).toEqual([{ desc: `Nothing like this ${tag}`, amount: 30000 }]);
   });
 
   test("7. a visit that already has a bill takes the rehearsal", async () => {

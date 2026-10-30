@@ -64,7 +64,7 @@ import {
   callLabel,
 } from "../../shared/callStatuses.js";
 import { slotDoctorKey, slotStartHour } from "../../shared/slotHour.js";
-import { CLOSED_WEEKDAYS, followUpDueDate, followUpTiming } from "../lib/followUp.js";
+import { CLOSED_WEEKDAYS, followUpDueDate, followUpTiming, skipSunday } from "../lib/followUp.js";
 import PatientRecordModal from "../components/ghm/PatientRecordModal.jsx";
 import StatusChangesView from "../components/ghm/StatusChangesView.jsx";
 import Dropdown from "../components/ui/Dropdown.jsx";
@@ -230,6 +230,7 @@ const addDaysStr = (n) => {
   d.setDate(d.getDate() + n);
   return d.toISOString().split("T")[0];
 };
+const openDayStr = (n) => skipSunday(addDaysStr(n));
 // pretty label like "Wed, 4 Jun"
 const prettyDate = (s) => {
   if (!s) return "";
@@ -809,6 +810,7 @@ function GhmFilters({
             value={draft.date}
             onChange={(v) => set("date", v)}
             minDate={view === "fu3" || view === "booked10" ? todayStr() : undefined}
+            closedWeekdays={CLOSED_WEEKDAYS}
             placeholder={view === "lookup" ? "Today" : "Select date"}
             clearable={view === "lookup"}
           />
@@ -2946,8 +2948,8 @@ export default function GHMPage() {
     VIEW_TABS[0];
   const [view, setView] = useState(initialTab.id); // by_date | tomorrow | fu3
   const [date, setDate] = useState(
-    searchParams.get("date") ||
-      (initialTab.offset !== null ? addDaysStr(initialTab.offset) : todayStr()),
+    skipSunday(searchParams.get("date")) ||
+      (initialTab.offset !== null ? openDayStr(initialTab.offset) : todayStr()),
   );
   const [showNew, setShowNew] = useState(false);
   const [showSlots, setShowSlots] = useState(false);
@@ -2985,7 +2987,7 @@ export default function GHMPage() {
   const switchView = (tab) => {
     setView(tab.id);
     setExpanded(null);
-    if (tab.offset !== null) setDate(addDaysStr(tab.offset));
+    if (tab.offset !== null) setDate(openDayStr(tab.offset));
     else setDate(todayStr());
   };
 
@@ -2994,7 +2996,7 @@ export default function GHMPage() {
 
   const tabDefaultDate = (id) => {
     const t = VIEW_TABS.find((x) => x.id === id);
-    return t && t.offset !== null ? addDaysStr(t.offset) : todayStr();
+    return t && t.offset !== null ? openDayStr(t.offset) : todayStr();
   };
 
   useEffect(() => {
@@ -3820,7 +3822,7 @@ export default function GHMPage() {
                 {t.id === "by_date" && view === t.id && date !== todayStr() ? "By Date" : t.label}
                 {t.offset !== null && (
                   <span className="ghm__tab-date">
-                    {prettyDate(view === t.id ? date : addDaysStr(t.offset))}
+                    {prettyDate(view === t.id ? date : openDayStr(t.offset))}
                   </span>
                 )}
               </button>

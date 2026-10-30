@@ -44,8 +44,7 @@ export const answerFromRecord = (record) =>
 export const homeProblemsNow = (answer, { brief = false } = {}) =>
   homeSampleProblems(answer, istClock(new Date()), { brief });
 
-export const homePayload = (answer, { brief = false } = {}) => ({
-  ...(brief ? { brief: true } : {}),
+const fullHomePayload = (answer) => ({
   sample: answer.sample,
   collectedTime: answer.sample === "collected" ? answer.collectedTime || null : null,
   collectedBy: answer.sample === "collected" ? answer.collectedBy : null,
@@ -54,6 +53,11 @@ export const homePayload = (answer, { brief = false } = {}) => ({
   mode: answer.sample === "collected" && answer.payment === "paid" ? answer.mode : null,
   note: answer.note.trim() || null,
 });
+
+export const homePayload = (answer, { brief = false } = {}) =>
+  brief
+    ? { brief: true, sample: answer.sample, note: answer.note.trim() || null }
+    : fullHomePayload(answer);
 
 function FieldError({ id, text }) {
   return text ? (

@@ -234,6 +234,8 @@ export function useArrivalBill(
             })
           ).data,
     enabled: Boolean(visitId) && enabled,
+    staleTime: 30 * 1000,
+    refetchOnWindowFocus: false,
     placeholderData: (prev) => prev,
   });
 }
