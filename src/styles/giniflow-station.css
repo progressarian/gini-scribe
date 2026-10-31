@@ -5898,6 +5898,15 @@
   justify-content: flex-end;
   gap: 6px;
 }
+.gf .rx-notes-wait {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--amb);
+}
 .gf .rxq-markall {
   margin: 0 0 8px;
 }

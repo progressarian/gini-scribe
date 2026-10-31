@@ -1,4 +1,10 @@
 import pool from "../../config/db.js";
+import {
+  RX_NOTES_WAIT_COLUMNS,
+  RX_NOTES_WAIT_JOIN,
+  RX_NOTES_WAITING_SQL,
+  notesWaitOf,
+} from "../healthray/notesRead.js";
 import { advanceStatus, budgetColour, returnToQueue } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup, getTestsPlacements } from "./board.js";
 import { buildCard } from "./medicineCard.js";
@@ -30,8 +36,10 @@ const QUEUE_SQL = `
          hold.tests_ready_at,
          cons.id AS consultation_id,
          rx.source AS rx_source,
-         (rx.id IS NOT NULL AND (rx.source <> 'visit' OR rxchg.last_change IS NULL OR rxchg.last_change <= rx.created_at))
+         (rx.id IS NOT NULL AND (rx.source <> 'visit' OR rxchg.last_change IS NULL OR rxchg.last_change <= rx.created_at)
+          AND NOT ${RX_NOTES_WAITING_SQL("rx.source")})
            AS has_printable_rx,
+         ${RX_NOTES_WAIT_COLUMNS("rx.source")},
          (rx.id IS NOT NULL AND rx.source = 'visit' AND rxchg.last_change > rx.created_at) AS rx_stale,
          meds.n AS medicine_count,
          ${EXPLAINED_SQL("v")} AS explained,
@@ -64,6 +72,7 @@ const QUEUE_SQL = `
       SELECT max(m2.updated_at) AS last_change FROM medications m2
        WHERE m2.consultation_id = cons.id
     ) rxchg ON TRUE
+    ${RX_NOTES_WAIT_JOIN("v")}
     LEFT JOIN LATERAL (
       SELECT count(*)::int AS n FROM medications m
        WHERE m.patient_id = v.patient_id AND m.is_active
@@ -106,9 +115,10 @@ const toRow = (row, budgetFor, now) => {
     doctorName: r.doctor_name,
     consultationId: r.consultation_id,
     medicineCount: r.medicine_count ?? 0,
-    canPrint: !!r.has_printable_rx,
+    canPrint: !!r.has_printable_rx || !!notesWaitOf(r, now)?.healthrayRxId,
     rxStale: !!r.rx_stale,
-    rxFromHealthray: r.rx_source === "healthray",
+    rxFromHealthray: r.rx_source === "healthray" || !!notesWaitOf(r, now)?.healthrayRxId,
+    notesWait: notesWaitOf(r, now),
     explained: !!r.explained,
     amendedAt: r.amended_at ? new Date(r.amended_at).toISOString() : null,
     amendedAfterExplained: !!r.amended_after_explained,
@@ -165,6 +175,7 @@ export async function getRxPatient(visitId, db = pool) {
             rx.id AS document_id,
             rx.source AS rx_source,
             (rx.id IS NOT NULL AND rx.source = 'visit' AND rxchg.last_change > rx.created_at) AS rx_stale,
+            ${RX_NOTES_WAIT_COLUMNS("rx.source")},
             ${labOnlyPredicate("v", "$2")} AS lab_only,
             ${EXPLAINED_SQL("v")} AS explained,
             ${AMENDED_AT_SQL("v")} AS amended_at,
@@ -190,6 +201,7 @@ export async function getRxPatient(visitId, db = pool) {
          SELECT max(m2.updated_at) AS last_change FROM medications m2
           WHERE m2.consultation_id = cons.id
        ) rxchg ON TRUE
+       ${RX_NOTES_WAIT_JOIN("v")}
       WHERE v.id = $1`,
     [visitId, LAB_ONLY_DOCTOR],
   );
@@ -222,9 +234,11 @@ export async function getRxPatient(visitId, db = pool) {
     statusLabel: STATUS_LABEL[v.current_status] || v.current_status,
     doctorName: v.doctor_name,
     consultationId: v.consultation_id,
-    canPrint: !!v.document_id && !v.rx_stale,
+    canPrint:
+      (!!v.document_id && !v.rx_stale && !v.notes_waiting) || !!notesWaitOf(v)?.healthrayRxId,
     rxStale: !!v.rx_stale,
-    rxFromHealthray: v.rx_source === "healthray",
+    rxFromHealthray: v.rx_source === "healthray" || !!notesWaitOf(v)?.healthrayRxId,
+    notesWait: notesWaitOf(v),
     visitDate: v.visit_date,
     phone: v.phone,
     explained: !!v.explained,

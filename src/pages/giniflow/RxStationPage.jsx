@@ -77,6 +77,22 @@ const whatsappHref = (phone, name) => {
   return `https://wa.me/91${local}?text=${text}`;
 };
 
+const notesWaitText = (wait) =>
+  wait.unreadable
+    ? "⚠ Today's HealthRay notes couldn't be read — showing the HealthRay prescription"
+    : wait.healthrayRxId
+      ? "⏳ Today's HealthRay notes not read yet — showing the HealthRay prescription"
+      : `⏳ Waiting for today's HealthRay notes${wait.since ? ` — since ${clock(wait.since)}` : ""}`;
+
+function NotesWait({ wait }) {
+  if (!wait) return null;
+  return (
+    <div className="rx-notes-wait" role="status">
+      {notesWaitText(wait)}
+    </div>
+  );
+}
+
 function ExplainedBadge({ explained, online }) {
   if (!explained && online) return <span className="badge b-ink">📱 Online visit</span>;
   return explained ? (
@@ -144,9 +160,11 @@ function QueueRow({ row, active, onPick }) {
       )}
       {!row.canPrint && (
         <div className="grp-hint">
-          {row.rxStale
-            ? "Prescription changed since the copy was made — open them and re-issue it"
-            : "Prescription still being prepared"}
+          {row.notesWait
+            ? notesWaitText(row.notesWait)
+            : row.rxStale
+              ? "Prescription changed since the copy was made — open them and re-issue it"
+              : "Prescription still being prepared"}
         </div>
       )}
     </button>
@@ -266,6 +284,7 @@ function Pane({
                 {returning ? "↩ Returning…" : "↩ Not this patient"}
               </button>
             )}
+            {data?.notesWait && <NotesWait wait={data.notesWait} />}
             {data?.canPrint ? (
               <>
                 <button
@@ -286,7 +305,7 @@ function Pane({
                       : "🖨 Print prescription"}
                 </button>
               </>
-            ) : (
+            ) : data?.notesWait ? null : (
               /* No printable copy is two situations and only one of them had a
                  way out. A stale copy offered "re-issue"; a missing one read
                  "🖨 Preparing…", disabled, with nothing the desk could do but
@@ -313,11 +332,13 @@ function Pane({
               <>
                 <button
                   className="st-btn"
-                  disabled={!data.card?.counts?.total}
+                  disabled={!data.card?.counts?.total || !!data.notesWait}
                   title={
-                    data.card?.counts?.total
-                      ? "The patient's medicines by time of day, to take home with the prescription"
-                      : "No medicines on the card"
+                    data.notesWait
+                      ? "Wait for today's HealthRay notes — the card would show the last visit's medicines"
+                      : data.card?.counts?.total
+                        ? "The patient's medicines by time of day, to take home with the prescription"
+                        : "No medicines on the card"
                   }
                   onClick={() => onView(visitId, data.name, false, "card")}
                 >
@@ -325,8 +346,14 @@ function Pane({
                 </button>
                 <button
                   className="st-btn"
-                  disabled={!data.card?.counts?.total || !!printing}
-                  title={data.card?.counts?.total ? undefined : "No medicines on the card"}
+                  disabled={!data.card?.counts?.total || !!printing || !!data.notesWait}
+                  title={
+                    data.notesWait
+                      ? "Wait for today's HealthRay notes — the card would show the last visit's medicines"
+                      : data.card?.counts?.total
+                        ? undefined
+                        : "No medicines on the card"
+                  }
                   onClick={() => onPrint(visitId, data.name, "card")}
                 >
                   {printing === `${visitId}:card` ? "🖨 Preparing…" : "🖨 Print medicine card"}
@@ -801,6 +828,7 @@ export default function RxStationPage() {
                       <div className="rxq-row__tags">
                         <span className="badge b-amb">⚠ {RX_NOT_TAKEN_REASON_LABEL[r.reason]}</span>
                       </div>
+                      <NotesWait wait={r.notesWait} />
                       {r.lastFollowup && (
                         <div className="rx-fu-last">
                           {RX_FOLLOWUP_LABEL[r.lastFollowup.action]}: {r.lastFollowup.remark} —{" "}
@@ -893,6 +921,7 @@ export default function RxStationPage() {
                       />
                       {r.rxFromHealthray && <span className="badge b-ink">HealthRay Rx</span>}
                     </div>
+                    <NotesWait wait={r.notesWait} />
                   </div>
                   <div className="rxq-row__acts">
                     <button

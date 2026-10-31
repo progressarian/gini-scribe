@@ -96,3 +96,14 @@ already reach.
   other future days.
 - Slot counts and the per-category capacity badges are **not** filtered: they count
   every booking on the day, as capacity must.
+
+## Change — 31 Oct 2026 (replaces §2.1, §2.3 and §3)
+
+- **No date filter.** The tab lists every upcoming appointment, from tomorrow on any date,
+  oldest booking first, then the sooner visit (`/ghm-appointments?booked_before_days=10&upcoming=1`).
+- **Who is listed:** the booking was taken **10 or more days before today** (IST calendar days;
+  on 31 Oct, booked on or before 21 Oct), for any appointment from tomorrow on. Example: booked
+  12 Oct for 23 Nov is listed; booked yesterday for 20 Nov is not.
+- The Appointment column is shown; the Gap (days) column is removed. "Booked On" stays.
+- Without `upcoming=1` the old one-date rule still answers, so nothing else that calls it breaks.
+- Test: `e2e/ghm/G28-booked-10-days-all-upcoming.spec.js`.

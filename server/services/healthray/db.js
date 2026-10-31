@@ -12,6 +12,7 @@ import { enrichMedWithDays } from "../medication/daysOfWeek.js";
 import { findEarliestStartDates, resolveStartedDate } from "../medication/historicalStart.js";
 import { markMedicationVisitStatus } from "../medication/visitStatus.js";
 import { savePrescriptionForVisit, buildVisitPayloadFromDb } from "../prescriptionAutoSave.js";
+import { notesReadFor } from "./notesRead.js";
 import { normalizeWhenToTake } from "../../schemas/index.js";
 async function autoSavePrescriptionAfterSeen(patientId, appointmentId, consultationId) {
   if (!patientId) return;
@@ -33,6 +34,13 @@ async function autoSavePrescriptionAfterSeen(patientId, appointmentId, consultat
       log(
         "autoSavePrescription",
         `appt=${appointmentId} pid=${patientId}: defer — clinical data not yet extracted`,
+      );
+      return;
+    }
+    if (!(await notesReadFor(appointmentId))) {
+      log(
+        "autoSavePrescription",
+        `appt=${appointmentId} pid=${patientId}: defer — today's HealthRay notes not read yet`,
       );
       return;
     }

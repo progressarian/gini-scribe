@@ -1,5 +1,6 @@
 // ── HealthRay → Gini Scribe sync orchestrator ──────────────────────────────
 
+import { markNotesRead, markNotesReadHash, notesHash } from "../healthray/notesRead.js";
 import {
   fetchDoctors,
   fetchAppointments,
@@ -546,6 +547,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
   // normalized-table sync below passes it to syncLabResults() — a block-scoped
   // const threw ReferenceError there and killed the whole sync tail.
   let rawText = null;
+  let notesReadStatus = null;
 
   if (doctorId) {
     try {
@@ -659,6 +661,13 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
           ((parsed.diagnoses?.length || 0) > 0 ||
             (parsed.medications?.length || 0) > 0 ||
             (parsed.previous_medications?.length || 0) > 0);
+        notesReadStatus = skipParse
+          ? "skipped_date_mismatch"
+          : !parsed
+            ? "failed"
+            : parseHasContent
+              ? "read"
+              : "empty";
 
         if (!parseHasContent && existing?.id) {
           const prior = await getAppointmentEnrichmentCounts(existing.id);
@@ -668,6 +677,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
               "Enrich",
               `${healthrayId}: parse ${parsed === null ? "returned null" : "produced no dx/meds/prev"} for ${rawText.length}-char clinical — appt ${existing.id} has prior enrichment (dx=${prior.dx} meds=${prior.meds} prev=${prior.prev_meds}); preserving existing JSONB and skipping medication sync`,
             );
+            await markNotesRead(existing.id, notesReadStatus, rawText);
             if (existing.patient_id)
               await syncAppointmentDocs(healthrayId, existing.patient_id, apptDate);
             if (await persistNoteFollowUp(existing.id, noteFollowUp)) {
@@ -792,6 +802,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
     familyMemberId: patientData.healthId,
   });
   await rememberHealthrayPatientId(localApptId, appt);
+  if (notesReadStatus) await markNotesRead(localApptId, notesReadStatus, rawText);
   // ── Sync to normalized tables + documents ──
   await syncVitals(patientId, localApptId, apptDate, opdVitals);
   // Propagate "vitals taken" into the Flow board so /flow/checkin and
@@ -1439,6 +1450,7 @@ export async function backfillPatientOpd(
         healthrayId: appt.healthray_id,
         appointmentDate: apptDateStr,
         apptId: appt.id,
+        notesHash: notesHash(appt.healthray_clinical_notes),
         origin, // 'daily_backfill' | 'day_before' — for monitoring (see monitoring.sql)
       },
       dedupKey: `opd:${appt.id}`,
@@ -1447,7 +1459,10 @@ export async function backfillPatientOpd(
   }
 
   const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes, apptDateStr);
-  if (!parsed) return { status: "parse_failed", apptId: appt.id };
+  if (!parsed) {
+    await markNotesRead(appt.id, "failed", appt.healthray_clinical_notes);
+    return { status: "parse_failed", apptId: appt.id };
+  }
 
   await applyOpdParse(
     {
@@ -1455,6 +1470,7 @@ export async function backfillPatientOpd(
       healthrayId: appt.healthray_id,
       appointmentDate: appt.appointment_date,
       apptId: appt.id,
+      notesHash: notesHash(appt.healthray_clinical_notes),
     },
     parsed,
   );
@@ -1510,6 +1526,7 @@ export async function applyOpdParse(ctx, parsed) {
   }
 
   await pool.query(`UPDATE appointments SET opd_backfilled_at = NOW() WHERE id = $1`, [apptId]);
+  await markNotesReadHash(apptId, "read", ctx.notesHash);
   await maybeAutoSavePrescription(apptId);
 }
 

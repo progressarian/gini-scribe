@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { RX_NOTES_WAIT_COLUMNS, RX_NOTES_WAIT_JOIN, notesWaitOf } from "../healthray/notesRead.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { RX_FOLLOWUP_RESOLVES } from "../../../shared/rxFollowups.js";
 
@@ -34,7 +35,8 @@ const NOT_TAKEN_SQL = `
             WHERE d.patient_id = v.patient_id AND d.doc_type = 'prescription'
               AND (d.file_url IS NOT NULL OR d.storage_path IS NOT NULL)
               AND (d.consultation_id = cons.id OR (d.consultation_id IS NULL AND d.doc_date = v.visit_date))
-         ) AS has_rx
+         ) AS has_rx,
+         ${RX_NOTES_WAIT_COLUMNS("NULL")}
     FROM giniflow_visits v
     CROSS JOIN since
     JOIN patients p ON p.id = v.patient_id
@@ -55,6 +57,7 @@ const NOT_TAKEN_SQL = `
        WHERE f.visit_id = v.id
        ORDER BY f.created_at DESC, f.id DESC LIMIT 1
     ) last_fu ON TRUE
+    ${RX_NOTES_WAIT_JOIN("v")}
    WHERE v.visit_date BETWEEN since.d AND $1::date
      AND v.current_status NOT IN ('cancelled', 'no_show')
      AND NOT COALESCE(p.is_blocked, FALSE)
@@ -107,7 +110,8 @@ export async function getRxNotTaken(visitDate, q = null, db = pool) {
     status: r.current_status,
     explained: !!r.explained,
     reason: r.not_taken_at ? "not_taken" : "not_explained",
-    canPrint: !!r.has_rx,
+    canPrint: (!!r.has_rx && !r.notes_waiting) || !!notesWaitOf(r)?.healthrayRxId,
+    notesWait: notesWaitOf(r),
     lastFollowup: r.last_action
       ? {
           action: r.last_action,

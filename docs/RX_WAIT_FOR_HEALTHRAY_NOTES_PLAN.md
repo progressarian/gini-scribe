@@ -1,6 +1,6 @@
 # Scribe Rx waits for today's HealthRay notes
 
-Status: plan, 2026-10-31. Not built.
+Status: plan agreed 2026-10-31 (decisions in §7). Building.
 
 ## 1. The case
 
@@ -99,9 +99,25 @@ medicine rows changed.
 4. Rx desk states + API refusal (4.3, 4.4).
 5. Each lands with its tests; ships together.
 
-## 7. Open questions
+## 7. Decisions (agreed 2026-10-31)
 
-1. When notes can't be read, offer only the HealthRay PDF, or also let the desk print the Scribe Rx
-   after a warning?
-2. If notes are still not read after N minutes, keep waiting or fall back to the HealthRay PDF?
-3. Today's labs written in the note (C4): keep dropping them, or put them on the Rx?
+1. Notes couldn't be read → **HealthRay PDF only**; the Scribe print stays disabled.
+2. Still not read **10 minutes** after HealthRay's prescription arrived → keep Scribe's print
+   disabled and offer the HealthRay PDF, so the patient isn't held.
+3. Today's labs written in the note (C4) → **keep as now**; not part of this change.
+
+## 8. Build notes
+
+- Which visits wait: those where HealthRay has a prescription PDF for the visit date
+  (`documents.source = 'healthray'`) and that day's HealthRay appointment's notes are not read
+  (4.1). A doctor who writes the Rx in Scribe and has no HealthRay prescription is not affected.
+- Reads use `to_jsonb(a)->>'notes_read_status'`, so before the migration everything behaves as
+  today; writes check the columns exist first.
+- Visits on or before the migration day with no marker count as read only if Scribe already read
+  them (`opd_backfilled_at` set; cut-off in `app_kv.rx_notes_gate_since`). Notes that were never
+  read — e.g. the 30–31 Oct Anthropic credit outage — still wait.
+- In the fallback (unreadable, or 10 minutes) the HealthRay PDF **is** the prescription on the
+  desk: View, Print, Download and the "Prescription not given" row serve it
+  (`getPrintableRx` returns the HealthRay document). Rebuild and the medicine card stay held.
+- 4.4 is covered by 4.1: changed notes have a new hash, so the visit is "waiting" until they are
+  read, and the read rebuilds the Rx.

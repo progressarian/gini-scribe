@@ -271,8 +271,8 @@ const VIEW_TABS = [
     id: "booked10",
     label: "Booked 10+ Days Ago",
     Icon: CalendarClock,
-    offset: 2,
-    hint: "Patients booked 10 or more days ago. HealthRay bookings count from when Scribe first saw them.",
+    offset: null,
+    hint: "Every upcoming patient (from tomorrow, any date) booked 10 or more days ago, oldest booking first. HealthRay bookings count from when Scribe first saw them.",
   },
   { id: "missed", label: "Missed", Icon: CalendarX, offset: null },
   { id: "changes", label: "Status Changes", Icon: History, offset: null },
@@ -780,7 +780,8 @@ function GhmFilters({
 
   // Lookup ignores the date entirely — it searches every patient on every date,
   // so offering one there only invited the question of what it filtered.
-  const showDate = view !== "tomorrow" && view !== "lookup" && view !== "missed";
+  const showDate =
+    view !== "tomorrow" && view !== "lookup" && view !== "missed" && view !== "booked10";
   const showDoctor = view !== "lookup";
 
   return (
@@ -809,7 +810,7 @@ function GhmFilters({
           <DatePicker
             value={draft.date}
             onChange={(v) => set("date", v)}
-            minDate={view === "fu3" || view === "booked10" ? todayStr() : undefined}
+            minDate={view === "fu3" ? todayStr() : undefined}
             closedWeekdays={CLOSED_WEEKDAYS}
             placeholder={view === "lookup" ? "Today" : "Select date"}
             clearable={view === "lookup"}
@@ -3120,7 +3121,10 @@ export default function GHMPage() {
       // whose follow-up is DUE on this date (matched on follow_up_date), not
       // appointments booked that day. Only "By Date" lists booked appointments.
       if (view === "tomorrow" || view === "fu3") p.set("mode", "followup");
-      if (view === "booked10") p.set("booked_before_days", String(BOOKED_LONG_AGO_DAYS));
+      if (view === "booked10") {
+        p.set("booked_before_days", String(BOOKED_LONG_AGO_DAYS));
+        p.set("upcoming", "1");
+      }
       if (view === "lookup") {
         p.set("mode", "lookup");
         p.set("q", lookupQ);
@@ -3455,7 +3459,7 @@ export default function GHMPage() {
   // identical without this column: the follow-up rows carry their own (older)
   // visit date, so a date matching the tab means "booked that day". Only the
   // Today tab is one kind of row throughout, where it would repeat 50 times.
-  const showApptDate = view !== "by_date" && view !== "booked10";
+  const showApptDate = view !== "by_date";
   // Where the patient is in the day — the same states the OPD board shows.
   // Only once the day has arrived: on a future date nobody has checked in yet,
   // so every row would read "Pending".
@@ -3473,7 +3477,7 @@ export default function GHMPage() {
         isMissed && "miss_history",
         showApptDate && "appt_date",
         showBookedOn && "booked_on",
-        showBookedOn && "booking_gap",
+        showBookedOn && "booked_ago",
         showVisitStatus && "visit_status",
         "patient",
         "biomarkers",
@@ -4017,7 +4021,9 @@ export default function GHMPage() {
                 </div>
                 <div className="ghm__empty-title">
                   {searchQ
-                    ? `No patient matches “${searchQ}” on ${prettyDate(date)}`
+                    ? view === "booked10"
+                      ? `No upcoming patient matches “${searchQ}”`
+                      : `No patient matches “${searchQ}” on ${prettyDate(date)}`
                     : callsFilter === "mine"
                       ? "No patients assigned to you on this list"
                       : callsFilter === "unassigned"
@@ -4025,7 +4031,7 @@ export default function GHMPage() {
                         : memberOfFilter(obtTeam, callsFilter)
                           ? `No patients assigned to ${memberOfFilter(obtTeam, callsFilter)} on this list`
                           : view === "booked10"
-                            ? `No patients on ${prettyDate(date)} were booked ${BOOKED_LONG_AGO_DAYS} or more days ago`
+                            ? `No upcoming patients were booked ${BOOKED_LONG_AGO_DAYS} or more days ago`
                             : `No appointments found for ${date}`}
                 </div>
                 <div className="ghm__empty-sub">
@@ -4064,13 +4070,14 @@ export default function GHMPage() {
                         </th>
                       )}
                       {showApptDate && <th style={{ width: 120 }}>Appointment</th>}
-                      {showBookedOn && <th style={{ width: 150 }}>Booked On</th>}
                       {showBookedOn && (
-                        <th
-                          style={{ width: 110 }}
-                          title="Days between the booking and the appointment"
-                        >
-                          Gap (days) ↑
+                        <th style={{ width: 150 }} title="Oldest booking first">
+                          Booked On ↑
+                        </th>
+                      )}
+                      {showBookedOn && (
+                        <th style={{ width: 110 }} title="Days since the booking was taken">
+                          Booked Ago
                         </th>
                       )}
                       {showVisitStatus && <th style={{ width: 120 }}>Visit Status</th>}
@@ -4268,7 +4275,14 @@ export default function GHMPage() {
                               </td>
                             )}
                             {showBookedOn && (
-                              <td>{row.booking_gap_days ?? <span className="muted">—</span>}</td>
+                              <td>
+                                {row.booked_days_ago === null ||
+                                row.booked_days_ago === undefined ? (
+                                  <span className="muted">—</span>
+                                ) : (
+                                  `${row.booked_days_ago} ${row.booked_days_ago === 1 ? "day" : "days"}`
+                                )}
+                              </td>
                             )}
 
                             {showVisitStatus && (

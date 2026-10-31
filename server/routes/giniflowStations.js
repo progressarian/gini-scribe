@@ -282,6 +282,7 @@ import {
   sendCardToPatient,
 } from "../services/giniflow/pharmacyStation.js";
 import { generateMedicineCardPdf } from "../services/giniflow/medicineCardPdf.js";
+import { refuseWhileNotesWaiting, rxNotesWaitRow } from "../services/healthray/notesRead.js";
 import { getStationSummary } from "../services/giniflow/stationSummary.js";
 import {
   defaultPlan,
@@ -3419,12 +3420,14 @@ router.get("/giniflow/stations/rx/:visitId/print", printRxGate, async (req, res)
 
 router.get("/giniflow/stations/rx/:visitId/medicine-card.pdf", printRxGate, async (req, res) => {
   try {
+    refuseWhileNotesWaiting(await rxNotesWaitRow(req.params.visitId));
     const { pdf, fileName } = await generateMedicineCardPdf(req.params.visitId);
     res.set("Content-Type", "application/pdf");
     res.set("Content-Disposition", `inline; filename="${fileName}"`);
     res.set("Cache-Control", "no-store");
     res.send(Buffer.from(pdf));
   } catch (e) {
+    if (e.reason) return res.status(e.status || 409).json({ error: e.message, reason: e.reason });
     handleError(res, e, "Gini Flow Rx counter medicine card");
   }
 });

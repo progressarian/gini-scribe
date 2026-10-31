@@ -1,5 +1,11 @@
 import pool from "../../config/db.js";
 import { savePrescriptionForVisit, buildVisitPayloadFromDb } from "../prescriptionAutoSave.js";
+import {
+  RX_NOTES_WAIT_COLUMNS,
+  RX_NOTES_WAIT_JOIN,
+  healthrayFallback,
+  refuseWhileNotesWaiting,
+} from "../healthray/notesRead.js";
 
 const RX_FOR_VISIT_SQL = `
   SELECT v.id AS visit_id, v.visit_date::text AS visit_date, v.current_status,
@@ -7,7 +13,8 @@ const RX_FOR_VISIT_SQL = `
          cons.id AS consultation_id,
          d.id AS document_id, d.file_url, d.file_name, d.source AS doc_source,
          d.created_at AS rendered_at,
-         meds.last_change
+         meds.last_change,
+         ${RX_NOTES_WAIT_COLUMNS("d.source")}
     FROM giniflow_visits v
     JOIN patients p ON p.id = v.patient_id
     LEFT JOIN LATERAL (
@@ -28,12 +35,15 @@ const RX_FOR_VISIT_SQL = `
         FROM medications m
        WHERE m.consultation_id = cons.id
     ) meds ON TRUE
+    ${RX_NOTES_WAIT_JOIN("v")}
    WHERE v.id = $1`;
 
 export async function getPrintableRx(visitId, db = pool) {
   const { rows } = await db.query(RX_FOR_VISIT_SQL, [visitId]);
   if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
   const r = rows[0];
+  const fallback = healthrayFallback(r);
+  if (fallback) return fallback;
 
   if (!r.consultation_id) {
     throw Object.assign(new Error("This visit has no consultation yet"), {
@@ -41,6 +51,7 @@ export async function getPrintableRx(visitId, db = pool) {
       reason: "not_finalized",
     });
   }
+  refuseWhileNotesWaiting(r);
   if (!r.document_id) {
     throw Object.assign(new Error("The prescription is still being prepared"), {
       status: 409,
@@ -131,6 +142,7 @@ export async function regenerateRx(visitId, db = pool) {
       ORDER BY id DESC LIMIT 1`,
     [consultationId],
   );
+  refuseWhileNotesWaiting((await db.query(RX_FOR_VISIT_SQL, [visitId])).rows[0]);
   if (existing.rows[0]?.source === "healthray") {
     throw Object.assign(
       new Error("This prescription came from HealthRay — it cannot be re-issued here"),

@@ -1231,6 +1231,7 @@ router.get("/ghm-appointments", async (req, res) => {
                 a.visit_type, a.appointment_type, a.booking_source,
                 a.booked_by_name, a.booking_date, a.created_at AS booked_at,
                 (a.appointment_date - (a.created_at AT TIME ZONE 'Asia/Kolkata')::date) AS booking_gap_days,
+                (${IST_TODAY} - (a.created_at AT TIME ZONE 'Asia/Kolkata')::date) AS booked_days_ago,
                 a.condition, a.chief_complaint,
                 a.insurance_taken, a.how_did_you_know, a.referred_by_doctor_name,
                 a.earlier_slot_given, a.show_no_show, a.status,
@@ -1516,6 +1517,13 @@ router.get("/ghm-appointments", async (req, res) => {
       });
     }
 
+    const bookedBeforeDays = Number(req.query.booked_before_days);
+    const bookedLongAgo =
+      Number.isInteger(bookedBeforeDays) && bookedBeforeDays >= 1 && bookedBeforeDays <= 60;
+    const allUpcoming = bookedLongAgo && req.query.upcoming === "1";
+    const dayRef = allUpcoming ? "a.appointment_date" : "$1";
+    if (allUpcoming) params[0] = new Date(Date.now() + 330 * 60 * 1000).toISOString().slice(0, 10);
+
     let where;
     let orderBy = `ORDER BY a.time_slot ASC NULLS LAST, a.created_at ASC, a.id ASC`;
     // if (mode === "followup") {
@@ -1531,8 +1539,9 @@ router.get("/ghm-appointments", async (req, res) => {
     //            )
     //          )`;
     // } else {
-    where =
-      req.query.booked === "today"
+    where = allUpcoming
+      ? `WHERE a.appointment_date > $1::date`
+      : req.query.booked === "today"
         ? `WHERE (a.created_at AT TIME ZONE 'Asia/Kolkata')::date = ${IST_TODAY}
              AND NOT (COALESCE(a.is_walkin, FALSE)
                       AND a.appointment_date <= (a.created_at AT TIME ZONE 'Asia/Kolkata')::date)`
@@ -1551,8 +1560,12 @@ router.get("/ghm-appointments", async (req, res) => {
     where += homeCond;
     where += modeCond;
     where += callsCond;
-    const bookedBeforeDays = Number(req.query.booked_before_days);
-    if (Number.isInteger(bookedBeforeDays) && bookedBeforeDays >= 1 && bookedBeforeDays <= 60) {
+    if (allUpcoming) {
+      params.push(bookedBeforeDays);
+      where += ` AND (a.created_at AT TIME ZONE 'Asia/Kolkata')::date <= ${IST_TODAY} - $${params.length}::int
+                 AND ${PREFERRED_BOOKING_ELSEWHERE("a", dayRef)} IS NULL`;
+      orderBy = `ORDER BY a.created_at ASC, a.appointment_date ASC, a.id ASC`;
+    } else if (bookedLongAgo) {
       params.push(bookedBeforeDays);
       where += ` AND a.appointment_date = $1 AND (a.created_at AT TIME ZONE 'Asia/Kolkata')::date <= ${IST_TODAY} - $${params.length}::int
                  AND ${PREFERRED_BOOKING_ELSEWHERE("a", "$1")} IS NULL`;
@@ -1575,26 +1588,26 @@ router.get("/ghm-appointments", async (req, res) => {
     }
 
     const rowWhere = buckets.length
-      ? `${where} AND ${bucketsWhere(buckets, "a", callStatusToday("a"))}`
+      ? `${where} AND ${bucketsWhere(buckets, "a", callStatusToday("a"), dayRef)}`
       : where;
 
     const [countR, dataR] = await Promise.all([
       pool.query(
-        `SELECT ${summaryCols("a", callStatusToday("a"), "$1", buckets)} FROM appointments a ${where}`,
+        `SELECT ${summaryCols("a", callStatusToday("a"), dayRef, buckets)} FROM appointments a ${where}`,
         params,
       ),
       pool.query(
         `SELECT ${baseCols},
                 a.call_status AS call_status_any,
                 ${callStatusToday("a")} AS call_status,
-                (${livePreferredOn("a", "$1")} AND a.appointment_date <> $1) AS via_preferred,
+                (${livePreferredOn("a", dayRef)} AND a.appointment_date <> ${dayRef}) AS via_preferred,
                 -- The row IS an appointment on this date, so the patient is
                 -- booked whether or not anyone ticked the dropdown.
-                (${BOOKED_ON_DAY("a", "$1")} OR ${BOOKED_FOR("a", "$1")}) AS is_booked,
+                (${BOOKED_ON_DAY("a", dayRef)} OR ${BOOKED_FOR("a", dayRef)}) AS is_booked,
                 ${BOOKING_LAPSED("a")} AS booking_lapsed,
                 ${BOOKING_NO_SLOT("a")} AS booking_no_slot,
                 ${BOOKED_DATE("a")} AS booked_for_date,
-                COALESCE(${upcomingBookingElsewhere("a")}, ${PREFERRED_BOOKING_ELSEWHERE("a", "$1")}) AS booked_on,
+                COALESCE(${upcomingBookingElsewhere("a")}, ${PREFERRED_BOOKING_ELSEWHERE("a", dayRef)}) AS booked_on,
                 -- Follow-up date shown for THIS visit:
                 --   1. the visit's OWN effective follow-up date (column, synced
                 --      HealthRay appointment value, or prescription-extracted date —
