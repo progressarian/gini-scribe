@@ -7,7 +7,7 @@ import { CATEGORIES as TEST_CATEGORIES } from "../services/giniflow/testCatalog.
 import { MACHINE_SAMPLE_FLOW } from "../../shared/machineStages.js";
 import { TEST_CANCEL_REASON_VALUES } from "../../shared/testCancelReasons.js";
 import { HOME_NOTE_MAX } from "../../shared/homeCollectors.js";
-import { RX_FOLLOWUP_ACTIONS } from "../../shared/rxFollowups.js";
+import { RX_FOLLOWUP_ACTIONS, RX_FOLLOWUP_RESOLVES } from "../../shared/rxFollowups.js";
 import { HOLD_DECISIONS, HOLD_NOTE_MAX, HOLD_NOTE_MIN } from "../../shared/coordinatorHold.js";
 import {
   ACANTHOSIS_GRADES,
@@ -1504,6 +1504,15 @@ export const giniflowRxStopSchema = z.object({
 
 export const giniflowRxFollowupSchema = z.object({
   action: z.enum(RX_FOLLOWUP_ACTIONS),
+  remark: z.string().trim().min(1, "Add a remark").max(500),
+});
+
+export const giniflowRxFollowupManySchema = z.object({
+  visitIds: z
+    .array(z.string().uuid())
+    .min(1, "Choose at least one patient")
+    .max(300, "Mark at most 300 patients at a time"),
+  action: z.enum(RX_FOLLOWUP_RESOLVES, { message: "Choose what happened" }),
   remark: z.string().trim().min(1, "Add a remark").max(500),
 });
 

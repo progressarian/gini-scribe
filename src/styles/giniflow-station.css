@@ -5898,6 +5898,9 @@
   justify-content: flex-end;
   gap: 6px;
 }
+.gf .rxq-markall {
+  margin: 0 0 8px;
+}
 .gf .rxq-row--stack {
   align-items: start;
 }

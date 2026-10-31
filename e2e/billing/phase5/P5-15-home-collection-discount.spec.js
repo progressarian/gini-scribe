@@ -87,6 +87,11 @@ test.describe.serial("P5-15 home collection discount", () => {
     expect(await codeLines(plain.bill)).toHaveLength(0);
   });
 
+  test("2b. a visit that is not home collection is never offered the code as a suggestion", async () => {
+    const { codes } = await bills.suggestCodes(plain.bill, desk, db);
+    expect(codes.map((entry) => entry.code)).not.toContain(HOME_COLLECTION_CODE);
+  });
+
   test("3. a reprice by a non-desk role keeps the code", async () => {
     const bill = await bills.addLine(home.bill, { item_id: ids.dressing }, labCtx, db);
     expect(bill.codes).toEqual([HOME_COLLECTION_CODE]);

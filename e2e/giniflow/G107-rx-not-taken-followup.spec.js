@@ -287,4 +287,63 @@ test.describe.serial("G107 prescriptions not given stay at the Rx desk until don
     await expect(pane.getByRole("button", { name: "⚠ Not taken" })).toHaveCount(0);
     expect(listed(await queue(), made.explained)?.reason).toBe("not_taken");
   });
+
+  test("9. Mark all done: needs an outcome and a remark, refuses other roles, clears only the listed patients", async ({
+    page,
+  }) => {
+    const first = await visitFor("RxBulkA", { status: "exited" });
+    const second = await visitFor("RxBulkB", { status: "exited", date: dayBefore(ids.day) });
+    const keep = await visitFor("RxKeep", { status: "exited" });
+    made.bulkA = first;
+    made.bulkB = second;
+    made.keep = keep;
+    const api = await apiAs("admin");
+    const lab = await apiAs("lab");
+    try {
+      const post = (who, data) =>
+        who.post("/api/giniflow/stations/rx/followups/mark-all", { data });
+      const visitIds = [first.visit, second.visit];
+      expect((await post(api, { visitIds, action: "note", remark: "x" })).status()).toBe(400);
+      expect((await post(api, { visitIds, action: "not_needed", remark: " " })).status()).toBe(400);
+      expect((await post(api, { visitIds: [], action: "not_needed", remark: "x" })).status()).toBe(
+        400,
+      );
+      expect((await post(lab, { visitIds, action: "not_needed", remark: "x" })).status()).toBe(403);
+    } finally {
+      await api.dispose();
+      await lab.dispose();
+    }
+    expect(listed(await queue(), first)).toBeTruthy();
+    expect(listed(await queue(), second)).toBeTruthy();
+
+    await loginAs(page, "admin");
+    await page.goto("/giniflow/station/rx");
+    await page.getByLabel("Search today's Prescription Explain queue").fill("RxBulk");
+    const button = page.getByRole("button", { name: "✓ Mark all done (2)" });
+    await expect(button).toBeVisible({ timeout: 15000 });
+    await button.click();
+    const dialog = page.getByRole("dialog", { name: "Mark all done — 2 patients" });
+    await dialog.getByRole("button", { name: "Mark 2 patients done" }).click();
+    await expect(dialog.getByText("Choose what happened")).toBeVisible();
+    await expect(dialog.getByText("Add a remark — what was done for these patients")).toBeVisible();
+    await dialog.getByLabel("Sent on WhatsApp").check();
+    await dialog.getByLabel("Remark (required)").fill("Sent from the group chat");
+    await dialog.getByRole("button", { name: "Mark 2 patients done" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText("Sent on WhatsApp — 2 patients done")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Mark all done/ })).toHaveCount(0);
+
+    const q = await queue();
+    expect(listed(q, first)).toBeUndefined();
+    expect(listed(q, second)).toBeUndefined();
+    expect(listed(q, keep)).toBeTruthy();
+    const saved = await query(
+      `SELECT action, remark FROM giniflow_rx_followups WHERE visit_id = ANY($1) ORDER BY visit_id`,
+      [[first.visit, second.visit]],
+    );
+    expect(saved.rows).toEqual([
+      { action: "sent_whatsapp", remark: "Sent from the group chat" },
+      { action: "sent_whatsapp", remark: "Sent from the group chat" },
+    ]);
+  });
 });

@@ -10,7 +10,11 @@ import {
   handOverEchoReport,
   returnRxToQueue,
 } from "../services/giniflow/rxStation.js";
-import { addRxFollowup, getRxNotTaken } from "../services/giniflow/rxFollowups.js";
+import {
+  addRxFollowup,
+  addRxFollowupMany,
+  getRxNotTaken,
+} from "../services/giniflow/rxFollowups.js";
 import { fetchRxFile, regenerateRx } from "../services/giniflow/printRx.js";
 import {
   addOrderedService,
@@ -49,6 +53,7 @@ import {
   giniflowRxPauseSchema,
   giniflowRxStopSchema,
   giniflowRxFollowupSchema,
+  giniflowRxFollowupManySchema,
   giniflowMedSearchQuerySchema,
   pharmacyMedicineRequestSchema,
   giniflowExternalMedSchema,
@@ -3320,6 +3325,19 @@ router.get(
       });
     } catch (e) {
       handleError(res, e, "Gini Flow Rx queue");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/rx/followups/mark-all",
+  rxGate,
+  validate(giniflowRxFollowupManySchema),
+  async (req, res) => {
+    try {
+      res.json(await addRxFollowupMany(req.body.visitIds, req.body, req.doctor?.doctor_id ?? null));
+    } catch (e) {
+      handleError(res, e, "Gini Flow Rx mark all done");
     }
   },
 );

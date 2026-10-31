@@ -100,6 +100,11 @@ const shapeStep = (r) => ({
 export { AUTO_LAB_BILLING_SQL, JOURNEY_STEPS_SQL };
 
 const LAB_ONLY_LEG = ["blood_sample", "lab_processing_2"];
+const AFTER_LAB_BILLING = ["blood_sample", "lab_processing_2", "report_upload"];
+const LAB_BILLING_OPEN_SQL = (visit) => `EXISTS (
+  SELECT 1 FROM giniflow_visit_steps lb
+   WHERE lb.visit_id = ${visit} AND lb.step_catalog_id = 'lab_billing' AND lb.status <> 'done'
+)`;
 
 const PLANNED_STEP_SQL = (step) => `NOT ${AUTO_LAB_BILLING_SQL(step)}`;
 
@@ -1504,8 +1509,9 @@ export async function syncLabStepsFromLab(db, visitId) {
               started_at = COALESCE(started_at, NOW()),
               completed_at = COALESCE(completed_at, NOW())
         WHERE visit_id = $1 AND step_catalog_id = $2
-          AND status IN ('pending', 'in_progress', 'skipped')`,
-      [visitId, catalogId],
+          AND status IN ('pending', 'in_progress', 'skipped')
+          AND NOT ($2 = ANY($3::text[]) AND ${LAB_BILLING_OPEN_SQL("$1")})`,
+      [visitId, catalogId, AFTER_LAB_BILLING],
     );
   const reopen = async (catalogId) =>
     db.query(
@@ -1556,7 +1562,8 @@ export async function syncMachineSteps(db, visitId) {
               completed_at = CASE WHEN $3 = 'done' THEN COALESCE(completed_at, NOW())
                                   ELSE completed_at END
         WHERE visit_id = $1 AND step_catalog_id = $2
-          AND status = ANY($4::text[])`,
+          AND status = ANY($4::text[])
+          AND NOT ${LAB_BILLING_OPEN_SQL("$1")}`,
       [
         visitId,
         machine.id,
@@ -1593,6 +1600,21 @@ export async function setStepStatus(stepId, status, db = pool) {
   }
 
   if (status === "done") {
+    const { rows: unpaid } = await db.query(
+      `SELECT 1
+         FROM giniflow_visit_steps s
+         LEFT JOIN flow_step_catalog c ON c.id = s.step_catalog_id
+        WHERE s.id = $1
+          AND (s.step_catalog_id = ANY($2::text[]) OR COALESCE(c.machine, FALSE))
+          AND ${LAB_BILLING_OPEN_SQL("s.visit_id")}`,
+      [stepId, AFTER_LAB_BILLING],
+    );
+    if (unpaid.length) {
+      throw Object.assign(
+        new Error("Lab Billing comes first — clear the test payment on the Payments tab"),
+        { status: 409 },
+      );
+    }
     const { rows: earlier } = await db.query(
       `SELECT prev.step_name
          FROM giniflow_visit_steps s
@@ -1623,10 +1645,13 @@ export async function setStepStatus(stepId, status, db = pool) {
               WHEN $2 IN ('in_progress', 'done') THEN COALESCE(started_at, NOW())
               ELSE started_at END,
             completed_at = CASE WHEN $2 = 'done' THEN NOW() ELSE NULL END
-      WHERE id = $1 RETURNING visit_id`,
+      WHERE id = $1 RETURNING visit_id, step_catalog_id`,
     [stepId, status],
   );
   if (!rows.length) throw Object.assign(new Error("Step not found"), { status: 404 });
+  if (status === "done" && rows[0].step_catalog_id === "lab_billing") {
+    await syncLabStepsFromLab(db, rows[0].visit_id);
+  }
   return getJourney(rows[0].visit_id, db);
 }
 

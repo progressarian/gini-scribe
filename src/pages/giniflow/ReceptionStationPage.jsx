@@ -1253,7 +1253,17 @@ const withBilledSteps = (planned, bill = null, requires = {}) => {
         }
       : { ...b, source: "auto" };
   });
-  const at = rest.findIndex((s) => s.catalogId === "vitals") + 1;
+  const vitalsAt = rest.findIndex((s) => s.catalogId === "vitals");
+  if (vitalsAt < 0) {
+    const inPlace = list.map((s) => merged.find((m) => m.catalogId === s.catalogId) || s);
+    const added = merged.filter((m) => !list.some((s) => s.catalogId === m.catalogId));
+    const after = inPlace.findIndex((s) => s.catalogId === "check_in") + 1;
+    return inJourneyOrder(
+      [...inPlace.slice(0, after), ...added, ...inPlace.slice(after)],
+      requires,
+    );
+  }
+  const at = vitalsAt + 1;
   return inJourneyOrder([...rest.slice(0, at), ...merged, ...rest.slice(at)], requires);
 };
 

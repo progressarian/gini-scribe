@@ -18,6 +18,7 @@ import LiveBadge from "../../components/giniflow/LiveBadge";
 import StationNotice from "../../components/giniflow/StationNotice";
 import PdfViewerModal, { printPdf } from "../../components/visit/PdfViewerModal";
 import RxFollowupDialog from "../../components/giniflow/RxFollowupDialog";
+import RxFollowupAllDialog from "../../components/giniflow/RxFollowupAllDialog";
 import {
   RX_FOLLOWUP_LABEL,
   RX_FOLLOWUP_RESOLVES,
@@ -484,6 +485,7 @@ export default function RxStationPage() {
   const [toast, setToast] = useState("");
   const [viewing, setViewing] = useState(null);
   const [followup, setFollowup] = useState(null);
+  const [markingAll, setMarkingAll] = useState(false);
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   useEffect(() => {
@@ -772,6 +774,15 @@ export default function RxStationPage() {
                 Left without their prescription. Send it on WhatsApp, then mark done — they stay
                 here until someone does.
               </div>
+              {notTaken.length > 0 && (
+                <button
+                  type="button"
+                  className="st-btn st-btn-grn rxq-markall"
+                  onClick={() => setMarkingAll(true)}
+                >
+                  ✓ Mark all done ({notTaken.length})
+                </button>
+              )}
               {!notTaken.length && <div className="empty-note">Nothing to send.</div>}
               {notTaken.map((r) => {
                 const wa = whatsappHref(r.phone, r.name);
@@ -964,6 +975,19 @@ export default function RxStationPage() {
           onClose={() => setFollowup(null)}
           onDone={(message) => {
             setFollowup(null);
+            setToast(`✓ ${message}`);
+            setTimeout(() => setToast(""), 3500);
+          }}
+        />
+      )}
+
+      {markingAll && (
+        <RxFollowupAllDialog
+          rows={notTaken}
+          labelOf={(r) => visitLabel(r.visitDate, today)}
+          onClose={() => setMarkingAll(false)}
+          onDone={(message) => {
+            setMarkingAll(false);
             setToast(`✓ ${message}`);
             setTimeout(() => setToast(""), 3500);
           }}

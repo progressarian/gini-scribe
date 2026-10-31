@@ -138,6 +138,18 @@ export async function getRxFollowups(visitId, db = pool) {
   }));
 }
 
+export async function addRxFollowupMany(visitIds, { action, remark }, actorId = null, db = pool) {
+  const { rows } = await db.query(
+    `INSERT INTO giniflow_rx_followups (visit_id, action, remark, actor_id)
+     SELECT v.id, $2, $3, $4
+       FROM giniflow_visits v
+      WHERE v.id = ANY($1::uuid[]) AND NOT ${labOnlyPredicate("v", "$5")}
+     RETURNING visit_id`,
+    [visitIds, action, remark.trim(), actorId, LAB_ONLY_DOCTOR],
+  );
+  return { ok: true, marked: rows.length };
+}
+
 export async function addRxFollowup(visitId, { action, remark }, actorId = null, db = pool) {
   const { rows } = await db.query(
     `SELECT ${labOnlyPredicate("v", "$2")} AS lab_only

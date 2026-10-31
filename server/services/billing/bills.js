@@ -1772,9 +1772,10 @@ export async function suggestCodes(billId, ctx, db = pool) {
         AND (valid_from IS NULL OR valid_from <= COALESCE($1::date, (now() AT TIME ZONE 'Asia/Kolkata')::date))
         AND (valid_to IS NULL OR valid_to >= COALESCE($1::date, (now() AT TIME ZONE 'Asia/Kolkata')::date))
         AND NOT (lower(code) = ANY($2::text[]))
+        AND lower(code) <> lower($3)
       ORDER BY priority, lower(name), id
       LIMIT ${MAX_CODES_TRIED}`,
-    [bill.bill_date, onBill.map((code) => code.toLowerCase())],
+    [bill.bill_date, onBill.map((code) => code.toLowerCase()), HOME_COLLECTION_CODE],
   );
   if (!rules.length) return { codes: [] };
   const removed = await homeCodeRemoved(db, id);
