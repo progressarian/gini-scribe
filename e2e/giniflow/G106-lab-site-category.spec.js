@@ -423,4 +423,29 @@ test.describe.serial("G106 reception and the lab set the lab sample category", (
       site: "ghm",
     });
   });
+
+  test("10. at check-in a booked patient with no test yet can be set to home collection", async () => {
+    const made = await visitFor("LsCheckIn", { bloodTest: false });
+    expect(await labSite.labSiteOf(made.visit, db)).toMatchObject({
+      applies: false,
+      editable: false,
+      notArrived: true,
+    });
+    expect(await refusal(labSite.setLabSite(made.visit, "home", desk, db))).toEqual({
+      status: 400,
+      message: "This patient has no lab test today",
+    });
+
+    await labSite.setLabSite(made.visit, "home", { ...desk, atCheckIn: true }, db);
+    expect(await homeNow(made.visit)).toBe(true);
+    expect(await bookingTag(made.appointment)).toBe(true);
+
+    const arrived = await visitFor("LsArrivedNoTest", { bloodTest: false });
+    await query(`UPDATE giniflow_visits SET current_status = 'checked_in' WHERE id = $1`, [
+      arrived.visit,
+    ]);
+    expect(
+      await refusal(labSite.setLabSite(arrived.visit, "home", { ...desk, atCheckIn: true }, db)),
+    ).toEqual({ status: 400, message: "This patient has no lab test today" });
+  });
 });

@@ -15,8 +15,8 @@ export function useLabSite(visitId) {
 export function useSetLabSite() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ visitId, site }) =>
-      (await api.post(`/api/giniflow/stations/lab-site/${visitId}`, { site })).data,
+    mutationFn: async ({ visitId, site, atCheckIn = false }) =>
+      (await api.post(`/api/giniflow/stations/lab-site/${visitId}`, { site, atCheckIn })).data,
     onSuccess: (data, { visitId }) => {
       queryClient.setQueryData(labSiteKey(visitId), data);
       queryClient.invalidateQueries({ queryKey: ["giniflow"] });

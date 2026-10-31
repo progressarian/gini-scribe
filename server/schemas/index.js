@@ -1039,6 +1039,7 @@ export const homeSampleRecordSchema = z.object({
 
 export const labSiteSchema = z.object({
   site: z.enum(["home", "ghm"], { message: "Choose 🏥 At GHM or 🏠 Home collection" }),
+  atCheckIn: z.boolean().optional(),
 });
 
 const followupReason = z

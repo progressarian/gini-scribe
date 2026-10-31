@@ -1598,6 +1598,7 @@ router.post(
         await setLabSite(req.params.visitId, req.body.site, {
           actorId: req.doctor?.doctor_id ?? null,
           actorName: (req.doctor?.short_name || req.doctor?.doctor_name || "").trim() || null,
+          atCheckIn: Boolean(req.body.atCheckIn),
         }),
       );
     } catch (e) {

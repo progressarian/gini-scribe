@@ -10,7 +10,7 @@ const SITES = [
 ];
 const labelOf = (site) => SITES.find((s) => s.value === site)?.label || site;
 
-export default function LabSiteControl({ visitId, card = false }) {
+export default function LabSiteControl({ visitId, card = false, atCheckIn = false }) {
   const { data } = useLabSite(visitId);
   const save = useSetLabSite();
   const [asking, setAsking] = useState(null);
@@ -18,15 +18,16 @@ export default function LabSiteControl({ visitId, card = false }) {
   const [done, setDone] = useState("");
   const uid = useId();
 
-  if (!data?.today || !data.applies) return null;
+  if (!data?.today || !(data.applies || (atCheckIn && data.notArrived))) return null;
 
+  const checkInOnly = atCheckIn && data.notArrived && !data.locked;
   const who = `${data.name}${data.fileNo ? ` (${data.fileNo})` : ""}`;
   const shown = asking ?? data.site;
 
   const confirm = async () => {
     setError("");
     try {
-      await save.mutateAsync({ visitId, site: asking });
+      await save.mutateAsync({ visitId, site: asking, atCheckIn: checkInOnly });
       setDone(`${data.name}: lab sample set to ${labelOf(asking)}`);
       setAsking(null);
     } catch (e) {
@@ -40,7 +41,7 @@ export default function LabSiteControl({ visitId, card = false }) {
       className={card ? "bc-card lsite" : "lsite"}
       aria-label={card ? "Lab sample category" : undefined}
     >
-      <fieldset className="lsite__set" disabled={!data.editable || save.isPending}>
+      <fieldset className="lsite__set" disabled={!(data.editable || checkInOnly) || save.isPending}>
         <legend className="lsite__legend">Lab sample</legend>
         {SITES.map((s) => (
           <label key={s.value} className="lsite__opt">

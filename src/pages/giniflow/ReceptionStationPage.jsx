@@ -114,6 +114,8 @@ import {
 } from "../../../shared/directConsult.js";
 import { labOnlyJourney, labOnlyKeepsStep, withProcedure } from "../../../shared/labOnly.js";
 import { homeStillNeeded } from "../../../shared/homeCollectors.js";
+import LabSiteControl from "../../components/giniflow/LabSiteControl";
+import { useLabSite } from "../../queries/hooks/useLabSite";
 
 // Arrived and done. They stay on the floor list — the desk is asked about them
 // — but they are not in the building.
@@ -1330,8 +1332,10 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const [billFor, setBillFor] = useState(null);
   const [arrivalChoices, setArrivalChoices] = useState(emptyArrivalChoices);
   const [arrivalError, setArrivalError] = useState(null);
+  const { data: labSite } = useLabSite(forAppointment ? null : arrival.visitId);
+  const homeNow = labSite ? labSite.site === "home" : arrival.homeCollection;
   const asksHome = Boolean(
-    !forAppointment && arrival.visitId && canRecordHome(arrival) && !arrival.homeRecord,
+    !forAppointment && arrival.visitId && homeNow && arrival.homeRecordsOn && !arrival.homeRecord,
   );
   const saveHome = useSaveHomeSample();
   const [homeAnswer, setHomeAnswer] = useState(emptyHomeAnswer);
@@ -1599,6 +1603,11 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
 
         <div className="dp-scroll">
           <div className="dp-inner ci-panel">
+            {!forAppointment &&
+              arrival.visitId &&
+              (homeNow || (steps || []).some((s) => s.catalogId === "blood_sample")) && (
+                <LabSiteControl visitId={arrival.visitId} atCheckIn />
+              )}
             {asksHome && (
               <section
                 className="ci-home"

@@ -82,6 +82,8 @@ async function siteRow(db, visitId, lock = false) {
   return rows[0] ?? null;
 }
 
+const notArrived = (r) => r.current_status === "booked";
+
 const shape = (r) => ({
   visitId: r.id,
   name: r.name,
@@ -92,6 +94,7 @@ const shape = (r) => ({
   setAt: r.lab_site_at ? new Date(r.lab_site_at).toISOString() : null,
   locked: Boolean(r.locked),
   applies: Boolean(r.has_lab_test) || Boolean(r.home),
+  notArrived: notArrived(r),
   editable:
     Boolean(r.today) &&
     (Boolean(r.has_lab_test) || Boolean(r.home)) &&
@@ -111,7 +114,7 @@ const SITE_WORD = { home: "Home collection", ghm: "At GHM" };
 export async function setLabSite(
   visitId,
   site,
-  { actorId = null, actorName = null } = {},
+  { actorId = null, actorName = null, atCheckIn = false } = {},
   db = pool,
 ) {
   if (!LAB_SITES.includes(site)) throw fail(400, "Choose 🏥 At GHM or 🏠 Home collection");
@@ -127,7 +130,7 @@ export async function setLabSite(
       throw fail(409, "This visit is marked no-show or cancelled — undo that first");
     }
     if (row.locked) throw fail(409, "The sample is already collected — the category can't change");
-    if (!row.has_lab_test && !row.home) {
+    if (!row.has_lab_test && !row.home && !(atCheckIn && notArrived(row))) {
       throw fail(400, "This patient has no lab test today");
     }
     if ((row.home ? "home" : "ghm") === site && row.lab_site === site) {

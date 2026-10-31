@@ -175,6 +175,54 @@ test.describe.serial("G105 reception records the home sample", () => {
     ]);
   });
 
+  test("3b. a lab patient without the home tag is switched to home collection at check-in and asked the sample", async ({
+    page,
+  }) => {
+    const made = await homeVisit("HsUntagged", { home: false });
+    let checkedIn = 0;
+    await page.route(`**/api/giniflow/stations/reception/${made.visit}/checkin`, async (route) => {
+      checkedIn++;
+      await query(`UPDATE giniflow_visits SET current_status = 'checked_in' WHERE id = $1`, [
+        made.visit,
+      ]);
+      return route.fulfill({ json: { totalCount: 1, plannedTotalMin: 5, raised: null } });
+    });
+    await openArrivals(page);
+    await rowOf(page, made.name).getByRole("button", { name: "✓ Arrived" }).click();
+    const panel = page.getByRole("dialog", { name: "Check in" });
+    await panel.getByRole("button", { name: /^Lab only/ }).click();
+    const site = panel.getByRole("group", { name: "Lab sample" });
+    await expect(site.getByRole("radio", { name: "🏥 At GHM" })).toBeChecked();
+    await expect(
+      panel.getByRole("region", { name: "Home collection — ask the patient" }),
+    ).toHaveCount(0);
+
+    await site.getByRole("radio", { name: "🏠 Home collection" }).check();
+    await panel
+      .getByRole("group", { name: "Confirm lab sample" })
+      .getByRole("button", { name: "Confirm" })
+      .click();
+    await expect(
+      panel.getByRole("status").filter({ hasText: "lab sample set to 🏠 Home collection" }),
+    ).toBeVisible();
+    const visit = await query(`SELECT lab_site FROM giniflow_visits WHERE id = $1`, [made.visit]);
+    expect(visit.rows[0].lab_site).toBe("home");
+
+    const box = panel.getByRole("region", { name: "Home collection — ask the patient" });
+    await expect(box).toBeVisible();
+    const arrive = panel.getByRole("button", { name: /^✓ Check in/ });
+    await expect(arrive).toBeDisabled();
+    await box.getByRole("radio", { name: "Collected at home" }).check();
+    await expect(arrive).toBeEnabled({ timeout: 15000 });
+    await arrive.click();
+
+    await expect.poll(() => checkedIn).toBe(1);
+    const rows = await savedRows(made.visit);
+    expect(rows.map((r) => [r.sample, r.collected_by, r.payment])).toEqual([
+      ["collected", null, null],
+    ]);
+  });
+
   test("4. not collected hides the payment questions and the patient checks in as normal", async ({
     page,
   }) => {
