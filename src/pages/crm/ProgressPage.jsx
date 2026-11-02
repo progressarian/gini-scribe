@@ -8,6 +8,7 @@ import ProgressCards from "../../components/crm/progress/ProgressCards.jsx";
 import ProgressTrend from "../../components/crm/progress/ProgressTrend.jsx";
 import StaffTable from "../../components/crm/progress/StaffTable.jsx";
 import Breakdowns from "../../components/crm/progress/Breakdowns.jsx";
+import DoctorsAdded from "../../components/crm/progress/DoctorsAdded.jsx";
 import ProgressDoctors from "../../components/crm/progress/ProgressDoctors.jsx";
 import { SERIES, rangeText } from "../../components/crm/progress/progressText.js";
 
@@ -170,6 +171,7 @@ export default function ProgressPage() {
             />
           )}
           <Breakdowns breakdowns={data.breakdowns} />
+          <DoctorsAdded added={data.added} />
           <ProgressDoctors params={scope} showRep={reportFilters.rep === "all"} />
           <p className="rep__hint">
             India time; weeks start Monday. “As of now” numbers show today’s state, whatever the

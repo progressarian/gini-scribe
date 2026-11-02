@@ -397,9 +397,49 @@ const breakdownSql = `SELECT v.visit_type, v.outcome, v.source, t.name AS territ
         AND ${between("v.occurred_at", "$2", "$3")}
         AND ${territoryClause("d", "$4")}`;
 
+const creatorClause = `($9::boolean OR d.created_by = ANY($1::uuid[]))`;
+
+const addedSql = `SELECT d.created_by AS user_id, u.full_name,
+            GROUPING(d.created_by, u.full_name) = 3 AS is_total,
+            count(*)::int AS added,
+            count(*) FILTER (WHERE d.import_batch_id IS NULL)::int AS by_hand,
+            count(*) FILTER (WHERE d.import_batch_id IS NOT NULL)::int AS imported
+       FROM crm.doctors d
+       LEFT JOIN crm.users u ON u.id = d.created_by
+      WHERE d.deleted_at IS NULL AND ${between("d.created_at", "$2", "$3")}
+        AND ${territoryClause("d", "$4")} AND ${creatorClause}
+      GROUP BY GROUPING SETS ((d.created_by, u.full_name), ())`;
+
+const addedBeforeSql = `SELECT count(*)::int AS added
+       FROM crm.doctors d
+      WHERE d.deleted_at IS NULL AND ${between("d.created_at", "$6", "$7")}
+        AND ${territoryClause("d", "$4")} AND ${creatorClause}`;
+
+function addedFrom(rows, before) {
+  const total = rows.find((r) => r.is_total);
+  return {
+    added: total?.added ?? 0,
+    by_hand: total?.by_hand ?? 0,
+    imported: total?.imported ?? 0,
+    previous: before?.[0]?.added ?? 0,
+    by_person: rows
+      .filter((r) => !r.is_total)
+      .map(({ user_id, full_name, added, by_hand, imported }) => ({
+        user_id,
+        full_name: full_name ?? "Unknown",
+        added,
+        by_hand,
+        imported,
+      }))
+      .sort((a, b) => b.added - a.added || a.full_name.localeCompare(b.full_name)),
+  };
+}
+
 const territorySql = "SELECT id, name FROM crm.territories WHERE deleted_at IS NULL ORDER BY name";
 
 const jsonRows = (key, query) => `(SELECT json_agg(q) FROM (${query}) q) AS "${key}"`;
+
+const allCreators = (f) => f.canPickStaff && f.rep === "all";
 
 async function reportData(sql, f) {
   const parts = {
@@ -411,6 +451,8 @@ async function reportData(sql, f) {
     ),
     trend: trendSql,
     breakdowns: breakdownSql,
+    added: addedSql,
+    added_before: addedBeforeSql,
     territories: territorySql,
   };
   const { rows } = await sql(
@@ -418,7 +460,17 @@ async function reportData(sql, f) {
      SELECT ${Object.entries(parts)
        .map(([k, q]) => jsonRows(k, q))
        .join(",\n            ")}`,
-    [f.repIds, f.from, f.to, f.territory, REACHED, f.previous.from, f.previous.to, f.group],
+    [
+      f.repIds,
+      f.from,
+      f.to,
+      f.territory,
+      REACHED,
+      f.previous.from,
+      f.previous.to,
+      f.group,
+      allCreators(f),
+    ],
   );
   const r = rows[0];
   const pick = (prefix) => ({
@@ -432,6 +484,7 @@ async function reportData(sql, f) {
     previous: metricsFrom(pick("previous")),
     trendRows: trendFrom(r.trend ?? [], f),
     split: breakdownsFrom(r.breakdowns ?? []),
+    added: addedFrom(r.added ?? [], r.added_before),
     territories: r.territories ?? [],
   };
 }
@@ -462,7 +515,7 @@ function breakdownsFrom(rows) {
 export async function progressReport(crmUser, query) {
   return withCrmContext(crmUser, async (sql) => {
     const f = await resolveIn(sql, crmUser, query);
-    const { current, previous, trendRows, split, territories } = await reportData(sql, f);
+    const { current, previous, trendRows, split, added, territories } = await reportData(sql, f);
     const names = new Map(f.staffOptions.map((o) => [o.id, o.full_name]));
     if (!names.has(crmUser.id)) names.set(crmUser.id, crmUser.full_name);
     const staff =
@@ -496,6 +549,7 @@ export async function progressReport(crmUser, query) {
         buckets: trendRows,
       },
       breakdowns: split,
+      added,
     };
   });
 }
@@ -508,6 +562,27 @@ async function doctorRows(sql, f, { state, q, limit, offset }) {
   const term = textOf(q);
   const params = [f.repIds, f.from, f.to, f.territory, term ? likeOf(term) : null];
   const search = `($5::text IS NULL OR d.full_name ILIKE $5 OR d.area ILIKE $5 OR d.mobile ILIKE $5)`;
+  if (state === "added") {
+    const addedParams = [...params, allCreators(f)];
+    const base = `
+       FROM crm.doctors d
+       LEFT JOIN crm.users u ON u.id = d.created_by
+       LEFT JOIN crm.territories t ON t.id = d.territory_id
+      WHERE d.deleted_at IS NULL AND ${between("d.created_at", "$2", "$3")}
+        AND ${territoryClause("d", "$4")} AND ${search}
+        AND ($6::boolean OR d.created_by = ANY($1::uuid[]))`;
+    const { rows: total } = await sql(`SELECT count(*)::int AS n ${base}`, addedParams);
+    const { rows } = await sql(
+      `SELECT d.id AS doctor_id, d.full_name, d.specialty, d.area, d.priority, t.name AS territory,
+              d.created_at AS added_at, coalesce(u.full_name, 'Unknown') AS added_by,
+              d.import_batch_id IS NOT NULL AS imported
+         ${base}
+        ORDER BY d.created_at DESC, d.full_name, d.id
+        LIMIT ${limit} OFFSET ${offset}`,
+      addedParams,
+    );
+    return { rows, total: total[0].n };
+  }
   if (state === "not_visited") {
     const base = `
        FROM crm.doctor_assignments a
@@ -560,7 +635,7 @@ async function doctorRows(sql, f, { state, q, limit, offset }) {
 }
 
 export async function progressDoctors(crmUser, query) {
-  const state = query.state === "not_visited" ? "not_visited" : "visited";
+  const state = ["not_visited", "added"].includes(query.state) ? query.state : "visited";
   return withCrmContext(crmUser, async (sql) => {
     const f = await resolveIn(sql, crmUser, query);
     const requested = Math.min(10_000, Math.max(1, Math.floor(Number(query.page)) || 1));
@@ -601,7 +676,12 @@ export async function progressWorkbook(crmUser, query) {
       limit: MAX_EXPORT_ROWS,
       offset: 0,
     });
-    return { visited: visited.rows, notVisited: notVisited.rows };
+    const added = await doctorRows(sql, f, {
+      state: "added",
+      limit: MAX_EXPORT_ROWS,
+      offset: 0,
+    });
+    return { visited: visited.rows, notVisited: notVisited.rows, added: added.rows };
   });
 
   const book = new ExcelJS.Workbook();
@@ -646,6 +726,10 @@ export async function progressWorkbook(crmUser, query) {
   line("Tasks completed", cards.tasks.completed, prev.tasks.completed);
   line("— on time", cards.tasks.on_time, prev.tasks.on_time);
   line("Tasks overdue (now)", cards.tasks.overdue_now, "");
+  line("Doctors added", report.added.added, report.added.previous);
+  line("— added by hand", report.added.by_hand, "");
+  line("— from import", report.added.imported, "");
+  for (const p of report.added.by_person) line(`Added by ${p.full_name}`, p.added, "");
   bold(summary);
   summary.addRow([]);
   summary.addRow(["India time; weeks start Monday. '(now)' rows are as of the download."]);
@@ -752,6 +836,26 @@ export async function progressWorkbook(crmUser, query) {
   ];
   lists.notVisited.forEach((r) => missing.addRow({ ...r, last: istDateOf(r.last_visit_at) }));
   bold(missing);
+
+  const addedSheet = book.addWorksheet("Doctors added");
+  addedSheet.columns = [
+    { header: "Doctor", key: "full_name", width: 28 },
+    { header: "Specialty", key: "specialty", width: 18 },
+    { header: "Area", key: "area", width: 16 },
+    { header: "Territory", key: "territory", width: 14 },
+    { header: "Priority", key: "priority", width: 9 },
+    { header: "Added on", key: "added_on", width: 12 },
+    { header: "Added by", key: "added_by", width: 20 },
+    { header: "How", key: "how", width: 10 },
+  ];
+  lists.added.forEach((r) =>
+    addedSheet.addRow({
+      ...r,
+      added_on: istDateOf(r.added_at),
+      how: r.imported ? "Import" : "By hand",
+    }),
+  );
+  bold(addedSheet);
 
   const slug = who
     .toLowerCase()

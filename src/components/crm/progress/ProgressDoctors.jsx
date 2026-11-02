@@ -9,7 +9,40 @@ import { shortDateTime } from "./progressText.js";
 const STATES = [
   { key: "not_visited", label: "Not visited in this period" },
   { key: "visited", label: "Visited in this period" },
+  { key: "added", label: "Added in this period" },
 ];
+
+const EMPTY = {
+  visited: "No doctors were visited in this period.",
+  not_visited: "Every assigned doctor was visited in this period.",
+  added: "No doctors were added in this period.",
+};
+
+function detail(d, state, showRep) {
+  if (state === "added") {
+    return [
+      `Added ${shortDateTime(d.added_at)}`,
+      `by ${d.added_by}`,
+      d.imported ? "from import" : "by hand",
+    ].join(" · ");
+  }
+  if (state === "visited") {
+    return [
+      `${d.visits} visit${d.visits === 1 ? "" : "s"}`,
+      `last ${shortDateTime(d.last_visit_at)}`,
+      outcomeLabel(d.last_outcome),
+      showRep && d.rep,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  return [
+    d.last_visit_at ? `Last visit ${shortDateTime(d.last_visit_at)}` : "Never visited",
+    showRep && `Owner ${d.rep}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
 
 export default function ProgressDoctors({ params, showRep }) {
   const [state, setState] = useState("not_visited");
@@ -64,11 +97,7 @@ export default function ProgressDoctors({ params, showRep }) {
       <ListBody
         data={data}
         loading={loading}
-        empty={
-          state === "visited"
-            ? "No doctors were visited in this period."
-            : "Every assigned doctor was visited in this period."
-        }
+        empty={EMPTY[state]}
         filteredEmpty={`No doctors match “${q}”.`}
         active={Boolean(q)}
         onClear={() => setQ("")}
@@ -83,25 +112,7 @@ export default function ProgressDoctors({ params, showRep }) {
                     .filter(Boolean)
                     .join(" · ")}
                 </span>
-                <span className="rep__row-sub">
-                  {state === "visited"
-                    ? [
-                        `${d.visits} visit${d.visits === 1 ? "" : "s"}`,
-                        `last ${shortDateTime(d.last_visit_at)}`,
-                        outcomeLabel(d.last_outcome),
-                        showRep && d.rep,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")
-                    : [
-                        d.last_visit_at
-                          ? `Last visit ${shortDateTime(d.last_visit_at)}`
-                          : "Never visited",
-                        showRep && `Owner ${d.rep}`,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                </span>
+                <span className="rep__row-sub">{detail(d, state, showRep)}</span>
               </div>
               <span className="rep__chev" aria-hidden="true">
                 ›
