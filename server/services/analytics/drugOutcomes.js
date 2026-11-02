@@ -216,6 +216,7 @@ export function summariseOutcomes(cohorts, outcomes, { markers = OUTCOME_MARKERS
           row.drop_ge_1pct = drop1;
           row.drop_ge_1pct_rate = pct(drop1, pairs.length);
           row.above_goal_at_baseline = startedAbove.length;
+          row.above_goal_reached_target = reachedFromAbove;
           row.above_goal_reached_target_rate = pct(reachedFromAbove, startedAbove.length);
         }
         results.push(row);

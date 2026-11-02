@@ -772,7 +772,7 @@ function overviewSheet(funnel, rows) {
     "Followed under 3 months",
     "Followed 3–6 months",
     "Followed 6+ months",
-    "Median months on drug",
+    "Median months followed on GLP-1",
     "Median visits since start",
   ];
   return [
@@ -852,7 +852,8 @@ function outcomeSheet(rows) {
     "Mean change",
     "Median % change",
     "Median days after start",
-    "Reached HbA1c <7",
+    "HbA1c below 7 at follow-up",
+    "Started at 7 or above → below 7 at follow-up",
     "HbA1c fell ≥1 point",
   ];
   return [
@@ -872,6 +873,9 @@ function outcomeSheet(rows) {
       r.pct_change.median,
       r.median_days_after,
       r.reached_under_7 != null ? `${r.reached_under_7} (${r.reached_under_7_rate}%)` : null,
+      r.above_goal_at_baseline != null
+        ? `${r.above_goal_reached_target} of ${r.above_goal_at_baseline} (${r.above_goal_reached_target_rate ?? 0}%)`
+        : null,
       r.drop_ge_1pct != null ? `${r.drop_ge_1pct} (${r.drop_ge_1pct_rate}%)` : null,
     ]),
   ];
@@ -1007,7 +1011,7 @@ function exampleSheet(rows) {
       "UHID",
       "Health ID",
       "GLP-1 drugs",
-      "Months on GLP-1",
+      "Months followed on GLP-1",
       "HbA1c start → latest",
       "Fasting sugar start → latest",
       "Weight start → latest (kg)",
@@ -1072,7 +1076,7 @@ function patientSheet(patientRows) {
     "GLP-1 end date",
     "Treatment status",
     "Stop reason",
-    "Months on GLP-1",
+    "Months followed on GLP-1",
     "Follow-up band",
     "Visits since start",
     "Last visit",
@@ -1208,8 +1212,8 @@ function methodSheet(meta) {
       `A distinct day with a consultation, or an appointment with status ${VISIT_STATUSES_COUNTED.join(" / ")}.`,
     ],
     [
-      "Months on drug / end date",
-      "Start to last visit if still on the drug; start to the stop date (or last prescribed date) if discontinued. End date is blank while the drug is still prescribed.",
+      "Months followed on GLP-1 / end date",
+      "Follow-up so far, not time before stopping: start to last visit if still on the drug; start to the stop date (or last prescribed date) if discontinued. End date is blank while the drug is still prescribed.",
     ],
     [
       "Treatment status",
@@ -1352,19 +1356,30 @@ function renderView(report, { asOf }) {
   const waist = anyOf(waistRows);
   const hba1c6 = anyOutcome("hba1c", "m6");
   const fg6 = anyOutcome("fg", "m6");
-  const hba1c12 = anyOutcome("hba1c", "m12");
-  const fg12 = anyOutcome("fg", "m12");
 
-  const outcomeTable = (rows, marker, window, extra) =>
+  const BELOW_7 = { label: "Below 7 at follow-up", get: (r) => `${r.reached_under_7_rate}%` };
+  const FROM_ABOVE_7 = {
+    label: "Started 7+, now below 7",
+    get: (r) =>
+      `${r.above_goal_reached_target} of ${r.above_goal_at_baseline} (${r.above_goal_reached_target_rate ?? 0}%)`,
+  };
+  const outcomeTable = (rows, marker, window, ...extras) =>
     htmlTable([
-      ["Drug", "Patients", "Start (median)", "Follow-up (median)", "Median change", extra.label],
+      [
+        "Drug",
+        "Patients",
+        "Start (median)",
+        "Follow-up (median)",
+        "Median change",
+        ...extras.map((e) => e.label),
+      ],
       ...pick(rows, marker, window).map((r) => [
         r.cohort_label,
         r.paired_n,
         fixed(r.baseline.median, MARKERS[marker].decimals),
         fixed(r.followup.median, MARKERS[marker].decimals),
         fixed(r.change.median, MARKERS[marker].decimals),
-        extra.get(r),
+        ...extras.map((e) => e.get(r)),
       ]),
     ]);
 
@@ -1407,10 +1422,8 @@ function renderView(report, { asOf }) {
 <div class="stats">
 ${stat("Unique patients on a GLP-1", funnel.unique, `${funnel.multiple} used more than one GLP-1`)}
 ${stat("Active on GLP-1", countWithRate(drug.on_drug, drug.patients), `prescribed in the last 12 months · ${drug.discontinued} discontinued · ${drug.not_seen} status unknown`)}
-${stat("HbA1c at 6 months", hba1c6 ? `${fixed(hba1c6.baseline.median, 1)} → ${fixed(hba1c6.followup.median, 1)}` : "—", hba1c6 ? `${hba1c6.reached_under_7_rate}% reached <7 · n=${hba1c6.paired_n}` : "")}
-${stat("HbA1c at 12 months", hba1c12 ? `${fixed(hba1c12.baseline.median, 1)} → ${fixed(hba1c12.followup.median, 1)}` : "—", hba1c12 ? `${hba1c12.reached_under_7_rate}% reached <7 · n=${hba1c12.paired_n}` : "")}
+${stat("HbA1c at 6 months", hba1c6 ? `${fixed(hba1c6.baseline.median, 1)} → ${fixed(hba1c6.followup.median, 1)}` : "—", hba1c6 ? `${hba1c6.reached_under_7_rate}% below 7 · ${hba1c6.above_goal_reached_target_rate ?? 0}% of those starting at 7+ got below 7 · n=${hba1c6.paired_n}` : "")}
 ${stat("Fasting sugar at 6 months", fg6 ? `${fg6.baseline.median} → ${fg6.followup.median} mg/dL` : "—", fg6 ? `median change ${fg6.change.median} · n=${fg6.paired_n}` : "")}
-${stat("Fasting sugar at 12 months", fg12 ? `${fg12.baseline.median} → ${fg12.followup.median} mg/dL` : "—", fg12 ? `median change ${fg12.change.median} · n=${fg12.paired_n}` : "")}
 ${stat("Weight change", weight ? `${fixed(weight.change.median, 1)} kg (${fixed(weight.pct_change.median, 1)}%)` : "—", weight ? `${pct(weight.lost_5, weight.with_pair)}% lost ≥5% · n=${weight.with_pair} (${weight.coverage}% of patients)` : "")}
 ${stat("Waist change", waist && waist.with_pair ? `${fixed(waist.change.median, 1)} cm` : "—", waist ? `n=${waist.with_pair} (${waist.coverage}% of patients)` : "")}
 ${stat("Insulin stopped", insulin ? `${insulin.stopped} of ${insulin.counted}` : "—", insulin ? `${insulin.stopped_rate}% of patients on insulin at start and followed` : "")}
@@ -1429,7 +1442,7 @@ ${stat("Started insulin after GLP-1", insulin ? insulin.started_later : "—", i
       "Followed <3 months",
       "3–6 months",
       "6+ months",
-      "Median months on drug",
+      "Median months followed on GLP-1",
       "Median visits",
     ],
     ...drugRows.map((r) => [
@@ -1445,7 +1458,7 @@ ${stat("Started insulin after GLP-1", insulin ? insulin.started_later : "—", i
       r.visits_since_start.median,
     ]),
   ])}</div>
-<p class="note">Active = GLP-1 prescribed within the last 12 months. Status unknown = still on the last prescription, but that prescription is more than 12 months old, so we cannot tell whether the patient still takes it. Discontinued = a later prescription no longer includes the GLP-1. Many patients are recent starters, which pulls the median time on drug down.</p>
+<p class="note">Active = GLP-1 prescribed within the last 12 months. Status unknown = still on the last prescription, but that prescription is more than 12 months old, so we cannot tell whether the patient still takes it. Discontinued = a later prescription no longer includes the GLP-1. Months followed = from the GLP-1 start to the last visit (or the stop date), so it is follow-up so far, not time before stopping. Many patients are recent starters, which pulls it down.</p>
 
 <h3>How many patients improved</h3>
 <div class="table-wrap">${htmlTable([
@@ -1462,13 +1475,11 @@ ${stat("Started insulin after GLP-1", insulin ? insulin.started_later : "—", i
 <p class="note">Each patient counted once, comparing the reading at GLP-1 start with the latest reading at least 1–2 months later. For insulin, "improved" = stopped and "stable" = still on insulin.</p>
 
 <h2>3. Diabetes outcomes</h2>
-<p class="note">"6 months" uses the reading closest to day 180 within 150–270 days after the GLP-1 start; "12 months" the reading closest to day 365 within 270–450 days. The start value is the latest reading from 180 days before to 14 days after the start. Patients without a reading in the window are not included.</p>
+<p class="note">"6 months" uses the reading closest to day 180 within 150–270 days after the GLP-1 start. The start value is the latest reading from 180 days before to 14 days after the start. Patients without a reading in the window are not included.</p>
 <h3>HbA1c at 6 months — all GLP-1 patients</h3>
-<div class="table-wrap">${outcomeTable(outcomeRows, "hba1c", "m6", { label: "Reached HbA1c <7", get: (r) => `${r.reached_under_7_rate}%` })}</div>
+<div class="table-wrap">${outcomeTable(outcomeRows, "hba1c", "m6", BELOW_7, FROM_ABOVE_7)}</div>
 <h3>HbA1c at 6 months — diabetic patients</h3>
-<div class="table-wrap">${outcomeTable(diabeticOutcomeRows, "hba1c", "m6", { label: "Fell ≥1 point", get: (r) => `${r.drop_ge_1pct_rate}%` })}</div>
-<h3>HbA1c at 12 months — all GLP-1 patients</h3>
-<div class="table-wrap">${outcomeTable(outcomeRows, "hba1c", "m12", { label: "Reached HbA1c <7", get: (r) => `${r.reached_under_7_rate}%` })}</div>
+<div class="table-wrap">${outcomeTable(diabeticOutcomeRows, "hba1c", "m6", { label: "Fell ≥1 point", get: (r) => `${r.drop_ge_1pct_rate}%` }, BELOW_7, FROM_ABOVE_7)}</div>
 <h3>Fasting sugar at 6 months</h3>
 <div class="table-wrap">${outcomeTable(outcomeRows, "fg", "m6", { label: "Median % change", get: (r) => `${r.pct_change.median}%` })}</div>
 
@@ -1789,6 +1800,475 @@ async function buildReport(db, { asOf }) {
   };
 }
 
+const PRESS_HEADER_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8EDF3" } };
+const PRESS_THIN = { style: "thin", color: { argb: "FFD0D7DE" } };
+const PRESS_BORDER = { top: PRESS_THIN, bottom: PRESS_THIN, left: PRESS_THIN, right: PRESS_THIN };
+const PRESS_GREY = "FF8A94A3";
+
+function pressDrugOrder(rows, keyOf) {
+  const all = rows.filter((r) => keyOf(r) === "glp1");
+  const rest = rows.filter((r) => keyOf(r) !== "glp1");
+  return [...all, ...rest];
+}
+
+function pressLabel(key, label) {
+  return key === "glp1" ? "All GLP-1 patients" : label;
+}
+
+function pressSheet(wb, name, { title, subtitle, widths }) {
+  const ws = wb.addWorksheet(name, { views: [{ showGridLines: false }] });
+  ws.columns = widths.map((width) => ({ width }));
+  ws.addRow([title]).font = { bold: true, size: 14 };
+  if (subtitle) ws.addRow([subtitle]).font = { color: { argb: PRESS_GREY }, size: 10 };
+  ws.addRow([]);
+  return ws;
+}
+
+function pressHeader(ws, groups, labels) {
+  if (groups) {
+    const groupRow = ws.addRow([]);
+    let col = 1;
+    for (const [text, span] of groups) {
+      groupRow.getCell(col).value = text || null;
+      if (span > 1) ws.mergeCells(groupRow.number, col, groupRow.number, col + span - 1);
+      for (let c = col; c < col + span; c++) {
+        const cell = groupRow.getCell(c);
+        if (text) {
+          cell.fill = PRESS_HEADER_FILL;
+          cell.border = PRESS_BORDER;
+        }
+        cell.font = { bold: true };
+        cell.alignment = { horizontal: "center" };
+      }
+      col += span;
+    }
+  }
+  const row = ws.addRow(labels);
+  row.eachCell((cell) => {
+    cell.font = { bold: true };
+    cell.fill = PRESS_HEADER_FILL;
+    cell.border = PRESS_BORDER;
+    cell.alignment = { wrapText: true, vertical: "middle", horizontal: "center" };
+  });
+  row.getCell(1).alignment = { wrapText: true, vertical: "middle", horizontal: "left" };
+  return row;
+}
+
+function pressBody(ws, rows, { isAll, isSmall, formats = [] }) {
+  for (const r of rows) {
+    const row = ws.addRow(r.values);
+    row.eachCell({ includeEmpty: true }, (cell, col) => {
+      cell.border = PRESS_BORDER;
+      if (col > 1) cell.alignment = { horizontal: "right" };
+      if (formats[col - 1]) cell.numFmt = formats[col - 1];
+      if (isAll(r)) cell.font = { bold: true };
+      if (isSmall?.(r)) cell.font = { italic: true, color: { argb: PRESS_GREY } };
+    });
+  }
+}
+
+function pressNote(ws, text) {
+  const row = ws.addRow([text]);
+  row.font = { color: { argb: PRESS_GREY }, size: 10 };
+}
+
+function pressSummarySheet(wb, report, asOf) {
+  const { funnel, drugRows, outcomeRows, weightRows, waistRows, insulinRows } = report;
+  const any = (rows) => rows.find((r) => r.key === "glp1");
+  const outcome = (marker, window) =>
+    outcomeRows.find((r) => r.cohort === "glp1" && r.marker === marker && r.window === window);
+  const drug = any(drugRows);
+  const insulin = any(insulinRows);
+  const weight = any(weightRows);
+  const waist = any(waistRows);
+  const lab = (marker, window, unit) => {
+    const r = outcome(marker, window);
+    if (!r) return ["—", null, ""];
+    const d = MARKERS[marker].decimals;
+    const extra =
+      marker === "hba1c" && r.reached_under_7_rate != null
+        ? `${r.reached_under_7_rate}% below 7; of ${r.above_goal_at_baseline} who started at 7 or above, ${r.above_goal_reached_target} (${r.above_goal_reached_target_rate ?? 0}%) got below 7`
+        : `median change ${fixed(r.change.median, d)} ${unit}`;
+    return [
+      `${fixed(r.baseline.median, d)} → ${fixed(r.followup.median, d)} ${unit}`,
+      r.paired_n,
+      extra,
+    ];
+  };
+  const body = (r, unit) =>
+    r && r.with_pair
+      ? [
+          `${fixed(r.change.median, 1)} ${unit} (${fixed(r.pct_change.median, 1)}%)`,
+          r.with_pair,
+          `${fixed(r.start.median, 1)} → ${fixed(r.latest.median, 1)} ${unit}; only ${r.coverage}% of patients have reliable start and later readings`,
+        ]
+      : ["—", 0, ""];
+
+  const ws = pressSheet(wb, "Summary", {
+    title: "GLP-1 patients — key figures",
+    subtitle: `Gini Advanced Care Hospital · data as at ${asOf} · patients whose first GLP-1 started on or after ${HISTORY_START_DATE} · all values are medians`,
+    widths: [44, 26, 18, 70],
+  });
+  pressHeader(ws, null, ["What", "Result", "Patients counted", "Note"]);
+  const lines = [
+    [
+      "Patients on a GLP-1",
+      funnel.unique,
+      funnel.unique,
+      `${funnel.multiple} used more than one GLP-1`,
+    ],
+    [
+      "Still prescribed (in the last 12 months)",
+      drug.on_drug,
+      drug.patients,
+      `${drug.discontinued} stopped · ${drug.not_seen} last prescribed over 12 months ago, status unknown`,
+    ],
+    [
+      "Months followed on GLP-1",
+      `${drug.months_on_drug.median} months`,
+      drug.patients,
+      `follow-up so far, not time before stopping: most patients are still on it · median visits since start: ${drug.visits_since_start.median}`,
+    ],
+    ["HbA1c after 6 months", ...lab("hba1c", "m6", "%")],
+    ["Fasting sugar after 6 months", ...lab("fg", "m6", "mg/dL")],
+    ["Weight change", ...body(weight, "kg")],
+    ["Waist change", ...body(waist, "cm")],
+    [
+      "Insulin stopped",
+      insulin ? `${insulin.stopped} of ${insulin.counted} (${insulin.stopped_rate}%)` : "—",
+      insulin?.counted ?? 0,
+      "patients on insulin when the GLP-1 started and followed up 3+ months",
+    ],
+    [
+      "Insulin continuing",
+      insulin ? `${insulin.continuing} of ${insulin.counted}` : "—",
+      insulin?.counted ?? 0,
+      "",
+    ],
+    [
+      "Started insulin after the GLP-1",
+      insulin ? insulin.started_later : "—",
+      insulin?.not_on_insulin ?? 0,
+      insulin
+        ? `of patients not on insulin at the start · ${insulin.started_later_still_on} still on it`
+        : "",
+    ],
+  ];
+  pressBody(
+    ws,
+    lines.map((values) => ({ values })),
+    { isAll: () => false, formats: [null, null, "#,##0"] },
+  );
+  ws.getColumn(1).font = { bold: true };
+  ws.addRow([]);
+  pressNote(
+    ws,
+    "Routine-care data, not a trial: there is no comparison group, so changes are associations, not proof the drug caused them.",
+  );
+  pressNote(
+    ws,
+    "Per-drug numbers are on the next sheets. How each figure is worked out is on the Notes sheet.",
+  );
+}
+
+function pressDrugSheet(wb, report) {
+  const ws = pressSheet(wb, "Patients by drug", {
+    title: "Patients on each GLP-1",
+    subtitle:
+      "A patient who used two GLP-1 drugs is counted under both drugs, so the drug rows add up to more than the total.",
+    widths: [32, 12, 12, 16, 12, 18, 14, 14],
+  });
+  pressHeader(ws, null, [
+    "Drug",
+    "Patients",
+    "Diabetic",
+    "Still prescribed (last 12 months)",
+    "Stopped",
+    "Status unknown (last prescribed 12+ months ago)",
+    "Median months followed on GLP-1",
+    "Median visits since start",
+  ]);
+  pressBody(
+    ws,
+    pressDrugOrder(report.drugRows, (r) => r.key).map((r) => ({
+      key: r.key,
+      values: [
+        pressLabel(r.key, r.drug),
+        r.patients,
+        r.diabetic_patients,
+        r.on_drug,
+        r.discontinued,
+        r.not_seen,
+        r.months_on_drug.median,
+        r.visits_since_start.median,
+      ],
+    })),
+    {
+      isAll: (r) => r.key === "glp1",
+      formats: [null, "#,##0", "#,##0", "#,##0", "#,##0", "#,##0", "0.0", "0"],
+    },
+  );
+}
+
+function pressLabSheet(wb, report, marker) {
+  const isHba1c = marker === "hba1c";
+  const unit = MARKERS[marker].unit;
+  const d = MARKERS[marker].decimals;
+  const name = isHba1c ? "HbA1c" : "Fasting sugar";
+  const perWindow = isHba1c ? 6 : 4;
+  const ws = pressSheet(wb, name, {
+    title: `${name} before and after starting the GLP-1 (${unit})`,
+    subtitle:
+      "Start = last reading before the GLP-1 started. After 6 months = reading 5–9 months after the start. Medians.",
+    widths: [32, ...Array(perWindow).fill(12)],
+  });
+  const windowLabels = [
+    "Patients",
+    "Start",
+    "After",
+    "Change",
+    ...(isHba1c ? ["Below 7", "Started 7+, now below 7"] : []),
+  ];
+  const fmt = d ? "0.0" : "0";
+  const windowFormats = ["#,##0", fmt, fmt, fmt, ...(isHba1c ? ["0.0%", "0.0%"] : [])];
+  for (const [label, rows] of [
+    ["All GLP-1 patients", report.outcomeRows],
+    ["Diabetic patients only", report.diabeticOutcomeRows],
+  ]) {
+    ws.addRow([label]).font = { bold: true, size: 12 };
+    pressHeader(
+      ws,
+      [
+        ["", 1],
+        ["After 6 months", perWindow],
+      ],
+      ["Drug", ...windowLabels],
+    );
+    const has = (key) =>
+      rows.some((r) => r.cohort === key && r.marker === marker && r.window === "m6" && r.paired_n);
+    const cohorts = pressDrugOrder(report.drugRows, (r) => r.key)
+      .filter((r) => has(r.key))
+      .map((r) => ({ cohort: r.key, cohort_label: r.drug }));
+    const cell = (r) =>
+      r
+        ? [
+            r.paired_n,
+            round(r.baseline.median, d),
+            round(r.followup.median, d),
+            round(r.change.median, d),
+            ...(isHba1c
+              ? [
+                  r.reached_under_7 != null ? round(r.reached_under_7_rate / 100, 3) : null,
+                  r.above_goal_at_baseline
+                    ? round(r.above_goal_reached_target_rate / 100, 3)
+                    : null,
+                ]
+              : []),
+          ]
+        : Array(perWindow).fill(null);
+    pressBody(
+      ws,
+      cohorts.map((c) => {
+        const find = (w) =>
+          rows.find((r) => r.cohort === c.cohort && r.marker === marker && r.window === w);
+        const m6 = find("m6");
+        return {
+          key: c.cohort,
+          small: (m6?.paired_n ?? 0) < MIN_TABLE_N,
+          values: [pressLabel(c.cohort, c.cohort_label), ...cell(m6)],
+        };
+      }),
+      {
+        isAll: (r) => r.key === "glp1",
+        isSmall: (r) => r.small,
+        formats: [null, ...windowFormats],
+      },
+    );
+    ws.addRow([]);
+  }
+  pressNote(ws, `Grey rows have fewer than ${MIN_TABLE_N} patients at 6 months: too few to quote.`);
+}
+
+function pressBodySheet(wb, report) {
+  const ws = pressSheet(wb, "Weight & waist", {
+    title: "Weight and waist: first vs latest reading",
+    subtitle:
+      "Only readings actually measured at the visit are used (many clinic records repeat the last value). Latest = most recent reading at least 2 months after the start. Medians.",
+    widths: [32, 11, 11, 11, 11, 11, 12, 11, 11, 11, 11],
+  });
+  pressHeader(
+    ws,
+    [
+      ["", 1],
+      ["Weight (kg)", 6],
+      ["Waist (cm)", 4],
+    ],
+    [
+      "Drug",
+      "Patients",
+      "Start",
+      "Latest",
+      "Change",
+      "Change %",
+      "Lost 5% or more",
+      "Patients",
+      "Start",
+      "Latest",
+      "Change",
+    ],
+  );
+  const waistBy = new Map(report.waistRows.map((r) => [r.key, r]));
+  pressBody(
+    ws,
+    pressDrugOrder(report.weightRows, (r) => r.key)
+      .filter((w) => w.with_pair || waistBy.get(w.key)?.with_pair)
+      .map((w) => {
+        const v = waistBy.get(w.key);
+        const has = (r) => r && r.with_pair;
+        return {
+          key: w.key,
+          small: w.with_pair < MIN_TABLE_N,
+          values: [
+            pressLabel(w.key, w.drug),
+            w.with_pair,
+            has(w) ? w.start.median : null,
+            has(w) ? w.latest.median : null,
+            has(w) ? w.change.median : null,
+            has(w) ? round(w.pct_change.median / 100, 3) : null,
+            has(w) ? pct(w.lost_5, w.with_pair) / 100 : null,
+            v?.with_pair ?? 0,
+            has(v) ? v.start.median : null,
+            has(v) ? v.latest.median : null,
+            has(v) ? v.change.median : null,
+          ],
+        };
+      }),
+    {
+      isAll: (r) => r.key === "glp1",
+      isSmall: (r) => r.small,
+      formats: [null, "#,##0", "0.0", "0.0", "0.0", "0.0%", "0%", "#,##0", "0.0", "0.0", "0.0"],
+    },
+  );
+  ws.addRow([]);
+  const any = report.weightRows.find((r) => r.key === "glp1");
+  if (any)
+    pressNote(
+      ws,
+      `Only ${any.coverage}% of GLP-1 patients have a reliable start and later weight, so treat these as indicative.`,
+    );
+  pressNote(
+    ws,
+    `Grey rows have fewer than ${MIN_TABLE_N} patients with weight readings: too few to quote.`,
+  );
+}
+
+function pressInsulinSheet(wb, report) {
+  const ws = pressSheet(wb, "Insulin", {
+    title: "Insulin: continuing or stopped after the GLP-1",
+    subtitle:
+      "Stopped = no insulin now and insulin missing from at least 2 visits in a row. Followed up = seen 3+ months after the GLP-1 started.",
+    widths: [32, 14, 14, 12, 12, 12, 14, 14],
+  });
+  pressHeader(
+    ws,
+    [
+      ["", 1],
+      ["On insulin when the GLP-1 started", 5],
+      ["Not on insulin at the start", 2],
+    ],
+    [
+      "Drug",
+      "Patients",
+      "Followed up",
+      "Still on insulin",
+      "Stopped",
+      "Stopped %",
+      "Patients",
+      "Started insulin later",
+    ],
+  );
+  pressBody(
+    ws,
+    pressDrugOrder(report.insulinRows, (r) => r.key)
+      .filter((r) => r.on_at_start || r.started_later)
+      .map((r) => ({
+        key: r.key,
+        small: r.counted < MIN_TABLE_N,
+        values: [
+          pressLabel(r.key, r.drug),
+          r.on_at_start,
+          r.counted,
+          r.continuing,
+          r.stopped,
+          r.counted ? r.stopped_rate / 100 : null,
+          r.not_on_insulin,
+          r.started_later,
+        ],
+      })),
+    {
+      isAll: (r) => r.key === "glp1",
+      isSmall: (r) => r.small,
+      formats: [null, "#,##0", "#,##0", "#,##0", "#,##0", "0.0%", "#,##0", "#,##0"],
+    },
+  );
+  ws.addRow([]);
+  const any = report.insulinRows.find((r) => r.key === "glp1");
+  if (any)
+    pressNote(
+      ws,
+      `Of ${any.on_at_start} on insulin at the start, ${any.too_early} were not seen 3+ months later and ${any.dropped_once} had insulin missing from one prescription only; they are not in "Followed up".`,
+    );
+  pressNote(ws, `Grey rows have fewer than ${MIN_TABLE_N} followed-up patients: too few to quote.`);
+}
+
+function pressNotesSheet(wb, report, meta) {
+  const ws = pressSheet(wb, "Notes", {
+    title: "How the numbers are worked out",
+    subtitle: `Data as at ${meta.asOf} · generated ${meta.generatedAt}`,
+    widths: [30, 110],
+  });
+  const keep = new Set([
+    "GLP-1 patient",
+    "Unique patients vs drug counts",
+    "Treatment status",
+    "HbA1c / FBS start and follow-up",
+    "Copied lab readings",
+    "Weight and waist",
+    "Insulin stopped",
+    "Insulin started after GLP-1",
+    "Erly and Gliptoza",
+    "Diabetic",
+    "Caution",
+  ]);
+  const rows = methodSheet({ ...meta, funnel: report.funnel }).filter((r) => keep.has(r[0]));
+  const pressText = {
+    "HbA1c / FBS start and follow-up": `Start = latest reading from ${BASELINE_WINDOW.beforeDays} days before to ${BASELINE_WINDOW.afterDays} days after the GLP-1 start. After 6 months = the reading closest to day 180, taken 150–270 days after the start. Patients without both readings are not counted.`,
+  };
+  for (const [item, text] of rows) {
+    const row = ws.addRow([item, pressText[item] ?? text]);
+    row.getCell(1).font = { bold: true };
+    row.alignment = { wrapText: true, vertical: "top" };
+  }
+  ws.addRow([]);
+  pressNote(
+    ws,
+    "Patient-level lists and checking sheets are in the separate INTERNAL details workbook (contains patient identifiers — do not share).",
+  );
+}
+
+async function writePressWorkbook(file, report, meta) {
+  const { default: ExcelJS } = await import("exceljs");
+  const wb = new ExcelJS.Workbook();
+  pressSummarySheet(wb, report, meta.asOf);
+  pressDrugSheet(wb, report);
+  pressLabSheet(wb, report, "hba1c");
+  pressLabSheet(wb, report, "fg");
+  pressBodySheet(wb, report);
+  pressInsulinSheet(wb, report);
+  pressNotesSheet(wb, report, meta);
+  await wb.xlsx.writeFile(file);
+}
+
 async function writeWorkbook(file, report, meta) {
   const XLSX = await import("xlsx");
   const wb = XLSX.utils.book_new();
@@ -1865,7 +2345,9 @@ await fs.mkdir(outDir, { recursive: true });
 const meta = { asOf, target, generatedAt: new Date().toISOString() };
 const xlsxPath = path.join(outDir, `glp1-press-${asOf}.xlsx`);
 const htmlPath = path.join(outDir, `glp1-press-summary-${asOf}.html`);
-await writeWorkbook(xlsxPath, report, meta);
+const detailsPath = path.join(outDir, `glp1-press-details-INTERNAL-${asOf}.xlsx`);
+await writePressWorkbook(xlsxPath, report, meta);
+await writeWorkbook(detailsPath, report, meta);
 await fs.writeFile(htmlPath, renderHtml(report, { asOf }), "utf8");
 
 console.log(`  finished in ${((Date.now() - started) / 1000).toFixed(1)}s`);
@@ -1891,4 +2373,5 @@ for (const [label, rows] of [
 }
 console.log(`  timeline rows ${report.timelineRows.length}`);
 console.log(`  xlsx  ${xlsxPath}`);
+console.log(`  xlsx  ${detailsPath}`);
 console.log(`  html  ${htmlPath}`);

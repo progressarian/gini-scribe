@@ -206,8 +206,10 @@ async function keepPaidInStep(client, bill, ctx) {
 
 async function tickBillingStep(client, bill) {
   if (!bill.visit_id) return;
-  const { tickBillingIfConsultPaid } = await import("../giniflow/journey.js");
+  const { tickBillingIfConsultPaid, tickLabBillingIfLabBillPaid } =
+    await import("../giniflow/journey.js");
   await tickBillingIfConsultPaid(client, bill.id, bill.visit_id);
+  await tickLabBillingIfLabBillPaid(client, bill.visit_id);
 }
 
 async function syncLabSteps(client, visitId) {

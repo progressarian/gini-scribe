@@ -171,8 +171,23 @@ Decision: "active" = GLP-1 prescribed in the last 12 months (was 6). Result: 1,0
 
 Tried and removed at the user's request: the page is all-time only (2,059 patients). The Patients sheet keeps a "Last GLP-1 prescription" column.
 
+### Excel split (2026-11-02)
+
+The single 15-sheet workbook was too confusing, so it is now two files:
+
+- `glp1-press-<date>.xlsx`: the press workbook. Seven short, formatted sheets: Summary, Patients by drug, HbA1c, Fasting sugar, Weight & waist, Insulin, Notes. "All GLP-1 patients" is the first row in bold. Lab sheets show the 6- and 12-month results side by side for all patients and for diabetic patients. Rows with fewer than 20 patients are shown in grey.
+- `glp1-press-details-INTERNAL-<date>.xlsx`: the previous full workbook, unchanged. It contains UHID and Health ID, so it is for internal use only.
+
 ## 9. Still open
 
 1. Which doctors count: all consultants, or only the press-conference doctor's patients?
 2. Deadline (the press conference date)?
 3. The doctor's answers on the drug names above
+
+### HbA1c "below 7" wording (2026-11-02)
+
+"Reached <7" counted everyone below 7 at follow-up, including patients already below 7 at the start. It is now labelled "Below 7", and a new figure shows patients who started at 7 or above and got below 7: 104 of 290 (35.9%) at 6 months and 76 of 224 (33.9%) at 12 months.
+
+### 12-month results hidden (2026-11-02)
+
+At the user's request, the summary page and the press workbook show the 6-month HbA1c and fasting sugar results only. The 12-month key-figure boxes, the 12-month HbA1c table, the Summary rows and the 12-month columns are removed. The INTERNAL details workbook still has 3, 6 and 12 months. "Active = prescribed in the last 12 months" and the "Change by time on GLP-1" table are unchanged.

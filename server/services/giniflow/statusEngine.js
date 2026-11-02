@@ -295,6 +295,23 @@ const SKIPPED_STATION_NAME = {
   with_rx: "Prescription Explain",
 };
 
+const SHORT_HOLD_MS = 5 * 60000;
+
+const shortHoldRows = (rows) => {
+  const short = new Set();
+  rows.forEach((row, i) => {
+    if (row.status !== "paused") return;
+    const back = rows.slice(i + 1).find((r) => r.status === "resumed" || r.status === "paused");
+    if (
+      back?.status === "resumed" &&
+      new Date(back.occurred_at) - new Date(row.occurred_at) < SHORT_HOLD_MS
+    ) {
+      short.add(row).add(back);
+    }
+  });
+  return short;
+};
+
 const markerLabel = (row) => {
   const base = STATUS_LABEL[row.status] || row.status;
   if (row.status === "paused" && isSampleBreak(row.meta?.reason)) return "On break — sample given";
@@ -372,9 +389,11 @@ export async function getStationTimes(
     );
 
   const statusRows = rows.filter((r) => !isMarkerStatus(r.status));
+  const shortHolds = shortHoldRows(rows);
   const markerRows = rows.filter(
     (r) =>
       isMarkerStatus(r.status) &&
+      !shortHolds.has(r) &&
       !(r.status === "test_cancelled" && r.meta?.reason === NOT_ON_BILL_REASON),
   );
 
@@ -781,7 +800,12 @@ export async function getStationTimes(
     entry.rank ?? eventRank.get(`${entry.status}|${new Date(entry.enteredAt).getTime()}`) ?? null;
 
   const arrivedBeforeBreak = statusRows
-    .filter((row) => JOURNEY_START_STATUSES.includes(row.status) && row.meta?.original_occurred_at)
+    .filter(
+      (row) =>
+        JOURNEY_START_STATUSES.includes(row.status) &&
+        row.meta?.original_occurred_at &&
+        !(Number(row.meta.shifted_for_pause_ms) < SHORT_HOLD_MS),
+    )
     .map((row) => ({
       status: "arrived_before_break",
       timestampOnly: true,
@@ -936,10 +960,13 @@ export async function resumeVisitTx(
     return { ok: true, paused: false, status, unchanged: true };
   }
 
-  const restart = hasNotStarted(status);
+  const shortHold = Date.now() - new Date(pausedAt).getTime() < SHORT_HOLD_MS;
+  const restart = !shortHold && hasNotStarted(status);
 
-  const shifted = await client.query(
-    `WITH gap AS (SELECT NOW() - $2::timestamptz AS d),
+  const shifted = shortHold
+    ? { rows: [] }
+    : await client.query(
+        `WITH gap AS (SELECT NOW() - $2::timestamptz AS d),
      anchors AS (
        SELECT id FROM (
          SELECT id FROM giniflow_visit_events
@@ -962,25 +989,29 @@ export async function resumeVisitTx(
               'shifted_for_pause_ms', (EXTRACT(EPOCH FROM (SELECT d FROM gap)) * 1000)::bigint)
       WHERE e.id IN (SELECT id FROM anchors)
       RETURNING e.id, e.status`,
-    [visitId, pausedAt, restart],
-  );
+        [visitId, pausedAt, restart],
+      );
 
-  await client.query(
-    `UPDATE giniflow_visit_steps
-        SET started_at = started_at + (NOW() - $2::timestamptz)
-      WHERE visit_id = $1 AND status = 'in_progress' AND started_at IS NOT NULL`,
-    [visitId, pausedAt],
-  );
+  if (!shortHold) {
+    await client.query(
+      `UPDATE giniflow_visit_steps
+          SET started_at = started_at + (NOW() - $2::timestamptz)
+        WHERE visit_id = $1 AND status = 'in_progress' AND started_at IS NOT NULL`,
+      [visitId, pausedAt],
+    );
+  }
 
   const upd = await client.query(
     `UPDATE giniflow_visits
         SET paused_at = NULL, paused_by = NULL, paused_reason = NULL,
             paused_ms_total = paused_ms_total
-              + GREATEST(0, (EXTRACT(EPOCH FROM (NOW() - $2::timestamptz)) * 1000)::bigint),
+              + CASE WHEN $3 THEN 0
+                     ELSE GREATEST(0, (EXTRACT(EPOCH FROM (NOW() - $2::timestamptz)) * 1000)::bigint)
+                END,
             updated_at = NOW()
       WHERE id = $1
       RETURNING paused_ms_total`,
-    [visitId, pausedAt],
+    [visitId, pausedAt, shortHold],
   );
   await client.query(
     `INSERT INTO giniflow_visit_events (visit_id, status, actor_role, actor_id, meta)

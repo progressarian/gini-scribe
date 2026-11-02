@@ -50,6 +50,7 @@ import {
   LIVE_LAB_CASE_SQL,
   caseFromEarlierLabOnlyVisit,
   caseSampledBeforeVisit,
+  caseTime,
 } from "./testsHold.js";
 import { billSuppressor } from "./testCancel.js";
 import {
@@ -1389,8 +1390,9 @@ export async function addLabStepsForArrivedLabCase(
   try {
     await client.query("BEGIN");
     await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR UPDATE`, [rows[0].id]);
-    const result =
-      (await billHasNoLab(client, rows[0].id)) || (await sampleTakenBeforeVisit(client, rows[0].id))
+    const result = (await sampleTakenBeforeVisit(client, rows[0].id))
+      ? await addEarlierLabSteps(client, rows[0].id)
+      : (await billHasNoLab(client, rows[0].id))
         ? { added: [] }
         : await insertLabStepsForOrder(client, rows[0].id);
     await client.query("COMMIT");
@@ -1454,14 +1456,68 @@ export async function insertLabStepsIfHealthrayCase(client, visitId) {
       WHERE v.id = $1`,
     [visitId],
   );
-  if (
-    !(rows[0]?.hr_cases > 0) ||
-    (await sampleTakenBeforeVisit(client, visitId)) ||
-    (await billHasNoLab(client, visitId))
-  ) {
-    return { added: [] };
-  }
+  if (!(rows[0]?.hr_cases > 0)) return { added: [] };
+  if (await sampleTakenBeforeVisit(client, visitId)) return addEarlierLabSteps(client, visitId);
+  if (await billHasNoLab(client, visitId)) return { added: [] };
   return insertLabStepsForOrder(client, visitId);
+}
+
+async function sampledEarlierAt(client, visitId) {
+  const { rows } = await client.query(
+    `SELECT min(LEAST(${caseTime("collected_on")}, ${caseTime("received_on")},
+                      ${caseTime("reported_on")})) AS sampled_at
+       FROM giniflow_visits v
+       JOIN patients p ON p.id = v.patient_id
+       JOIN lab_cases lc ON lc.case_date = v.visit_date
+        AND (lc.patient_id = v.patient_id
+             OR (lc.patient_id IS NULL
+                 AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
+      WHERE v.id = $1
+        AND ${LIVE_LAB_CASE_SQL("lc")}
+        AND ${caseSampledBeforeVisit("v")}
+        AND NOT ${caseFromEarlierLabOnlyVisit("v")}`,
+    [visitId],
+  );
+  return rows[0]?.sampled_at ?? null;
+}
+
+export async function addEarlierLabSteps(client, visitId) {
+  const sampledAt = await sampledEarlierAt(client, visitId);
+  if (!sampledAt) return { added: [] };
+  const result = await insertAutoSteps(client, visitId, ["lab_billing", "blood_sample"], (plan) => {
+    const vitals = plan.find((s) => s.step_catalog_id === "vitals");
+    const lastDone = plan.filter((s) => s.status === "done").pop();
+    const after = vitals ?? lastDone;
+    return after ? after.step_order + 1 : plan[0]?.step_order;
+  });
+  await client.query(
+    `UPDATE giniflow_visit_steps
+        SET status = 'done', started_at = COALESCE(started_at, $2), completed_at = COALESCE(completed_at, $2)
+      WHERE visit_id = $1 AND step_catalog_id = 'blood_sample' AND status IN ('pending', 'skipped')`,
+    [visitId, sampledAt],
+  );
+  await tickLabBillingIfLabBillPaid(client, visitId);
+  return result;
+}
+
+export async function tickLabBillingIfLabBillPaid(client, visitId) {
+  if (!visitId || !(await sampledEarlierAt(client, visitId))) return false;
+  const { rowCount } = await client.query(
+    `UPDATE giniflow_visit_steps s
+        SET status = 'done',
+            started_at = COALESCE(s.started_at, paid.at),
+            completed_at = COALESCE(s.completed_at, paid.at)
+       FROM (SELECT min(COALESCE((SELECT max(pm.received_at) FROM payments pm WHERE pm.bill_id = b.id),
+                                 b.updated_at)) AS at
+               FROM bills b
+              WHERE b.visit_id = $1 AND b.status = 'final' AND b.paid_amount >= b.patient_payable
+                AND EXISTS (SELECT 1 FROM bill_lines l
+                             WHERE l.bill_id = b.id AND l.is_live AND l.group_code = 'LAB')) paid
+      WHERE s.visit_id = $1 AND s.step_catalog_id = 'lab_billing'
+        AND s.status IN ('pending', 'in_progress', 'skipped') AND paid.at IS NOT NULL`,
+    [visitId],
+  );
+  return rowCount > 0;
 }
 
 export async function syncLabStepsFromLab(db, visitId) {
