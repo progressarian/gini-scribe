@@ -59,6 +59,15 @@ const NOISE_TOKENS = new Set([
   "analogue",
 ]);
 
+const GENERIC_NAMES = new Set([
+  "tirzepatide",
+  "semaglutide",
+  "liraglutide",
+  "dulaglutide",
+  "exenatide",
+  "lixisenatide",
+]);
+
 const MOLECULES = [
   {
     key: "tirzepatide",
@@ -76,8 +85,9 @@ const MOLECULES = [
       "monjero",
       "mounjao",
       "zepbound",
+      "yurpeak",
     ],
-    fuzzy: ["tirzepatide", "mounjaro", "zepbound"],
+    fuzzy: ["tirzepatide", "mounjaro", "zepbound", "yurpeak"],
   },
   {
     key: "semaglutide_oral",
@@ -94,19 +104,9 @@ const MOLECULES = [
     className: "GLP-1",
     incretin: true,
     defaultRoute: "injectable",
-    aliases: [
-      "semaglutide",
-      "ozempic",
-      "wegovy",
-      "semanex",
-      "semanext",
-      "semaglow",
-      "erly",
-      "gliptoza",
-      "jampi",
-      "oxemia",
-    ],
-    fuzzy: ["semaglutide", "ozempic", "wegovy", "semanext", "erly", "gliptoza"],
+    aliases: ["semaglutide", "ozempic", "wegovy", "semanex", "semanext", "semaglow", "jampi"],
+    wordAliases: ["vigovy"],
+    fuzzy: ["semaglutide", "ozempic", "wegovy", "semanext"],
   },
   {
     key: "liraglutide",
@@ -114,8 +114,9 @@ const MOLECULES = [
     className: "GLP-1",
     incretin: true,
     defaultRoute: "injectable",
-    aliases: ["liraglutide", "victoza", "saxenda", "lirafit"],
-    fuzzy: ["liraglutide", "victoza", "saxenda", "lirafit"],
+    aliases: ["liraglutide", "victoza", "saxenda", "lirafit", "erly", "gliptoza"],
+    wordAliases: ["erl", "erli", "erlt", "eryl", "erely"],
+    fuzzy: ["liraglutide", "victoza", "saxenda", "lirafit", "erly", "gliptoza"],
   },
   {
     key: "dulaglutide",
@@ -135,9 +136,21 @@ const MOLECULES = [
     aliases: ["exenatide", "byetta", "bydureon"],
     fuzzy: ["exenatide", "byetta", "bydureon"],
   },
+  {
+    key: "lixisenatide_glargine",
+    label: "Lixisenatide + insulin glargine",
+    className: "GLP-1 + insulin",
+    incretin: true,
+    defaultRoute: "injectable",
+    alsoClasses: ["insulin"],
+    aliases: ["soliqua", "saliqua", "lixisenatide"],
+    fuzzy: ["soliqua"],
+  },
 ];
 
-const GLP1_HINTS = [/\bglp[\s-]?1\b/i, /\bglp1ra?\b/i, /\bincretin\b/i];
+const NOT_PRESCRIBED = /\b(deferred|not\s+started|refused|declined|not\s+willing)\b/i;
+
+const GLP1_HINTS = [/\bglp[\s-]?1\b/i, /\bglp1ra?\b/i, /\bglp\b/i, /\bincretin\b/i];
 
 const LOCAL_BRANDS = {
   statin: /\b(atchol|lipvas|tonact|storvas|atorlip|rozat|rosufit|liponorm)\b/i,
@@ -151,6 +164,7 @@ const LOCAL_BRANDS = {
   antiplatelet: /\b(ecospirin|ecosprin|deplatt)\b/i,
   diuretic: /\b(dytor|lasilactone|aldactone)\b/i,
   supplement: /\b(aktiv|maxmala|racal|nefcm|amla candy|onecan)\b/i,
+  insulin: /\b(huminsulin|insugen|mixtard|actrapid|basalog|wosulin)\b/i,
 };
 
 const METFORMIN_FDC =
@@ -223,7 +237,7 @@ export function normalizeStoredClass(rawClass) {
   if (raw.includes("+")) {
     return raw
       .split("+")
-      .map((part) => RAW_CLASS_MAP[part.trim()] || null)
+      .flatMap((part) => RAW_CLASS_COMPONENTS[part.trim()] || [RAW_CLASS_MAP[part.trim()]])
       .filter(Boolean);
   }
   const mapped = RAW_CLASS_MAP[raw];
@@ -282,7 +296,20 @@ function matchMolecule(haystack, tokens) {
   const lower = haystack.toLowerCase();
   for (const spec of MOLECULES) {
     for (const alias of spec.aliases) {
+      if (GENERIC_NAMES.has(alias)) continue;
       if (lower.includes(alias)) return { spec, brand: alias, matched: "alias" };
+    }
+  }
+  for (const spec of MOLECULES) {
+    for (const alias of spec.wordAliases || []) {
+      if (tokens.includes(alias)) return { spec, brand: alias, matched: "alias" };
+    }
+  }
+  for (const spec of MOLECULES) {
+    for (const alias of spec.aliases) {
+      if (GENERIC_NAMES.has(alias) && lower.includes(alias)) {
+        return { spec, brand: alias, matched: "alias" };
+      }
     }
   }
   for (const spec of MOLECULES) {
@@ -345,6 +372,18 @@ export function normalizeDrug(med) {
       matched: "empty",
     };
   }
+  if (NOT_PRESCRIBED.test(haystack)) {
+    return {
+      molecule: null,
+      moleculeLabel: null,
+      brand: null,
+      classes: [],
+      className: null,
+      route: null,
+      isIncretin: false,
+      matched: "not_prescribed",
+    };
+  }
   const tokens = tokenize(haystack);
   const hit = matchMolecule(haystack, tokens);
 
@@ -358,7 +397,7 @@ export function normalizeDrug(med) {
       molecule: key,
       moleculeLabel: MOLECULE_LABELS[key],
       brand: hit.brand,
-      classes: ["glp1"],
+      classes: ["glp1", ...(hit.spec.alsoClasses || [])],
       className: "glp1",
       route,
       isIncretin: true,
@@ -366,9 +405,7 @@ export function normalizeDrug(med) {
     };
   }
 
-  const declaredGlp1 =
-    /glp/i.test(med?.drug_class || "") || GLP1_HINTS.some((p) => p.test(haystack));
-  if (declaredGlp1) {
+  if (GLP1_HINTS.some((p) => p.test(haystack))) {
     return {
       molecule: "glp1_unspecified",
       moleculeLabel: "GLP-1 (molecule not identified)",
@@ -395,7 +432,7 @@ export function normalizeDrug(med) {
     };
   }
 
-  const byStored = normalizeStoredClass(med?.drug_class);
+  const byStored = normalizeStoredClass(med?.drug_class).filter((c) => c !== "glp1");
   if (byStored.length) {
     return {
       molecule: null,

@@ -14,7 +14,7 @@ import { markMedicationVisitStatus } from "../medication/visitStatus.js";
 import { savePrescriptionForVisit, buildVisitPayloadFromDb } from "../prescriptionAutoSave.js";
 import { notesReadFor } from "./notesRead.js";
 import { normalizeWhenToTake } from "../../schemas/index.js";
-async function autoSavePrescriptionAfterSeen(patientId, appointmentId, consultationId) {
+async function saveRxAfterSeen(patientId, appointmentId, consultationId) {
   if (!patientId) return;
   if (appointmentId) {
     const { rows } = await pool.query(
@@ -55,6 +55,30 @@ async function autoSavePrescriptionAfterSeen(patientId, appointmentId, consultat
     titlePrefix: "Prescription — Visit",
     overwrite: true,
   });
+}
+
+const rxSavesInFlight = new Map();
+
+function autoSavePrescriptionAfterSeen(patientId, appointmentId, consultationId) {
+  const key = `${patientId}:${appointmentId ?? ""}:${consultationId ?? ""}`;
+  const running = rxSavesInFlight.get(key);
+  if (running) {
+    running.again = true;
+    return running.promise;
+  }
+  const entry = { again: false };
+  entry.promise = (async () => {
+    try {
+      do {
+        entry.again = false;
+        await saveRxAfterSeen(patientId, appointmentId, consultationId);
+      } while (entry.again);
+    } finally {
+      rxSavesInFlight.delete(key);
+    }
+  })();
+  rxSavesInFlight.set(key, entry);
+  return entry.promise;
 }
 
 export async function maybeAutoSavePrescription(appointmentId) {

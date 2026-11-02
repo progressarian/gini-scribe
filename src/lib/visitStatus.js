@@ -5,6 +5,7 @@ const MAP = {
   checkedin: { key: "checkedin", label: "Checked In", tone: "sky" },
   prepped: { key: "prepped", label: "Ready", tone: "teal" },
   no_show: { key: "no_show", label: "No Show", tone: "gray" },
+  cancelled: { key: "cancelled", label: "Cancelled", tone: "red" },
 };
 
 export function visitStatus(status) {

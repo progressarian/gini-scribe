@@ -289,6 +289,7 @@ const STATUS_COLORS = {
   checkedin: { dot: SK, bg: SKL, color: SK },
   prepped: { dot: T, bg: TL, color: T },
   no_show: { dot: BD2, bg: BG, color: INK3 },
+  cancelled: { dot: BD2, bg: BG, color: INK3 },
   pending: { dot: BD2, bg: BG, color: INK3 },
 };
 

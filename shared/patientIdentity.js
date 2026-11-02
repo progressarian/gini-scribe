@@ -114,8 +114,8 @@ export function identityProblems(p, { requiresCard = false, useOtherId = false }
       problems.govt_id = govtIdHint(p.govt_id_type);
     return problems;
   }
-  if (!filled(p.aadhaar))
-    problems.aadhaar = "Aadhaar is required for General patients, or use another govt ID.";
-  else if (!isValidAadhaar(p.aadhaar)) problems.aadhaar = aadhaarProblem(p.aadhaar);
+  if (filled(p.aadhaar) && !isValidAadhaar(p.aadhaar)) problems.aadhaar = aadhaarProblem(p.aadhaar);
   return problems;
 }
+
+export const hasIdNumber = (p) => filled(p?.aadhaar) || filled(p?.govt_id);

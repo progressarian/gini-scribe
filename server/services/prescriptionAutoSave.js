@@ -253,8 +253,17 @@ export async function savePrescriptionForVisit(pid, payload, opts = {}) {
     await pool.query("DELETE FROM documents WHERE id=$1", [docRow.id]);
     throw new Error(`Could not store the regenerated prescription (${uploadError})`);
   }
-  if (existing) {
-    await pool.query("DELETE FROM documents WHERE id=$1", [existing.id]);
+  if (!uploadError) {
+    await pool.query(
+      `DELETE FROM documents
+        WHERE patient_id = $1
+          AND consultation_id IS NOT DISTINCT FROM $2
+          AND ($2::int IS NOT NULL OR doc_date = $5::date)
+          AND doc_type = 'prescription'
+          AND source = $3
+          AND id < $4`,
+      [pid, consultationId, source, docRow.id, docRow.doc_date],
+    );
   }
 
   if (consultationId) {

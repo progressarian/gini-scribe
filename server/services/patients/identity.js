@@ -3,6 +3,7 @@ import { encryptAadhaar, encryptionReady } from "../../utils/aadhaarCrypt.js";
 import {
   aadhaarDigits,
   cleanGovtId,
+  hasIdNumber,
   identityProblems,
   schemeNeedsCard,
 } from "../../../shared/patientIdentity.js";
@@ -40,7 +41,8 @@ export async function checkNewPatientIdentity(p, db = pool) {
       error: "ID numbers can't be stored until the encryption key is set; ask an admin.",
     };
   }
-  return { identity, requiredScan: requiredScanKind(identity.scheme_code, scheme) };
+  const scan = requiredScanKind(identity.scheme_code, scheme);
+  return { identity, requiredScan: scan === "id_proof" && !hasIdNumber(identity) ? null : scan };
 }
 
 const needsCard = (scheme) =>

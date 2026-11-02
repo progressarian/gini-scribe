@@ -5,6 +5,7 @@ import {
   GOVT_ID_TYPES,
   aadhaarDigits,
   formatAadhaar,
+  hasIdNumber,
   identityProblems,
   schemeNeedsCard,
 } from "../../../shared/patientIdentity.js";
@@ -26,15 +27,15 @@ const requiresCard = (code) => {
   return schemeNeedsCard(code, meta?.parent, meta?.requiresRef);
 };
 
-export const requiredScan = (code) =>
-  !code ? "id_proof" : requiresCard(code) ? "scheme_card" : null;
+export const requiredScan = (code, identity) =>
+  !code ? (hasIdNumber(identity) ? "id_proof" : null) : requiresCard(code) ? "scheme_card" : null;
 
 export function registrationProblems(identity, files, { withFiles = true } = {}) {
   const problems = identityProblems(identity, {
     requiresCard: requiresCard(identity.scheme_code),
     useOtherId: !identity.scheme_code && identity.use_other_id,
   });
-  const scan = requiredScan(identity.scheme_code);
+  const scan = requiredScan(identity.scheme_code, identityPayload(identity));
   if (withFiles && scan && !files?.[scan]) {
     problems[scan] =
       scan === "scheme_card" ? "Scan or upload the card." : "Scan or upload the ID proof.";
@@ -178,11 +179,7 @@ export default function RegistrationIdentityFields({
         )}
 
         {(!general || !value.use_other_id) && (
-          <Field
-            id={`${uid}-aadhaar`}
-            label={general ? "Aadhaar number *" : "Aadhaar number (optional)"}
-            error={shown("aadhaar")}
-          >
+          <Field id={`${uid}-aadhaar`} label="Aadhaar number (optional)" error={shown("aadhaar")}>
             <input
               className="regid__input"
               value={formatAadhaar(value.aadhaar)}
@@ -192,7 +189,7 @@ export default function RegistrationIdentityFields({
               maxLength={14}
               autoComplete="off"
               {...inputProps("aadhaar")}
-              aria-required={general ? "true" : undefined}
+              aria-required={undefined}
             />
           </Field>
         )}
@@ -245,7 +242,7 @@ export default function RegistrationIdentityFields({
           {general && (
             <CaptureSlot
               label={value.use_other_id ? "ID proof scan" : "Aadhaar scan"}
-              required
+              required={hasIdNumber(identityPayload(value))}
               facing="environment"
               value={files.id_proof}
               onChange={(item) => setFile("id_proof", item)}

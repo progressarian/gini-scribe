@@ -1,6 +1,7 @@
 import { MARKERS, MARKER_KEYS } from "./constants.js";
 
 const EARLIEST_VALID_DATE = "2015-01-01";
+const HEALTHRAY_NOTE_SOURCE = "healthray";
 
 function buildUnionSql(markerKeys, params) {
   const parts = [];
@@ -11,7 +12,7 @@ function buildUnionSql(markerKeys, params) {
       params.push(key, spec.canonical, spec.min, spec.max);
       const i = params.length;
       parts.push(
-        `SELECT patient_id, $${i - 3}::text AS marker, test_date AS d, result::float8 AS val
+        `SELECT patient_id, $${i - 3}::text AS marker, test_date AS d, result::float8 AS val, source AS src
            FROM lab_results
           WHERE canonical_name = ANY($${i - 2}::text[])
             AND result IS NOT NULL
@@ -23,7 +24,7 @@ function buildUnionSql(markerKeys, params) {
       params.push(key, spec.min, spec.max);
       const i = params.length;
       parts.push(
-        `SELECT patient_id, $${i - 2}::text AS marker, recorded_at::date AS d, ${spec.vitalsColumn}::float8 AS val
+        `SELECT patient_id, $${i - 2}::text AS marker, recorded_at::date AS d, ${spec.vitalsColumn}::float8 AS val, 'vitals'::text AS src
            FROM vitals
           WHERE ${spec.vitalsColumn} IS NOT NULL
             AND ${spec.vitalsColumn}::float8 BETWEEN $${i - 1}::float8 AND $${i}::float8
@@ -34,7 +35,7 @@ function buildUnionSql(markerKeys, params) {
   return parts.join("\n UNION ALL \n");
 }
 
-function dedupedCte(markerKeys, params, asOf) {
+function dedupedCte(markerKeys, params, asOf, { dropCopies = false } = {}) {
   const union = buildUnionSql(markerKeys, params);
   params.push(EARLIEST_VALID_DATE, asOf);
   const lo = params.length - 1;
@@ -44,14 +45,24 @@ function dedupedCte(markerKeys, params, asOf) {
       ${union}
     ),
     filtered AS (
-      SELECT patient_id, marker, d, val
+      SELECT patient_id, marker, d, val, src
         FROM raw
        WHERE patient_id IS NOT NULL
          AND d BETWEEN $${lo}::date AND $${hi}::date
     ),
+    first_seen AS (
+      SELECT patient_id, marker, d, val, src,
+             MIN(d) OVER (PARTITION BY patient_id, marker, val) AS value_first_date
+        FROM filtered
+    ),
+    kept AS (
+      SELECT patient_id, marker, d, val
+        FROM first_seen
+       ${dropCopies ? `WHERE NOT (src = '${HEALTHRAY_NOTE_SOURCE}' AND value_first_date < d)` : ""}
+    ),
     dedup AS (
       SELECT patient_id, marker, d, MAX(val) AS val
-        FROM filtered
+        FROM kept
        GROUP BY patient_id, marker, d
     )`;
 }
@@ -102,10 +113,13 @@ export async function getMarkerCoverage(db, { markers = MARKER_KEYS, asOf } = {}
   return rows;
 }
 
-export async function getWindowedOutcomes(db, { cohort, markers, asOf, baseline, windows } = {}) {
+export async function getWindowedOutcomes(
+  db,
+  { cohort, markers, asOf, baseline, windows, dropCopies = false } = {},
+) {
   if (!cohort || !cohort.length) return [];
   const params = [];
-  const cte = dedupedCte(markers, params, asOf);
+  const cte = dedupedCte(markers, params, asOf, { dropCopies });
 
   params.push(cohort.map((c) => c.patient_id));
   const idsIdx = params.length;
@@ -166,14 +180,31 @@ export async function getWindowedOutcomes(db, { cohort, markers, asOf, baseline,
   return rows;
 }
 
-export async function getLatestMarkerValues(db, { markers, asOf } = {}) {
+export async function getLatestMarkerValues(db, { markers, asOf, dropCopies = false } = {}) {
   const params = [];
-  const cte = dedupedCte(markers, params, asOf);
+  const cte = dedupedCte(markers, params, asOf, { dropCopies });
   const sql = `
     WITH ${cte}
     SELECT DISTINCT ON (patient_id, marker) patient_id, marker, d AS test_date, val
       FROM dedup
      ORDER BY patient_id, marker, d DESC`;
+  const { rows } = await db.query(sql, params);
+  return rows;
+}
+
+export async function getMarkerReadings(
+  db,
+  { markers, asOf, patientIds, dropCopies = false } = {},
+) {
+  const params = [];
+  const cte = dedupedCte(markers, params, asOf, { dropCopies });
+  params.push(patientIds);
+  const sql = `
+    WITH ${cte}
+    SELECT patient_id, marker, d::text AS d, val
+      FROM dedup
+     WHERE patient_id = ANY($${params.length}::int[])
+     ORDER BY patient_id, marker, d`;
   const { rows } = await db.query(sql, params);
   return rows;
 }

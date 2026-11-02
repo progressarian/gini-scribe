@@ -100,7 +100,11 @@ function daysBetween(a, b) {
   return Math.round((y - x) / 86400000);
 }
 
-export async function computeOutcomes(db, cohorts, { asOf, markers = OUTCOME_MARKERS } = {}) {
+export async function computeOutcomes(
+  db,
+  cohorts,
+  { asOf, markers = OUTCOME_MARKERS, dropCopies = false } = {},
+) {
   const input = cohorts.map((c) => ({
     patient_id: c.patient_id,
     index_date: c.index_date,
@@ -112,6 +116,7 @@ export async function computeOutcomes(db, cohorts, { asOf, markers = OUTCOME_MAR
     asOf,
     baseline: BASELINE_WINDOW,
     windows: OUTCOME_WINDOWS,
+    dropCopies,
   });
 
   const byCohortMarkerWindow = new Map();
@@ -401,4 +406,4 @@ function extractDose(row) {
   return null;
 }
 
-export { COMPARATOR_ARMS, round };
+export { COMPARATOR_ARMS, round, extractDose };
