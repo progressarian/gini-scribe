@@ -87,7 +87,11 @@ const caseMatches = (v, p) =>
           OR (lc.patient_id IS NULL
               AND lc.raw_list_json->'patient'->>'healthray_uid' = ${p}.file_no))`;
 
-export const caseTime = (field) =>
+const caseDoneAt = `(SELECT min(a.created_at) FROM giniflow_lab_case_actions a
+                      WHERE a.case_no = lc.case_no
+                        AND a.action IN ('report_uploaded', 'sent_outside'))`;
+
+const caseTime = (field) =>
   `(COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'${field}')::timestamptz`;
 
 const visitArrival = (v) =>
@@ -113,12 +117,6 @@ export const caseSampledBeforeVisit = (v) =>
   `COALESCE(LEAST(${caseTime("collected_on")}, ${caseTime("received_on")}, ${caseTime("reported_on")})
             < ${visitArrival(v)}, FALSE)`;
 
-const caseDoneAt = (v) =>
-  `COALESCE((SELECT min(a.created_at) FROM giniflow_lab_case_actions a
-              WHERE a.case_no = lc.case_no
-                AND a.action IN ('report_uploaded', 'sent_outside')),
-            CASE WHEN ${caseSampledBeforeVisit(v)} THEN ${caseTime("reported_on")} END)`;
-
 const caseWorkedAsOrder = (v) =>
   `EXISTS (SELECT 1 FROM giniflow_lab_orders lo
             WHERE lo.visit_id = ${v}.id AND lo.urgency = 'today' AND lo.kind = 'lab')`;
@@ -134,13 +132,13 @@ export const TESTS_HOLD_SQL = (v = "v", p = "p") => `
           AND NOT ${caseReportedBeforeVisit(v)}
           AND NOT ${caseFromEarlierLabOnlyVisit(v)}
           AND ${LIVE_LAB_CASE_SQL("lc")}
-          AND ${caseDoneAt(v)} IS NULL) AS tests_pending,
+          AND ${caseDoneAt} IS NULL) AS tests_pending,
     GREATEST(
       (SELECT max(e.occurred_at) FROM giniflow_lab_order_events e
          JOIN giniflow_lab_orders o ON o.id = e.lab_order_id
         WHERE o.visit_id = ${v}.id AND o.urgency = 'today'
           AND e.track = 'sample' AND e.status IN ('uploaded', 'reported', 'sent_outside')),
-      (SELECT max(${caseDoneAt(v)}) FROM lab_cases lc
+      (SELECT max(${caseDoneAt}) FROM lab_cases lc
         WHERE ${caseMatches(v, p)} AND NOT ${caseWorkedAsOrder(v)}
           AND NOT ${caseFromEarlierLabOnlyVisit(v)}
           AND ${LIVE_LAB_CASE_SQL("lc")})

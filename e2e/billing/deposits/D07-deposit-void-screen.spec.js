@@ -39,7 +39,13 @@ test.describe.serial("D07 counter: void a wrongly taken deposit receipt", () => 
     ids.draft = (await draftWith(ids, "UiVoid", [{ item: ids.brace }])).bill;
     ids.taken = await deposits.receiveDeposit(
       ids.draft.patient_id,
-      { mode: "upi", amount: 1125, reference: `UPI-${tag}`, note: "entered by mistake" },
+      {
+        mode: "upi",
+        upi_app: "paytm",
+        amount: 1125,
+        reference: `UPI-${tag}`,
+        note: "entered by mistake",
+      },
       desk,
       db,
     );

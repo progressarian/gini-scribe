@@ -210,6 +210,12 @@ const NAV_ITEMS = [
     show: () => true,
   },
   {
+    path: "/billing/dashboard",
+    label: "📈 Billing Dashboard",
+    cap: C["/billing/dashboard"],
+    show: () => true,
+  },
+  {
     path: "/billing/reports",
     label: "💹 Billing Reports",
     cap: C["/billing/reports"],

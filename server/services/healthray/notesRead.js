@@ -33,8 +33,25 @@ export async function markNotesReadHash(appointmentId, status, hash, db = pool) 
   );
 }
 
+export const NOTES_RETRY = "retry";
+
+async function markNotesForRetry(appointmentId, db = pool) {
+  if (!appointmentId) return;
+  if (!(await markerReady())) return;
+  await db.query(
+    `UPDATE appointments
+        SET notes_read_status = NULL, notes_read_hash = NULL, notes_read_at = NOW()
+      WHERE id = $1`,
+    [appointmentId],
+  );
+}
+
+export const notesRetryDue = (row) => Boolean(row?.notes_read_at) && !row?.notes_read_status;
+
 export const markNotesRead = (appointmentId, status, text, db = pool) =>
-  markNotesReadHash(appointmentId, status, notesHash(text), db);
+  status === NOTES_RETRY
+    ? markNotesForRetry(appointmentId, db)
+    : markNotesReadHash(appointmentId, status, notesHash(text), db);
 
 export async function notesReadFor(appointmentId, db = pool) {
   if (!appointmentId) return false;

@@ -69,7 +69,12 @@ async function billed(
 }
 
 const full = (mode, reference) => (bill) => [
-  { mode, amount: bill.totals.payable / 100, ...(reference ? { reference } : {}) },
+  {
+    mode,
+    amount: bill.totals.payable / 100,
+    ...(reference ? { reference } : {}),
+    ...(mode === "upi" ? { upi_app: "paytm" } : {}),
+  },
 ];
 
 const withCodes = (lines, codes) => Object.assign(lines, { codes });
@@ -218,7 +223,7 @@ async function seedDeposits(ids, patientId) {
     (await one(`SELECT patient_id FROM bills WHERE id = $1`, [ids.bills.cash])).patient_id;
   await deposits.receiveDeposit(
     patient,
-    { mode: "upi", amount: 900, reference: `P5-${ids.tag}` },
+    { mode: "upi", upi_app: "paytm", amount: 900, reference: `P5-${ids.tag}` },
     desk,
     db,
   );

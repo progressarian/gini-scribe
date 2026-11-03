@@ -292,8 +292,10 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
       await pad(desk).getByLabel("Amount").fill("1000");
       await expect(pad(desk).getByRole("button", { name: /^Take payment/ })).toBeDisabled();
       await expect(
-        pad(desk).getByText("Add the reference for each card or UPI payment."),
+        pad(desk).getByText("Add the reference for each card, UPI or NEFT / cheque payment."),
       ).toBeVisible();
+      await expect(pad(desk).getByText("Choose the UPI app for each UPI payment.")).toBeVisible();
+      await pad(desk).getByLabel("UPI app").selectOption("paytm");
       await pad(desk).getByLabel("Reference").fill(`UPI${day.T}01`);
       await pad(desk).getByRole("button", { name: "Split payment" }).click();
       await pad(desk).getByLabel("Mode").nth(1).selectOption("cash");

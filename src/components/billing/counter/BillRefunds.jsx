@@ -22,6 +22,7 @@ const toRupees = (paise) => (Math.max(0, paise) / 100).toFixed(2).replace(/\.00$
 const REFERENCE_HINT = {
   card: "Card reversal reference",
   upi: "UPI reversal transaction ID",
+  neft: "NEFT UTR or cheque no.",
 };
 
 const rowsFor = (note) =>
@@ -128,7 +129,9 @@ function PayOut({ note, bill, onPaid }) {
         ))}
       </div>
       {missingReference && (
-        <div className="bc-hint">Add the reversal reference for each card or UPI refund.</div>
+        <div className="bc-hint">
+          Add the reversal reference for each card, UPI or NEFT / cheque refund.
+        </div>
       )}
       <button
         type="button"

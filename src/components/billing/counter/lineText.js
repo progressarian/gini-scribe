@@ -1,9 +1,13 @@
 import {
   DEPOSIT_MODE,
   HEALTHRAY_MODE,
+  NEFT_LABEL,
+  NEFT_MODE,
   ORDER_STATE,
   PREPAID_LABEL,
   PREPAID_MODE,
+  UPI_MODE,
+  upiAppText,
 } from "../../../../shared/billingVocab.js";
 
 export const ORDER_STATE_LABEL = {
@@ -57,16 +61,23 @@ export const requestStatusText = (status) => REQUEST_STATUS_LABEL[status] ?? sta
 
 export const PAYMENT_MODE_LABEL = { cash: "Cash", card: "Card", upi: "UPI" };
 
+export const TAKE_MODE_LABEL = { ...PAYMENT_MODE_LABEL, [NEFT_MODE]: NEFT_LABEL };
+
+export const needsUpiApp = (mode) => mode === UPI_MODE;
+
 export const HEALTHRAY_LABEL = "Paid in HealthRay";
 
 export const PAID_MODE_LABEL = {
-  ...PAYMENT_MODE_LABEL,
+  ...TAKE_MODE_LABEL,
   [HEALTHRAY_MODE]: HEALTHRAY_LABEL,
   [DEPOSIT_MODE]: "Paid from deposit",
   [PREPAID_MODE]: PREPAID_LABEL,
 };
 
 export const paymentModeText = (mode) => PAID_MODE_LABEL[mode] ?? mode ?? "";
+
+export const takenModeText = (mode, upiApp) =>
+  [TAKE_MODE_LABEL[mode] ?? paymentModeText(mode), upiAppText(upiApp)].filter(Boolean).join(" · ");
 
 const PAY_OUT_LABEL = {
   [HEALTHRAY_MODE]: "Refunded in HealthRay",
@@ -77,14 +88,14 @@ export const payOutText = (mode) => PAY_OUT_LABEL[mode] ?? `${paymentModeText(mo
 
 export const REFUND_MODE_LABEL = {
   as_paid: "Back the way it was paid",
-  ...PAYMENT_MODE_LABEL,
+  ...TAKE_MODE_LABEL,
   [HEALTHRAY_MODE]: "Refunded in HealthRay",
   [DEPOSIT_MODE]: "Keep as deposit for the patient",
 };
 
 export const refundModeText = (mode) => REFUND_MODE_LABEL[mode] ?? mode ?? "";
 
-const MODE_WORD = { cash: "cash", card: "card", upi: "UPI" };
+const MODE_WORD = { cash: "cash", card: "card", upi: "UPI", [NEFT_MODE]: "NEFT / cheque" };
 
 const legText = (leg, money) => {
   if (leg.mode === HEALTHRAY_MODE) return `${money(leg.amount)} in HealthRay`;

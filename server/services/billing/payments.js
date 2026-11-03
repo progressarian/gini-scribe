@@ -12,13 +12,21 @@ import {
   AS_PAID,
   DEPOSIT_MODE,
   HEALTHRAY_MODE,
+  NEFT_MODE,
   PREPAID_MODE,
   ORDER_STATE,
 } from "../../../shared/billingVocab.js";
 import { holdFor, recordApplied, restoreToDeposit } from "./deposits.js";
 import { writeAudit } from "./audit.js";
 import { nextNumber, seriesFor } from "./billNumber.js";
-import { cashOutShift, DRAWER_MODE, openShiftIdFor, PAYMENT_MODES } from "./cashShifts.js";
+import {
+  cashOutShift,
+  DRAWER_MODE,
+  openShiftIdFor,
+  PAYMENT_MODES,
+  TAKE_MODES,
+} from "./cashShifts.js";
+import { cleanUpiApp } from "./upiApp.js";
 import { DUE_BILLS, DUE_DAYS, DUE_MONEY, DUE_OUTSTANDING, shapeDue } from "./dues.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { TEST_MATCHES_SQL } from "./testMatch.js";
@@ -46,12 +54,13 @@ const MODE_LABEL = {
   cash: "cash",
   card: "card",
   upi: "UPI",
+  [NEFT_MODE]: "NEFT / cheque",
   healthray: "HealthRay",
   deposit: "deposit",
   prepaid: "paid earlier / online",
 };
 
-const PAY_OUT_MODES = [...PAYMENT_MODES, HEALTHRAY_MODE, PREPAID_MODE];
+const PAY_OUT_MODES = [...TAKE_MODES, HEALTHRAY_MODE, PREPAID_MODE];
 
 const NO_REFERENCE = [DRAWER_MODE, HEALTHRAY_MODE, DEPOSIT_MODE];
 const NO_DRAWER = [HEALTHRAY_MODE, DEPOSIT_MODE, PREPAID_MODE];
@@ -72,7 +81,8 @@ const TAKING = {
   amount: "The amount taken",
   positive: "The amount taken must be more than zero",
   mode: "A payment must be taken as one of",
-  modes: [...PAYMENT_MODES, DEPOSIT_MODE, PREPAID_MODE],
+  modes: [...TAKE_MODES, DEPOSIT_MODE, PREPAID_MODE],
+  upiApp: true,
   reference: (mode) => `A ${MODE_LABEL[mode]} payment needs its reference number`,
   none: "Enter the payment being taken",
   many: `At most ${PAYMENTS_AT_ONCE} payments can be taken at once`,
@@ -123,7 +133,8 @@ function cleanPayment(entry, words) {
   if (reference.length > REFERENCE_MAX) {
     throw httpError(400, `The reference is too long — keep it under ${REFERENCE_MAX} letters`);
   }
-  return { mode, amount, reference: reference || null };
+  const upiApp = words.upiApp ? cleanUpiApp(mode, entry?.upi_app) : null;
+  return { mode, amount, reference: reference || null, upi_app: upiApp };
 }
 
 function cleanPayments(input, words = TAKING) {
@@ -144,6 +155,7 @@ function shapePayment(row) {
     mode: row.mode,
     amount: paise(row.amount),
     reference: row.reference,
+    upi_app: row.upi_app ?? null,
     paid_via: row.paid_via ?? null,
     receipt_no: row.receipt_no,
     shift_id: row.shift_id,
@@ -152,7 +164,7 @@ function shapePayment(row) {
   };
 }
 
-const PAYMENT_COLUMNS = `id, bill_id, direction, mode, amount, reference, paid_via, receipt_no,
+const PAYMENT_COLUMNS = `id, bill_id, direction, mode, amount, reference, upi_app, paid_via, receipt_no,
   shift_id, received_by, received_at`;
 
 export const MONEY_COLUMNS = `b.patient_payable,
@@ -206,10 +218,8 @@ async function keepPaidInStep(client, bill, ctx) {
 
 async function tickBillingStep(client, bill) {
   if (!bill.visit_id) return;
-  const { tickBillingIfConsultPaid, tickLabBillingIfLabBillPaid } =
-    await import("../giniflow/journey.js");
+  const { tickBillingIfConsultPaid } = await import("../giniflow/journey.js");
   await tickBillingIfConsultPaid(client, bill.id, bill.visit_id);
-  await tickLabBillingIfLabBillPaid(client, bill.visit_id);
 }
 
 async function syncLabSteps(client, visitId) {
@@ -670,8 +680,8 @@ async function collectOnBill(billId, version, plan, ctx, db) {
       const receipt = await nextNumber(client, seriesFor("receipt"), null, ctx);
       const { rows } = await client.query(
         `INSERT INTO payments (bill_id, mode, amount, reference, receipt_no, shift_id,
-                               received_by, created_by, updated_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $7)
+                               received_by, created_by, updated_by, upi_app)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $7, $8)
          RETURNING ${PAYMENT_COLUMNS}`,
         [
           bill.id,
@@ -681,6 +691,7 @@ async function collectOnBill(billId, version, plan, ctx, db) {
           receipt.number,
           shiftFor(payment.mode, shiftId),
           ctx?.actorId ?? null,
+          payment.upi_app ?? null,
         ],
       );
       taken.push(shapePayment(rows[0]));

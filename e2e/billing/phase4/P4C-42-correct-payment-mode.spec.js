@@ -69,7 +69,12 @@ test.describe.serial("P4C-42 correcting a payment's mode", () => {
 
     await correctPaymentMode(
       ids.first.paymentId,
-      { mode: "upi", reference: `UPI-${tag}`, reason: "Paid by UPI, entered as cash" },
+      {
+        mode: "upi",
+        upi_app: "paytm",
+        reference: `UPI-${tag}`,
+        reason: "Paid by UPI, entered as cash",
+      },
       desk,
       db,
     );
@@ -184,11 +189,12 @@ test.describe.serial("P4C-42 correcting a payment's mode", () => {
     await page.getByRole("button", { name: /^Correct .* payment$/ }).click();
     const form = page.getByRole("form", { name: "Correct how it was paid" });
     await form.getByRole("combobox", { name: /^Really paid by/ }).selectOption("upi");
+    await form.getByRole("combobox", { name: "UPI app" }).selectOption("paytm");
     await form.getByRole("textbox", { name: "Reference" }).fill(`UPI-S-${tag}`);
     await form.getByRole("textbox", { name: "Reason" }).fill("Paid by UPI, typed as cash");
     await form.getByRole("button", { name: "Save correction" }).click();
 
-    await expect(received).toContainText(`UPI · UPI-S-${tag}`);
+    await expect(received).toContainText(`UPI · Paytm · UPI-S-${tag}`);
     await expect(form).toHaveCount(0);
   });
 });

@@ -21,6 +21,7 @@ import { slotStartTime } from "../../../shared/slotHour.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { LAB_ONLY_STEP_NAMES } from "../../../shared/labOnly.js";
 import { advanceStatus, IST_TODAY } from "./statusEngine.js";
+import { skipsChiefStop } from "./journey.js";
 import { recordHealthrayObservation, firstUnrecordedStation } from "./observation.js";
 import { LIVE_LAB_CASE_SQL, TESTS_HOLD_SQL, testsOpenInScribe } from "./testsHold.js";
 import { canReadBill, syncBillingForVisitId } from "./machineSync.js";
@@ -658,7 +659,7 @@ async function syncDay(day, db) {
     }
 
     for (const appt of appts) {
-      const target = onlineTarget(appt, healthrayTarget(appt.status, HEALTHRAY_STATUS_TO_CHAIN));
+      let target = onlineTarget(appt, healthrayTarget(appt.status, HEALTHRAY_STATUS_TO_CHAIN));
       if (!target) {
         result.skipped++;
         continue;
@@ -753,6 +754,8 @@ async function syncDay(day, db) {
           result.created++;
         }
 
+        const chiefNotPlanned = target === "sd_pending" && (await skipsChiefStop(client, visitId));
+        if (chiefNotPlanned) target = "ready_for_doctor";
         if (!mayWrite(target) || absentAfterArrival(currentStatus, target)) {
           await client.query("COMMIT");
           result.refused++;
@@ -815,6 +818,7 @@ async function syncDay(day, db) {
           healthray_status: appt.status,
           appointment_id: appt.id,
           observed_from: currentStatus,
+          ...(chiefNotPlanned ? { chief_not_planned: true } : {}),
         };
         if (
           healthrayMayWrite("checked_in") &&

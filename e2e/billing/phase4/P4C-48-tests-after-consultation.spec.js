@@ -187,6 +187,7 @@ test.describe.serial("P4C-48 tests ordered once the consultation started stand a
         {
           version: bill.version,
           mode: "upi",
+          upi_app: "paytm",
           amount: bill.totals.payable / 100,
           reference: `UPI${Date.now()}`,
         },

@@ -422,7 +422,7 @@ test.describe.serial("P4C-43 check in and bill in one step", () => {
     const preview = await arrival.arrivalBillPreview(made.visit, {}, desk, db);
     const first = await arrival.commitArrivalBill(
       made.visit,
-      { expectedTotal: preview.outstanding, mode: "upi", reference: `U-${tag}` },
+      { expectedTotal: preview.outstanding, mode: "upi", upiApp: "paytm", reference: `U-${tag}` },
       desk,
       db,
     );
@@ -473,7 +473,7 @@ test.describe.serial("P4C-43 check in and bill in one step", () => {
           expectedTotal: 200000,
           split: [
             { mode: "card", amount: 100000, reference: `C-${tag}` },
-            { mode: "upi", amount: 50000, reference: `U-${tag}` },
+            { mode: "upi", upiApp: "paytm", amount: 50000, reference: `U-${tag}` },
           ],
         },
         desk,
@@ -487,7 +487,7 @@ test.describe.serial("P4C-43 check in and bill in one step", () => {
           expectedTotal: 200000,
           split: [
             { mode: "card", amount: 100000, reference: `C-${tag}` },
-            { mode: "upi", amount: 100000 },
+            { mode: "upi", upiApp: "paytm", amount: 100000 },
           ],
         },
         desk,
@@ -501,7 +501,7 @@ test.describe.serial("P4C-43 check in and bill in one step", () => {
         expectedTotal: 200000,
         split: [
           { mode: "card", amount: 120000, reference: `C-${tag}` },
-          { mode: "upi", amount: 80000, reference: `U-${tag}` },
+          { mode: "upi", upiApp: "paytm", amount: 80000, reference: `U-${tag}` },
         ],
       },
       desk,
@@ -623,6 +623,8 @@ test.describe.serial("P4C-43 check in and bill in one step", () => {
     await expect(press).toBeDisabled();
     await expect(bill.getByRole("alert")).toHaveText("Enter the UPI reference number for part 2.");
     await split.getByLabel("Part 2 reference").fill(`SU-${tag}`);
+    await expect(bill.getByRole("alert")).toHaveText("Choose the UPI app for part 2.");
+    await split.getByLabel("Part 2 UPI app").selectOption("bharatpe");
     await expect(split.getByRole("status")).toContainText("₹2,000 of ₹2,000 ✓");
     await expect(bill.getByRole("alert")).toHaveCount(0);
     await press.click();
@@ -765,7 +767,7 @@ test.describe.serial("P4C-43 check in and bill in one step", () => {
     ]);
     const split = [
       { mode: "card", amount: 200000, reference: `XC-${tag}` },
-      { mode: "upi", amount: 50000, reference: `XU-${tag}` },
+      { mode: "upi", upiApp: "paytm", amount: 50000, reference: `XU-${tag}` },
     ];
     await expect(
       arrival.commitArrivalBill(made.visit, { expectedTotal: 200000, split }, desk, db),

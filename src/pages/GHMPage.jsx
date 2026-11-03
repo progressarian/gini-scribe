@@ -116,7 +116,7 @@ import { qk } from "../queries/keys";
 import { toast } from "../stores/uiStore";
 import { visitStatus } from "../lib/visitStatus.js";
 import { isEarlierVisitDue, isNewVisitType } from "../../shared/patientLists.js";
-import { isInvestigationVisit } from "../../shared/labOnly.js";
+import { isInvestigationVisit, LAB_ONLY_DOCTOR } from "../../shared/labOnly.js";
 import RegistrationIdentityFields, {
   EMPTY_IDENTITY,
   identityPayload,
@@ -4310,6 +4310,18 @@ export default function GHMPage() {
                                     >
                                       <Star size={11} aria-hidden="true" />
                                       Preferred
+                                    </span>
+                                  )}
+                                  {row.replaced_doctor && (
+                                    <span
+                                      className="pref-tag"
+                                      title={`Another booking today with ${row.replaced_doctor} was cancelled — this is the booking that stands`}
+                                    >
+                                      {row.doctor_name === LAB_ONLY_DOCTOR
+                                        ? `Consult with ${row.replaced_doctor} cancelled`
+                                        : row.replaced_doctor === row.doctor_name
+                                          ? "Rebooked"
+                                          : `Doctor changed from ${row.replaced_doctor}`}
                                     </span>
                                   )}
                                   {row.booked_on && (

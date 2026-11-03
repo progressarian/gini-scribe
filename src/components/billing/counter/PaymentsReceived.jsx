@@ -2,9 +2,15 @@ import { useState } from "react";
 import { useCorrectPaymentMode } from "../../../queries/hooks/useBilling";
 import { errorOf, fromPaise } from "../format";
 import { HEALTHRAY_MODE } from "../../../../shared/billingVocab";
-import { PAYMENT_MODE_LABEL, paymentModeText } from "./lineText";
+import { needsUpiApp, paymentModeText, TAKE_MODE_LABEL, takenModeText } from "./lineText";
+import UpiAppField from "./UpiAppField";
 
-const MODES = Object.keys(PAYMENT_MODE_LABEL);
+const MODES = Object.keys(TAKE_MODE_LABEL);
+
+const REFERENCE_HINT = {
+  upi: "UPI transaction ID",
+  neft: "UTR or cheque no.",
+};
 
 const isHealthray = (payment) => payment.mode === HEALTHRAY_MODE;
 
@@ -12,8 +18,10 @@ const currentMode = (payment) => (isHealthray(payment) ? payment.paid_via : paym
 
 const modeText = (payment) =>
   [
-    paymentModeText(payment.mode),
-    isHealthray(payment) && payment.paid_via && PAYMENT_MODE_LABEL[payment.paid_via],
+    isHealthray(payment)
+      ? paymentModeText(payment.mode)
+      : takenModeText(payment.mode, payment.upi_app),
+    isHealthray(payment) && payment.paid_via && takenModeText(payment.paid_via, payment.upi_app),
     payment.reference,
   ]
     .filter(Boolean)
@@ -33,9 +41,11 @@ function CorrectForm({ bill, payment, onDone, onCancel }) {
   const healthray = isHealthray(payment);
   const [mode, setMode] = useState(MODES.find((m) => m !== currentMode(payment)) || "cash");
   const [reference, setReference] = useState("");
+  const [upiApp, setUpiApp] = useState("");
   const [reason, setReason] = useState("");
   const [error, setError] = useState(null);
   const needsReference = mode !== "cash";
+  const needsApp = needsUpiApp(mode);
 
   const save = async (e) => {
     e.preventDefault();
@@ -47,6 +57,7 @@ function CorrectForm({ bill, payment, onDone, onCancel }) {
         visitId: bill.visit_id,
         mode,
         reference: needsReference ? reference.trim() : null,
+        upiApp: needsApp ? upiApp : null,
         reason: reason.trim(),
       });
       onDone();
@@ -62,13 +73,16 @@ function CorrectForm({ bill, payment, onDone, onCancel }) {
           {healthray ? "Paid in HealthRay by" : "Really paid by"}
         </span>
         <select className="bc-field__in" value={mode} onChange={(e) => setMode(e.target.value)}>
-          {MODES.filter((m) => m !== currentMode(payment) || payment.reference).map((m) => (
+          {MODES.filter(
+            (m) => m !== currentMode(payment) || payment.reference || needsUpiApp(m),
+          ).map((m) => (
             <option key={m} value={m}>
-              {PAYMENT_MODE_LABEL[m]}
+              {TAKE_MODE_LABEL[m]}
             </option>
           ))}
         </select>
       </label>
+      {needsApp && <UpiAppField value={upiApp} onChange={setUpiApp} />}
       {needsReference && (
         <label className="bc-field">
           <span className="bc-field__lbl">Reference</span>
@@ -76,7 +90,7 @@ function CorrectForm({ bill, payment, onDone, onCancel }) {
             className="bc-field__in"
             value={reference}
             maxLength={60}
-            placeholder={mode === "upi" ? "UPI transaction ID" : "Last 4 digits or slip no."}
+            placeholder={REFERENCE_HINT[mode] ?? "Last 4 digits or slip no."}
             onChange={(e) => setReference(e.target.value)}
           />
         </label>
@@ -98,14 +112,17 @@ function CorrectForm({ bill, payment, onDone, onCancel }) {
       <span className="bc-head__hint">
         {fromPaise(payment.amount)} · {modeText(payment)} →{" "}
         {healthray ? `${paymentModeText(payment.mode)} · ` : ""}
-        {PAYMENT_MODE_LABEL[mode]}
+        {takenModeText(mode, needsApp ? upiApp : null)}
         {payment.receipt_no ? ` · receipt ${payment.receipt_no}` : ""}. The amount stays the same.
       </span>
       <button
         type="submit"
         className="st-btn st-btn-grn"
         disabled={
-          correct.isPending || reason.trim().length < 5 || (needsReference && !reference.trim())
+          correct.isPending ||
+          reason.trim().length < 5 ||
+          (needsReference && !reference.trim()) ||
+          (needsApp && !upiApp)
         }
       >
         {correct.isPending ? "Saving…" : "Save correction"}

@@ -34,7 +34,7 @@ test.describe.serial("D05 the patients holding a deposit, and opening one at the
     ]) {
       await deposits.receiveDeposit(
         patient,
-        { mode: "upi", amount, reference: `UPI-${tag}` },
+        { mode: "upi", upi_app: "paytm", amount, reference: `UPI-${tag}` },
         desk,
         db,
       );

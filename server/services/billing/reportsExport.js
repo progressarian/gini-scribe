@@ -31,7 +31,7 @@ const IST_STAMP = new Intl.DateTimeFormat("en-CA", {
   hourCycle: "h23",
 });
 
-const stamp = (value) => {
+export const stamp = (value) => {
   if (!value) return null;
   const parts = Object.fromEntries(
     IST_STAMP.formatToParts(new Date(value)).map((part) => [part.type, part.value]),
@@ -112,7 +112,7 @@ function addSection(workbook, part, used) {
 
 const maxDepth = (part) => Math.max(0, ...part.rows.map((row) => row.depth ?? 0));
 
-async function filterNames(filters, db) {
+export async function filterNames(filters, db) {
   const names = {};
   const lookup = async (key, sql) => {
     if (filters[key] === undefined) return;

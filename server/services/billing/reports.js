@@ -4,12 +4,14 @@ import {
   BILLING_ROLES,
   DEPOSIT_MODE,
   HEALTHRAY_MODE,
+  NEFT_LABEL,
+  NEFT_MODE,
   PREPAID_LABEL,
   PREPAID_MODE,
 } from "../../../shared/billingVocab.js";
 import { ROLES } from "../../../shared/permissions.js";
 import { KINDS as REQUEST_KINDS } from "./billingRequests.js";
-import { PAYMENT_MODES } from "./cashShifts.js";
+import { TAKE_MODES } from "./cashShifts.js";
 import { indiaToday } from "./categoryResolver.js";
 import { DUE_BILLS, DUE_DAYS, DUE_MONEY, DUE_OUTSTANDING } from "./dues.js";
 import { httpError } from "./transaction.js";
@@ -27,15 +29,15 @@ import {
 export const ROW_CAP = 2000;
 
 import { TESTS_ONLY_CONSULTANT_SQL } from "./billConsultant.js";
-const SIGN = `(CASE WHEN b.bill_type = 'credit_note' THEN -1 ELSE 1 END)`;
-const FINAL = `b.status = 'final'`;
-const SCHEME_JOIN = `LEFT JOIN patient_schemes cs ON cs.code = b.scheme_code`;
-const VISIT_JOIN = `LEFT JOIN giniflow_visits v ON v.id = b.visit_id
+export const SIGN = `(CASE WHEN b.bill_type = 'credit_note' THEN -1 ELSE 1 END)`;
+export const FINAL = `b.status = 'final'`;
+export const SCHEME_JOIN = `LEFT JOIN patient_schemes cs ON cs.code = b.scheme_code`;
+export const VISIT_JOIN = `LEFT JOIN giniflow_visits v ON v.id = b.visit_id
   LEFT JOIN appointments a ON a.id = b.appointment_id`;
-const CATEGORY = `COALESCE(cs.parent_code, b.scheme_code)`;
-const LINE_CONSULTANT = `COALESCE(l.doctor_id, b.consultant_id, a.doctor_id, v.assigned_doctor_id,
+export const CATEGORY = `COALESCE(cs.parent_code, b.scheme_code)`;
+export const LINE_CONSULTANT = `COALESCE(l.doctor_id, b.consultant_id, a.doctor_id, v.assigned_doctor_id,
   ${TESTS_ONLY_CONSULTANT_SQL("a")})`;
-const BILL_CONSULTANT = `COALESCE(
+export const BILL_CONSULTANT = `COALESCE(
   b.consultant_id,
   (SELECT x.doctor_id FROM bill_lines x
     WHERE x.bill_id = COALESCE(b.original_bill_id, b.id) AND x.doctor_id IS NOT NULL
@@ -394,13 +396,15 @@ const MODE_LABELS = {
   cash: "Cash",
   card: "Card",
   upi: "UPI",
+  [NEFT_MODE]: NEFT_LABEL,
   healthray: "Paid in HealthRay",
   [PREPAID_MODE]: PREPAID_LABEL,
   cash_deposit: "Cash — deposit taken",
   card_deposit: "Card — deposit taken",
   upi_deposit: "UPI — deposit taken",
+  [`${NEFT_MODE}_deposit`]: `${NEFT_LABEL} — deposit taken`,
 };
-const DEPOSIT_MODES = PAYMENT_MODES.map((mode) => `${mode}_deposit`);
+const DEPOSIT_MODES = TAKE_MODES.map((mode) => `${mode}_deposit`);
 
 const PAYMENT_COLUMNS = {
   day: { instant: "m.received_at" },
@@ -446,7 +450,7 @@ async function collections(filters, db) {
        LEFT JOIN doctors su ON su.id = s.user_id
       ORDER BY r.day, array_position($${scope.params.length + 1}::text[], r.mode),
                lower(u.name), s.opened_at, r.shift_id`,
-    [...scope.params, [...PAYMENT_MODES, HEALTHRAY_MODE, PREPAID_MODE, ...DEPOSIT_MODES]],
+    [...scope.params, [...TAKE_MODES, HEALTHRAY_MODE, PREPAID_MODE, ...DEPOSIT_MODES]],
   );
   const { sets, total } = splitSets(rows, dims);
   const pick = (key) => sets.get(key) ?? [];
@@ -615,6 +619,7 @@ async function discounts(filters, db) {
         method: row.rule_id === null ? "manual" : row.code ? "code" : "auto",
       })),
       total,
+      { note: GIVEN_NOTE },
     ),
     section(
       "methods",
@@ -622,6 +627,7 @@ async function discounts(filters, db) {
       [col("label", "Method", "text"), ...given],
       pick("method").map((row) => ({ ...row, label: METHOD_LABELS[row.method] ?? row.method })),
       total,
+      { note: GIVEN_NOTE },
     ),
     section(
       "categories",
@@ -633,6 +639,7 @@ async function discounts(filters, db) {
         label: row.depth === 1 ? NAMED.category(row) : NAMED.sub_category(row),
       })),
       total,
+      { note: GIVEN_NOTE },
     ),
     section(
       "consultants",
@@ -640,6 +647,7 @@ async function discounts(filters, db) {
       [col("label", "Consultant", "text"), ...given],
       pick("consultant").map((row) => ({ ...row, label: NAMED.consultant(row) })),
       total,
+      { note: GIVEN_NOTE },
     ),
     section(
       "users",
@@ -647,12 +655,18 @@ async function discounts(filters, db) {
       [col("label", "Applied by", "text"), ...given],
       pick("applied_by").map((row) => ({ ...row, label: NAMED.user(row, "applied_by") })),
       total,
+      { note: GIVEN_NOTE },
     ),
     await discountGroups(filters, db),
   ];
 }
 
 const METHOD_LABELS = { auto: "Automatic", code: "Code", manual: "Manual" };
+
+const GIVEN_NOTE =
+  "Discount given on final bills when they were billed. A refund does not take it back here — see the Net columns of the % by group section.";
+const GROUP_NOTE =
+  "Discount given is as billed; Net takes off the discount credited back on refunds (credit notes) in these dates.";
 
 async function discountGroups(filters, db) {
   const scope = reportScope(filters, LINE_COLUMNS);
@@ -702,6 +716,7 @@ async function discountGroups(filters, db) {
     ],
     split.rows.map((row) => ({ ...row, label: row.group_name ?? row.group_code ?? "No group" })),
     split.total,
+    { note: GROUP_NOTE },
   );
 }
 

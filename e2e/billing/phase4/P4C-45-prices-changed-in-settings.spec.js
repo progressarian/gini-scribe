@@ -109,7 +109,7 @@ test.describe.serial("P4C-45 prices changed in Settings while a bill is a draft"
     expect(opened.price_changes).toBeNull();
     const paid = await payments.takePayments(
       billId,
-      { version: opened.version, mode: "upi", amount: 50, reference: "UPI1234" },
+      { version: opened.version, mode: "upi", upi_app: "paytm", amount: 50, reference: "UPI1234" },
       desk,
       db,
     );

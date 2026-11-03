@@ -1,7 +1,7 @@
 import { Router } from "express";
 import pool from "../config/db.js";
 import { handleError } from "../utils/errorHandler.js";
-import { dayWindowWhere, callStatusToday } from "../services/ghmDayWindow.js";
+import { dayWindowWhere, callStatusToday, NOT_REPLACED_CANCEL } from "../services/ghmDayWindow.js";
 import { OPEN_CALL_STATUSES, UNREACHABLE_STATUSES, pgArray } from "../../shared/callStatuses.js";
 
 // Blocked patients are hidden from working lists — nobody should be calling,
@@ -25,7 +25,7 @@ const isoDate = (d) => d.toISOString().split("T")[0];
 
 const dayOf = (req) => req.query.date || isoDate(new Date());
 
-const WHERE = dayWindowWhere("a") + NOT_BLOCKED("a");
+const WHERE = dayWindowWhere("a") + NOT_BLOCKED("a") + NOT_REPLACED_CANCEL("a");
 
 async function summaryOn(date) {
   const r = await pool.query(

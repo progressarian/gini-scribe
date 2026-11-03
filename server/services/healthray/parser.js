@@ -904,9 +904,9 @@ function normalizeFollowUp(parsed, visitDate = null) {
   };
 }
 
-export async function parsePrescriptionWithAi(rawText, visitDate = null) {
-  if (!anthropic) return null;
-  if (!rawText || rawText.trim().length < 10) return null;
+export async function readPrescriptionNotes(rawText, visitDate = null) {
+  if (!anthropic) return { parsed: null, apiError: false };
+  if (!rawText || rawText.trim().length < 10) return { parsed: null, apiError: false };
 
   const clean = stripPageFurniture(rawText);
   const userContent = visitDate ? `Visit date: ${visitDate}\n\n${clean}` : clean;
@@ -935,11 +935,15 @@ export async function parsePrescriptionWithAi(rawText, visitDate = null) {
       );
     }
 
-    return normalizeFollowUp(response.parsed_output, visitDate);
+    return { parsed: normalizeFollowUp(response.parsed_output, visitDate), apiError: false };
   } catch (e) {
     error("Parser", "messages.parse failed:", e?.message || e);
-    return null;
+    return { parsed: null, apiError: e instanceof Anthropic.APIError };
   }
+}
+
+export async function parsePrescriptionWithAi(rawText, visitDate = null) {
+  return (await readPrescriptionNotes(rawText, visitDate)).parsed;
 }
 
 export function buildHealthrayParseRequest(rawText, visitDate = null) {

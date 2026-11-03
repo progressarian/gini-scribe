@@ -321,6 +321,7 @@ test.describe.serial("P4-32 totals and payment", () => {
     );
 
     await pad(page).getByLabel("Mode").selectOption("upi");
+    await pad(page).getByLabel("UPI app").selectOption("paytm");
     await pad(page).getByLabel("Amount").fill("500");
     await pad(page).getByLabel("Reference").fill("P4-32-10");
     await pad(page).getByRole("button", { name: "Take payment" }).click();

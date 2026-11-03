@@ -4,7 +4,8 @@ import { paise } from "../../../shared/labPayment.js";
 import { CARRY_STATE, carryOverChoices, carryOverIn } from "../giniflow/carryOver.js";
 import { checkInIn } from "../giniflow/journey.js";
 import { addLine, finaliseBill, openDraftIn, removeLine } from "./bills.js";
-import { DRAWER_MODE, PAYMENT_MODES } from "./cashShifts.js";
+import { DRAWER_MODE, TAKE_MODES } from "./cashShifts.js";
+import { cleanUpiApp } from "./upiApp.js";
 import { receiveDeposit } from "./deposits.js";
 import { collectPlannedIn, moneyOn } from "./payments.js";
 import { httpError, inTransaction } from "./transaction.js";
@@ -180,8 +181,8 @@ const rupeeText = (paise) => `₹${(paise / 100).toLocaleString("en-IN")}`;
 
 function splitPayments(split, left, extraToDeposit = false) {
   const payments = split.map((part) => {
-    if (!PAYMENT_MODES.includes(part.mode)) {
-      throw httpError(400, `Each part of a split is one of: ${PAYMENT_MODES.join(", ")}`);
+    if (!TAKE_MODES.includes(part.mode)) {
+      throw httpError(400, `Each part of a split is one of: ${TAKE_MODES.join(", ")}`);
     }
     const amount = Math.round(Number(part.amount));
     if (!Number.isInteger(amount) || amount <= 0) {
@@ -191,7 +192,7 @@ function splitPayments(split, left, extraToDeposit = false) {
     if (part.mode !== DRAWER_MODE && !reference) {
       throw httpError(400, `The ${part.mode.toUpperCase()} part needs its reference number`);
     }
-    return { mode: part.mode, amount, reference };
+    return { mode: part.mode, amount, reference, upi_app: cleanUpiApp(part.mode, part.upiApp) };
   });
   const total = payments.reduce((sum, part) => sum + part.amount, 0);
   if (total < left || (total > left && !extraToDeposit)) {
@@ -245,14 +246,17 @@ function paymentsFor(view, input) {
     const { onBill, toDeposit } = splitPayments(input.split, left, input.extraToDeposit === true);
     return { wanted: [...wanted, ...onBill], toDeposit };
   }
-  if (!PAYMENT_MODES.includes(input.mode)) {
-    throw httpError(400, `Choose how the rest is paid: ${PAYMENT_MODES.join(", ")}`);
+  if (!TAKE_MODES.includes(input.mode)) {
+    throw httpError(400, `Choose how the rest is paid: ${TAKE_MODES.join(", ")}`);
   }
   const reference = input.mode === DRAWER_MODE ? null : String(input.reference || "").trim();
   if (input.mode !== DRAWER_MODE && !reference) {
     throw httpError(400, `A ${input.mode.toUpperCase()} payment needs its reference number`);
   }
-  return [...wanted, { mode: input.mode, amount: left, reference }];
+  return [
+    ...wanted,
+    { mode: input.mode, amount: left, reference, upi_app: cleanUpiApp(input.mode, input.upiApp) },
+  ];
 }
 
 async function depositExtra(client, visitId, parts, ctx) {
@@ -268,6 +272,7 @@ async function depositExtra(client, visitId, parts, ctx) {
         mode: part.mode,
         amount: part.amount / 100,
         reference: part.reference,
+        upi_app: part.upi_app,
         note: "Paid over the bill at check-in",
       },
       ctx,

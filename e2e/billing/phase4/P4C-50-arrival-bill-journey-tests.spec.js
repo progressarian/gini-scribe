@@ -74,7 +74,7 @@ test.describe.serial("P4C-50 Bill at arrival shows the journey's tests before ch
     await journey.checkInWithJourney(made.visit, { steps, actorId: desk.actorId }, db);
     const done = await arrival.commitArrivalBill(
       made.visit,
-      { expectedTotal: preview.outstanding, mode: "upi", reference: `J-${tag}` },
+      { expectedTotal: preview.outstanding, mode: "upi", upiApp: "paytm", reference: `J-${tag}` },
       desk,
       db,
     );
@@ -100,7 +100,12 @@ test.describe.serial("P4C-50 Bill at arrival shows the journey's tests before ch
     await expect(
       arrival.commitArrivalBill(
         made.visit,
-        { expectedTotal: preview.outstanding, mode: "upi", reference: `J2-${tag}` },
+        {
+          expectedTotal: preview.outstanding,
+          mode: "upi",
+          upiApp: "paytm",
+          reference: `J2-${tag}`,
+        },
         desk,
         db,
       ),
@@ -151,7 +156,7 @@ test.describe.serial("P4C-50 Bill at arrival shows the journey's tests before ch
     await journey.checkInWithJourney(made.visit, { steps, actorId: desk.actorId }, db);
     const done = await arrival.commitArrivalBill(
       made.visit,
-      { expectedTotal: preview.outstanding, mode: "upi", reference: `J6-${tag}` },
+      { expectedTotal: preview.outstanding, mode: "upi", upiApp: "paytm", reference: `J6-${tag}` },
       desk,
       db,
     );

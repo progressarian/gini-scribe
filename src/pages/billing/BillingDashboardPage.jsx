@@ -1,0 +1,388 @@
+import { useId, useMemo } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { Download, RefreshCw } from "lucide-react";
+import Shimmer from "../../components/Shimmer";
+import { useBillingReportCatalog } from "../../queries/hooks/useBillingReports";
+import {
+  useBillingDashboard,
+  useBillingDashboardExport,
+  useRefreshBillingDashboard,
+} from "../../queries/hooks/useBillingDashboard";
+import { saveBlob } from "../../components/billing/importText";
+import { errorOf } from "../../components/billing/format";
+import { DAY_MS, dayMs, dayText, RANGES } from "../../components/billing/reportRanges";
+import { Choice, DateField } from "../../components/billing/ReportFields";
+import KpiTiles from "../../components/billing/dashboard/KpiTiles";
+import RevenueTrend from "../../components/billing/dashboard/RevenueTrend";
+import MisTable from "../../components/billing/dashboard/MisTable";
+import { PaymentModes, RevenueMix } from "../../components/billing/dashboard/MixPanel";
+import DiscountPanel from "../../components/billing/dashboard/DiscountPanel";
+import { PERIOD_LABELS, reportHref } from "../../components/billing/dashboard/dashboardText";
+import useAuthStore from "../../stores/authStore";
+import { toast } from "../../stores/uiStore";
+import { CAPABILITIES, hasCapability } from "../../../shared/permissions";
+import "../../styles/flow.css";
+import "../flow/FlowSettings.css";
+import "../SettingsLayout.css";
+import "./billing.css";
+import "./billingUi.css";
+import "./billingReports.css";
+import "./billingDashboard.css";
+
+const DAY_BUCKETS_MAX = 92;
+const RANGE_DAYS_MAX = 366;
+
+const weekStart = (day) =>
+  dayText(dayMs(day) - ((new Date(dayMs(day)).getUTCDay() + 6) % 7) * DAY_MS);
+const back = (day, days) => dayText(dayMs(day) - days * DAY_MS);
+const daysIn = (from, to) => Math.round((dayMs(to) - dayMs(from)) / DAY_MS) + 1;
+const baseRange = (key) => RANGES.find((r) => r.key === key);
+
+const PRESETS = [
+  baseRange("today"),
+  baseRange("yesterday"),
+  {
+    key: "week",
+    label: "This week",
+    range: (today) => ({ from: weekStart(today), to: today }),
+  },
+  {
+    key: "last_week",
+    label: "Last week",
+    range: (today) => {
+      const start = back(weekStart(today), 7);
+      return { from: start, to: back(weekStart(today), 1) };
+    },
+  },
+  baseRange("month"),
+  baseRange("last_month"),
+  baseRange("last_30"),
+  {
+    key: "last_12_weeks",
+    label: "Last 12 weeks",
+    range: (today) => ({ from: back(weekStart(today), 77), to: today }),
+  },
+  {
+    key: "last_12_months",
+    label: "Last 12 months",
+    range: (today) => {
+      const year = Number(today.slice(0, 4)) - 1;
+      const start = `${year}-${today.slice(5, 7)}-01`;
+      const next = dayText(Date.UTC(year, Number(today.slice(5, 7)), 1));
+      return { from: daysIn(start, today) > RANGE_DAYS_MAX ? next : start, to: today };
+    },
+  },
+  baseRange("fy"),
+  { key: "custom", label: "Custom range", range: null },
+];
+
+const DEFAULT_PRESET = "month";
+const FILTER_KEYS = ["from", "to", "period", "category", "sub_category", "consultant"];
+
+function readFilters(params, today) {
+  const preset = params.get("range") || (params.get("from") ? "custom" : DEFAULT_PRESET);
+  const chosen = PRESETS.find((p) => p.key === preset);
+  const dates = chosen?.range && today ? chosen.range(today) : {};
+  return {
+    range: chosen ? preset : "custom",
+    from: params.get("from") || dates.from || "",
+    to: params.get("to") || dates.to || "",
+    period: params.get("period") || "",
+    category: params.get("category") || "",
+    sub_category: params.get("sub_category") || "",
+    consultant: params.get("consultant") || "",
+  };
+}
+
+const autoPeriod = (days) => (days <= 31 ? "day" : days <= 120 ? "week" : "month");
+
+function Filters({ catalog, filters, update, onClear, cleared }) {
+  const options = catalog.options;
+  const rangeId = useId();
+  const days = filters.from && filters.to ? daysIn(filters.from, filters.to) : 0;
+  const parents = options.categories.filter((c) => !c.parent_code);
+  const subs = options.categories.filter(
+    (c) => c.parent_code && (!filters.category || c.parent_code === filters.category),
+  );
+  const views = [
+    { key: "", label: `Auto (${PERIOD_LABELS[autoPeriod(days)]})` },
+    { key: "day", label: "Day", disabled: days > DAY_BUCKETS_MAX },
+    { key: "week", label: "Week" },
+    { key: "month", label: "Month" },
+  ];
+  return (
+    <div className="bill-form brep-filters" role="search" aria-label="Dashboard filters">
+      <div className="fset__field brep-field">
+        <label htmlFor={rangeId}>Dates</label>
+        <select
+          id={rangeId}
+          className="jb-assign"
+          value={filters.range}
+          onChange={(e) => {
+            const preset = PRESETS.find((p) => p.key === e.target.value);
+            const dates = preset?.range ? preset.range(catalog.today) : {};
+            update({ range: e.target.value, ...dates });
+          }}
+        >
+          {PRESETS.map((p) => (
+            <option key={p.key} value={p.key}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <DateField
+        label="From"
+        value={filters.from}
+        onChange={(from) => update({ range: "custom", from })}
+      />
+      <DateField label="To" value={filters.to} onChange={(to) => update({ range: "custom", to })} />
+      <div className="bdash-field-seg">
+        <span id={`${rangeId}-view`}>View by</span>
+        <div className="bdash-seg" role="group" aria-labelledby={`${rangeId}-view`}>
+          {views.map((view) => (
+            <button
+              key={view.key || "auto"}
+              type="button"
+              className={`flow-btn flow-btn-mini ${filters.period === view.key ? "flow-btn-primary" : "flow-btn-ghost"}`}
+              aria-pressed={filters.period === view.key}
+              disabled={view.disabled}
+              title={
+                view.disabled ? `Day by day covers at most ${DAY_BUCKETS_MAX} days` : undefined
+              }
+              onClick={() => update({ period: view.key })}
+            >
+              {view.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <Choice
+        label="Category"
+        value={filters.category}
+        onChange={(category) => update({ category, sub_category: "" })}
+        anyLabel="All categories"
+        options={parents.map((c) => ({ value: c.code, label: c.label }))}
+      />
+      <Choice
+        label="Sub-category"
+        value={filters.sub_category}
+        onChange={(sub_category) => update({ sub_category })}
+        anyLabel="All sub-categories"
+        options={subs.map((c) => ({ value: c.code, label: c.label }))}
+      />
+      <Choice
+        label="Consultant"
+        value={filters.consultant}
+        onChange={(consultant) => update({ consultant })}
+        anyLabel="All consultants"
+        options={options.consultants.map((d) => ({ value: String(d.id), label: d.name }))}
+      />
+      <div className="brep-quick">
+        <button
+          type="button"
+          className="flow-btn flow-btn-mini flow-btn-ghost"
+          disabled={cleared}
+          onClick={onClear}
+        >
+          Clear filters
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function rangeProblem(filters) {
+  if (!filters.from || !filters.to) return "Choose a start and an end date.";
+  if (filters.from > filters.to) return "The start date is after the end date.";
+  const days = daysIn(filters.from, filters.to);
+  if (days > RANGE_DAYS_MAX) return `Choose at most ${RANGE_DAYS_MAX} days at a time.`;
+  if (filters.period === "day" && days > DAY_BUCKETS_MAX) {
+    return `Day by day covers at most ${DAY_BUCKETS_MAX} days — view by week or month.`;
+  }
+  return null;
+}
+
+const IST_TIME = new Intl.DateTimeFormat("en-IN", {
+  timeZone: "Asia/Kolkata",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+const isEmpty = (data) =>
+  data.total.bills === 0 && data.total.credit_notes === 0 && data.total.collected === 0;
+
+export default function BillingDashboardPage() {
+  const catalog = useBillingReportCatalog();
+  const [params, setParams] = useSearchParams();
+  const role = useAuthStore((s) => s.currentDoctor?.role);
+  const canMap = hasCapability(role, CAPABILITIES.BILLING_MASTER);
+  const today = catalog.data?.today;
+  const filters = useMemo(() => readFilters(params, today), [params, today]);
+  const problem = today ? rangeProblem(filters) : null;
+  const sent = useMemo(
+    () => Object.fromEntries(FILTER_KEYS.map((key) => [key, filters[key]])),
+    [filters],
+  );
+  const result = useBillingDashboard(sent, { enabled: Boolean(today) && !problem });
+  const refresh = useRefreshBillingDashboard();
+  const download = useBillingDashboardExport();
+
+  const update = (patch) =>
+    setParams((current) => {
+      const next = new URLSearchParams(current);
+      const merged = { ...filters, ...patch };
+      for (const key of ["range", ...FILTER_KEYS]) {
+        if (merged[key]) next.set(key, merged[key]);
+        else next.delete(key);
+      }
+      return next;
+    });
+
+  const cleared = !["range", ...FILTER_KEYS].some((key) => params.get(key));
+  const clear = () => setParams(new URLSearchParams());
+
+  const pick = (row) => update({ range: "custom", from: row.start, to: row.end, period: "day" });
+
+  const downloadNow = () =>
+    download.mutate(
+      { filters: sent, resolved: result.data.filters },
+      {
+        onSuccess: (file) => {
+          saveBlob(file);
+          toast(`Downloaded ${file.fileName}`, "success");
+        },
+        onError: (e) => toast(errorOf(e, "Could not download the dashboard"), "error"),
+      },
+    );
+
+  const refreshNow = () =>
+    refresh.mutate(sent, {
+      onError: (e) => toast(errorOf(e, "Could not refresh the dashboard"), "error"),
+    });
+
+  if (catalog.isLoading) {
+    return (
+      <div className="flow-root fset bill-ui bdash-page">
+        <Shimmer type="stats" count={4} />
+      </div>
+    );
+  }
+  if (catalog.isError) {
+    return (
+      <div className="flow-root fset bill-ui bdash-page">
+        <div className="flow-card brep-error" role="alert">
+          {errorOf(catalog.error, "Could not load the dashboard")}
+          <button
+            type="button"
+            className="flow-btn flow-btn-mini"
+            onClick={() => catalog.refetch()}
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const data = result.data;
+  return (
+    <div className="flow-root fset bill-ui bdash-page">
+      <div className="flow-card bill-stack">
+        <div className="fset__cardhead">
+          <h1 className="flow-sec-title">Billing dashboard</h1>
+          <div className="bdash-actions">
+            {data ? (
+              <span className="bdash-asof" role="status">
+                {result.isFetching || refresh.isPending
+                  ? "Updating…"
+                  : `As of ${IST_TIME.format(new Date(data.generated_at))}`}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              className="flow-btn flow-btn-mini flow-btn-ghost"
+              onClick={refreshNow}
+              disabled={!data || refresh.isPending || Boolean(problem)}
+            >
+              <RefreshCw size={13} aria-hidden="true" /> Refresh
+            </button>
+            {canMap ? (
+              <Link
+                className="flow-btn flow-btn-mini flow-btn-ghost"
+                to="/billing/dashboard/columns"
+              >
+                MIS columns
+              </Link>
+            ) : null}
+            <Link
+              className="flow-btn flow-btn-mini flow-btn-ghost"
+              to={data ? reportHref("revenue_categories", data.filters) : "/billing/reports"}
+            >
+              Detailed reports
+            </Link>
+            <button
+              type="button"
+              className="flow-btn flow-btn-primary brep-export"
+              onClick={downloadNow}
+              disabled={!data || download.isPending || Boolean(problem)}
+            >
+              <Download size={14} aria-hidden="true" />
+              {download.isPending ? "Preparing…" : "Download Excel"}
+            </button>
+          </div>
+        </div>
+        <div className="fset__cardsub">
+          Final bills only; credit notes are taken off. Days are India dates. Figures refresh every
+          few minutes — use Refresh for the latest.
+        </div>
+        <Filters
+          catalog={catalog.data}
+          filters={filters}
+          update={update}
+          onClear={clear}
+          cleared={cleared}
+        />
+      </div>
+
+      {problem ? (
+        <div className="flow-card brep-error" role="alert">
+          {problem}
+        </div>
+      ) : result.isError ? (
+        <div className="flow-card brep-error" role="alert">
+          {errorOf(result.error, "Could not load the dashboard")}{" "}
+          <button type="button" className="flow-btn flow-btn-mini" onClick={() => result.refetch()}>
+            Try again
+          </button>
+        </div>
+      ) : !data ? (
+        <>
+          <Shimmer type="stats" count={4} />
+          <Shimmer type="table" count={6} />
+        </>
+      ) : isEmpty(data) ? (
+        <div className="flow-card bdash-empty">
+          <strong>No final bills or payments in this range</strong>
+          <span>Try a wider date range, or clear the filters.</span>
+          {!cleared ? (
+            <button type="button" className="flow-btn flow-btn-mini" onClick={clear}>
+              Clear filters
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <>
+          <KpiTiles data={data} />
+          <RevenueTrend data={data} onPick={pick} />
+          <MisTable data={data} onPick={pick} />
+          <div className="bdash-grid">
+            <RevenueMix data={data} />
+            <PaymentModes data={data} />
+          </div>
+          <DiscountPanel data={data} />
+        </>
+      )}
+    </div>
+  );
+}

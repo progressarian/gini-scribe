@@ -193,7 +193,7 @@ test.describe.serial("P4-15 take payments", () => {
           version: ready.version,
           payments: [
             { mode: "cash", amount: 300 },
-            { mode: "upi", amount: 300, reference: `UPI-${tag}` },
+            { mode: "upi", upi_app: "paytm", amount: 300, reference: `UPI-${tag}` },
           ],
         },
         desk,
@@ -244,7 +244,7 @@ test.describe.serial("P4-15 take payments", () => {
       "a card with no reference",
     );
     await bad(
-      { mode: "upi", amount: 10, reference: "   " },
+      { mode: "upi", upi_app: "paytm", amount: 10, reference: "   " },
       /UPI payment needs its reference/,
       "UPI with a blank reference",
     );

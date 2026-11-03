@@ -243,7 +243,7 @@ test.describe.serial("P4C-27 Paid in HealthRay clears the bill in one click", ()
     await clear(inShift.bill.id);
     const now = await shifts.currentShift(desk, db);
     expect(now.id).toBe(shift.id);
-    expect(now.collected).toEqual({ cash: 0, card: 0, upi: 0, total: 0 });
+    expect(now.collected).toEqual({ cash: 0, card: 0, upi: 0, neft: 0, total: 0 });
     expect(now.payment_count).toBe(0);
     expect(now.bill_count).toBe(0);
     expect(now.expected_cash).toBe(500);

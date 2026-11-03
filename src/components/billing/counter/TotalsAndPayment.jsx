@@ -12,10 +12,11 @@ import {
 } from "../../../queries/hooks/useBilling";
 import { DEPOSIT_MODE, HEALTHRAY_MODE } from "../../../../shared/billingVocab.js";
 import { errorOf, fromPaise, moneyTyped } from "../format";
-import { HEALTHRAY_LABEL, PAYMENT_MODE_LABEL } from "./lineText";
+import { HEALTHRAY_LABEL, needsUpiApp, TAKE_MODE_LABEL } from "./lineText";
 import { balanceOf, payLaterAllowed } from "./finaliseChecks";
 import { emptyPaymentRow } from "./counterForm";
 import PaymentsReceived from "./PaymentsReceived";
+import UpiAppField from "./UpiAppField";
 import { announcePaid } from "./paidSignal";
 
 const paiseOf = (typed) => Math.round(Number(typed || 0) * 100);
@@ -27,6 +28,7 @@ const toRupees = (paise) => (Math.max(0, paise) / 100).toFixed(2).replace(/\.00$
 const REFERENCE_HINT = {
   card: "e.g. last 4 digits or slip no.",
   upi: "e.g. UPI transaction ID",
+  neft: "e.g. UTR or cheque no.",
 };
 
 const healthrayPaidOf = (payments) =>
@@ -66,6 +68,9 @@ export default function TotalsAndPayment({
   const allowsLater = payLaterAllowed(bill, schemes, settings);
   const missingReference = rows.some(
     (row) => paiseOf(row.amount) > 0 && !NO_REFERENCE.includes(row.mode) && !row.reference.trim(),
+  );
+  const missingUpiApp = rows.some(
+    (row) => paiseOf(row.amount) > 0 && needsUpiApp(row.mode) && !row.upiApp,
   );
   const depositLeftFor = (index) =>
     depositAvailable -
@@ -110,7 +115,7 @@ export default function TotalsAndPayment({
       setCapped(paiseOf(typed) > most ? { index, most, deposit: true } : null);
       return;
     }
-    change(index, { mode });
+    change(index, needsUpiApp(mode) ? { mode } : { mode, upiApp: "" });
   };
 
   const pay = async () => {
@@ -128,6 +133,7 @@ export default function TotalsAndPayment({
               mode: row.mode,
               amount: row.amount.trim(),
               ...(row.reference.trim() ? { reference: row.reference.trim() } : {}),
+              ...(needsUpiApp(row.mode) ? { upi_app: row.upiApp } : {}),
             })),
         }),
       );
@@ -296,7 +302,7 @@ export default function TotalsAndPayment({
                         value={row.mode}
                         onChange={(e) => setMode(index, e.target.value)}
                       >
-                        {Object.entries(PAYMENT_MODE_LABEL).map(([mode, label]) => (
+                        {Object.entries(TAKE_MODE_LABEL).map(([mode, label]) => (
                           <option key={mode} value={mode}>
                             {label}
                           </option>
@@ -339,6 +345,13 @@ export default function TotalsAndPayment({
                           ? `Only ${fromPaise(capped.most)} can come from the deposit here, so this payment was capped at that.`
                           : `Only ${fromPaise(capped.most)} is still due, so this payment was capped at that.`}
                       </p>
+                    )}
+                    {needsUpiApp(row.mode) && (
+                      <UpiAppField
+                        className="bc-field bc-pay__ref"
+                        value={row.upiApp}
+                        onChange={(upiApp) => change(index, { upiApp })}
+                      />
                     )}
                     {!NO_REFERENCE.includes(row.mode) && (
                       <label className="bc-field bc-pay__ref">
@@ -391,8 +404,12 @@ export default function TotalsAndPayment({
           </dl>
 
           {missingReference && (
-            <div className="bc-hint">Add the reference for each card or UPI payment.</div>
+            <div className="bc-hint">
+              Add the reference for each card, UPI or NEFT / cheque payment.
+            </div>
           )}
+
+          {missingUpiApp && <div className="bc-hint">Choose the UPI app for each UPI payment.</div>}
 
           {depositOver && (
             <div className="bc-hint" role="alert">
@@ -404,7 +421,12 @@ export default function TotalsAndPayment({
             type="button"
             className="bc-pay__go"
             disabled={
-              entered <= 0 || entered > balance || missingReference || depositOver || take.isPending
+              entered <= 0 ||
+              entered > balance ||
+              missingReference ||
+              missingUpiApp ||
+              depositOver ||
+              take.isPending
             }
             onClick={pay}
           >

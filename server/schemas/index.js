@@ -7,6 +7,7 @@ import { CATEGORIES as TEST_CATEGORIES } from "../services/giniflow/testCatalog.
 import { MACHINE_SAMPLE_FLOW } from "../../shared/machineStages.js";
 import { TEST_CANCEL_REASON_VALUES } from "../../shared/testCancelReasons.js";
 import { HOME_NOTE_MAX } from "../../shared/homeCollectors.js";
+import { NEFT_MODE, UPI_APPS } from "../../shared/billingVocab.js";
 import { RX_FOLLOWUP_ACTIONS, RX_FOLLOWUP_RESOLVES } from "../../shared/rxFollowups.js";
 import { HOLD_DECISIONS, HOLD_NOTE_MAX, HOLD_NOTE_MIN } from "../../shared/coordinatorHold.js";
 import {
@@ -975,14 +976,16 @@ export const giniflowArrivalBillSchema = z.strictObject({
     )
     .max(50)
     .default([]),
-  mode: z.enum(["cash", "card", "upi"]).nullish(),
+  mode: z.enum(["cash", "card", "upi", NEFT_MODE]).nullish(),
   reference: z.string().trim().max(60).nullish(),
+  upiApp: z.enum(UPI_APPS).nullish(),
   split: z
     .array(
       z.strictObject({
-        mode: z.enum(["cash", "card", "upi"]),
+        mode: z.enum(["cash", "card", "upi", NEFT_MODE]),
         amount: z.number().int().positive(),
         reference: z.string().trim().max(60).nullish(),
+        upiApp: z.enum(UPI_APPS).nullish(),
       }),
     )
     .max(8)

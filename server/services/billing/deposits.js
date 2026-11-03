@@ -1,6 +1,6 @@
 import pool from "../../config/db.js";
 import { paise } from "../../../shared/labPayment.js";
-import { DEPOSIT_MAX, DEPOSIT_MODE } from "../../../shared/billingVocab.js";
+import { DEPOSIT_MAX, DEPOSIT_MODE, NEFT_MODE } from "../../../shared/billingVocab.js";
 import { writeAudit } from "./audit.js";
 import { nextNumber, seriesFor } from "./billNumber.js";
 import { CAPABILITIES, hasAnyCapability } from "../../../shared/permissions.js";
@@ -10,7 +10,9 @@ import {
   openShiftIdFor,
   PAYMENT_MODES,
   refreshClosedDrawer,
+  TAKE_MODES,
 } from "./cashShifts.js";
+import { cleanUpiApp } from "./upiApp.js";
 import { SUPABASE_SERVICE_KEY, SUPABASE_URL, STORAGE_BUCKET } from "../../config/storage.js";
 import { auditFields, cleanMoney, INT_MAX, readNumber } from "./common.js";
 import { httpError, inTransaction } from "./transaction.js";
@@ -18,7 +20,7 @@ import { httpError, inTransaction } from "./transaction.js";
 export const ENTRIES_SHOWN = 50;
 const REFERENCE_MAX = 60;
 const NOTE_MAX = 300;
-const MODE_LABEL = { cash: "cash", card: "card", upi: "UPI" };
+const MODE_LABEL = { cash: "cash", card: "card", upi: "UPI", [NEFT_MODE]: "NEFT / cheque" };
 const TEXT_MAX = 300;
 const IPD_NUMBER_MAX = 40;
 export const CONSENT_DOC_TYPE = "deposit_consent";
@@ -56,8 +58,8 @@ function cleanPatientId(value) {
 
 function cleanReceipt(input) {
   const mode = typeof input?.mode === "string" ? input.mode.trim().toLowerCase() : "";
-  if (!PAYMENT_MODES.includes(mode)) {
-    throw httpError(400, `A deposit is taken as one of: ${PAYMENT_MODES.join(", ")}`);
+  if (!TAKE_MODES.includes(mode)) {
+    throw httpError(400, `A deposit is taken as one of: ${TAKE_MODES.join(", ")}`);
   }
   const amount = paise(cleanMoney(input?.amount, "The deposit amount"));
   if (amount <= 0) throw httpError(400, "The deposit must be more than zero");
@@ -75,7 +77,8 @@ function cleanReceipt(input) {
   if (note.length > NOTE_MAX) {
     throw httpError(400, `The note is too long — keep it under ${NOTE_MAX} letters`);
   }
-  return { mode, amount, reference: reference || null, note: note || null };
+  const upiApp = cleanUpiApp(mode, input?.upi_app);
+  return { mode, amount, reference: reference || null, upi_app: upiApp, note: note || null };
 }
 
 async function patientExists(client, patientId) {
@@ -203,8 +206,8 @@ export async function receiveDeposit(patientIdValue, input, ctx, db = pool) {
     const receipt = await nextNumber(client, seriesFor("receipt"), null, ctx);
     const { rows } = await client.query(
       `INSERT INTO payments (deposit_patient_id, mode, amount, reference, receipt_no, shift_id,
-                             received_by, created_by, updated_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $7)
+                             received_by, created_by, updated_by, upi_app)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $7, $8)
        RETURNING id, receipt_no, received_at`,
       [
         patientId,
@@ -214,6 +217,7 @@ export async function receiveDeposit(patientIdValue, input, ctx, db = pool) {
         receipt.number,
         shiftId,
         ctx.actorId,
+        wanted.upi_app,
       ],
     );
     await writeAudit(client, {
@@ -223,6 +227,7 @@ export async function receiveDeposit(patientIdValue, input, ctx, db = pool) {
       after: {
         deposit_patient_id: patientId,
         mode: wanted.mode,
+        upi_app: wanted.upi_app,
         amount: wanted.amount,
         receipt_no: rows[0].receipt_no,
       },
@@ -317,7 +322,7 @@ export async function restoreToDeposit(client, { note, patientId, amount }, ctx)
 const ENTRY_SQL = `
   SELECT e.id, e.kind, e.amount, e.balance_after, e.note, e.created_at, e.payment_id,
          e.bill_id, b.bill_no, b.bill_type, o.bill_no AS original_bill_no,
-         p.mode, p.reference, p.receipt_no, p.shift_id, p.received_by,
+         p.mode, p.upi_app, p.reference, p.receipt_no, p.shift_id, p.received_by,
          p.voided_at, p.void_reason, COALESCE(vd.short_name, vd.name) AS voided_by_name,
          s.closed_at AS shift_closed_at, e.counter_entry_id, cp.receipt_no AS counter_receipt_no,
          (SELECT v.id FROM deposit_entries v
@@ -409,6 +414,7 @@ export async function getDeposit(patientIdValue, db = pool, ctx = null) {
       original_bill_no: row.original_bill_no,
       payment_id: row.payment_id,
       mode: row.mode,
+      upi_app: row.upi_app ?? null,
       reference: row.reference,
       receipt_no: row.kind === "voided" ? row.counter_receipt_no : row.receipt_no,
       voided_at: row.voided_at,

@@ -69,6 +69,7 @@ async function assertNotLabOnly(client, visitId, toStatus) {
 }
 
 export const NO_CHIEF_STEP_REASON = "plan_has_no_chief_step";
+const CHIEF_STATUSES = ["sd_pending", "with_sd"];
 
 const DOCTOR_STATUSES = ["sd_pending", "with_sd", "ready_for_doctor", "with_doctor"];
 const REPORTED_SAMPLE_STATUSES = [
@@ -170,6 +171,15 @@ export async function advanceStatus(
   }
   if (toStatus === "blocked_reports" && !blockedReason) {
     throw new Error("Blocking a visit requires a reason");
+  }
+  if (
+    actorRole === "system" &&
+    CHIEF_STATUSES.includes(toStatus) &&
+    (await skipsChiefStop(client, visitId)) &&
+    !(await isLabOnlyVisit(client, visitId))
+  ) {
+    toStatus = "ready_for_doctor";
+    meta = { ...meta, chief_not_planned: true };
   }
 
   const current = await client.query(
@@ -380,7 +390,8 @@ export async function getStationTimes(
           (st) => chainIndex(st) > chainIndex(from) && chainIndex(st) < chainIndex(to),
         )
       : [];
-  const chiefNotPlanned = (next) => next?.meta?.reason === NO_CHIEF_STEP_REASON;
+  const chiefNotPlanned = (next) =>
+    next?.meta?.reason === NO_CHIEF_STEP_REASON || next?.meta?.chief_not_planned === true;
   const skippedBetween = (row, next) =>
     stationsSkipped(row.status, next.status).filter(
       (st) =>

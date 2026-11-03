@@ -60,7 +60,13 @@ async function dueBill(visit, items, category, { paid = 0, ageDays = 0 } = {}) {
   if (paid) {
     await payments.takePayments(
       final.id,
-      { version: final.version, mode: "upi", amount: paid, reference: `UPI-${tag}-${final.id}` },
+      {
+        version: final.version,
+        mode: "upi",
+        upi_app: "paytm",
+        amount: paid,
+        reference: `UPI-${tag}-${final.id}`,
+      },
       desk,
       db,
     );

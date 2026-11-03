@@ -62,7 +62,12 @@ test.describe.serial("P5-10 receivables, coupons, cancellations and requests rep
       {
         version: drafted.version,
         payments: [
-          { mode: "upi", amount: drafted.totals.payable / 100, reference: `UPI-${tag}-H` },
+          {
+            mode: "upi",
+            upi_app: "paytm",
+            amount: drafted.totals.payable / 100,
+            reference: `UPI-${tag}-H`,
+          },
         ],
       },
       mine,

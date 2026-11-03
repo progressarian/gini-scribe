@@ -4,7 +4,7 @@ import useDialog from "../useDialog";
 import { useVoidDeposit } from "../../../queries/hooks/useBilling";
 import { errorOf, fromPaise } from "../format";
 import { when } from "../importText";
-import { PAYMENT_MODE_LABEL } from "./lineText";
+import { takenModeText } from "./lineText";
 
 const REASON_MIN = 5;
 
@@ -55,7 +55,7 @@ export default function VoidDepositDialog({ entry, patient, balance, onClose, on
             <div>
               <dt>Receipt</dt>
               <dd>
-                {[entry.receipt_no, PAYMENT_MODE_LABEL[entry.mode] ?? entry.mode, entry.reference]
+                {[entry.receipt_no, takenModeText(entry.mode, entry.upi_app), entry.reference]
                   .filter(Boolean)
                   .join(" · ")}
               </dd>

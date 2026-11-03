@@ -55,7 +55,12 @@ test.describe.serial("D01 deposits: receive, use on a bill, keep a refund as dep
       status: 400,
     });
     await expect(
-      receive(bill.patient_id, { mode: "upi", amount: 500000.01, reference: "UPI-MAX" }),
+      receive(bill.patient_id, {
+        mode: "upi",
+        upi_app: "paytm",
+        amount: 500000.01,
+        reference: "UPI-MAX",
+      }),
     ).rejects.toMatchObject({ status: 400, message: "One deposit can be at most ₹5,00,000" });
     expect(await balanceOf(bill.patient_id)).toBe(0);
   });
@@ -82,7 +87,12 @@ test.describe.serial("D01 deposits: receive, use on a bill, keep a refund as dep
 
   test("3. part of a bill from the deposit, the rest in cash; only the cash reaches the drawer", async () => {
     const bill = await billFor("Apply", [{ item: ids.brace }, { item: ids.dressing }]);
-    await receive(bill.patient_id, { mode: "upi", amount: 1000, reference: `UPI-${tag}` });
+    await receive(bill.patient_id, {
+      mode: "upi",
+      upi_app: "paytm",
+      amount: 1000,
+      reference: `UPI-${tag}`,
+    });
     const before = await drawer();
     const payable = bill.totals.payable / 100;
     const taken = await payOn(bill.id, [

@@ -154,7 +154,13 @@ test.describe.serial("P4-16 pay later and dues", () => {
     expect(still[0]).toMatchObject({ paid: 20000, outstanding: 30000 });
     const rest = await payments.takePayments(
       ids.dueBill,
-      { version: part.version, mode: "upi", amount: 300, reference: `UPI-${tag}` },
+      {
+        version: part.version,
+        mode: "upi",
+        upi_app: "paytm",
+        amount: 300,
+        reference: `UPI-${tag}`,
+      },
       desk,
       db,
     );

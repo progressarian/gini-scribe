@@ -547,8 +547,15 @@ export function useBillPayments(billId) {
 export function useCorrectPaymentMode() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ paymentId, mode, reference, reason }) =>
-      (await api.patch(`${DESK}/payments/${paymentId}/mode`, { mode, reference, reason })).data,
+    mutationFn: async ({ paymentId, mode, reference, upiApp, reason }) =>
+      (
+        await api.patch(`${DESK}/payments/${paymentId}/mode`, {
+          mode,
+          reference,
+          ...(upiApp ? { upi_app: upiApp } : {}),
+          reason,
+        })
+      ).data,
     onSuccess: (_payment, variables) => {
       queryClient.invalidateQueries({ queryKey: billingKeys.billPayments(variables?.billId) });
       queryClient.invalidateQueries({ queryKey: billingKeys.visitBills(variables?.visitId) });

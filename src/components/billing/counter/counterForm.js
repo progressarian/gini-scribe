@@ -1,5 +1,5 @@
-import { DEPOSIT_MODE } from "../../../../shared/billingVocab.js";
-import { PAYMENT_MODE_LABEL } from "./lineText";
+import { DEPOSIT_MODE, UPI_APPS } from "../../../../shared/billingVocab.js";
+import { TAKE_MODE_LABEL } from "./lineText";
 
 export const BILL_FORM_PREFIX = "billing.counter.form.";
 
@@ -9,7 +9,7 @@ export const SHIFT_FORM_PREFIX = "billing.counter.shift.";
 
 export const shiftFormKey = (userId) => (userId ? `${SHIFT_FORM_PREFIX}${userId}` : null);
 
-export const emptyPaymentRow = () => ({ mode: "cash", amount: "", reference: "" });
+export const emptyPaymentRow = () => ({ mode: "cash", amount: "", reference: "", upiApp: "" });
 
 const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
@@ -24,7 +24,8 @@ const text = (max) => ({ blank: "", valid: (value) => isText(value, max) });
 
 const isPaymentRow = (row) =>
   isObject(row) &&
-  (Object.hasOwn(PAYMENT_MODE_LABEL, row.mode) || row.mode === DEPOSIT_MODE) &&
+  (Object.hasOwn(TAKE_MODE_LABEL, row.mode) || row.mode === DEPOSIT_MODE) &&
+  (row.upiApp === undefined || row.upiApp === "" || UPI_APPS.includes(row.upiApp)) &&
   isText(row.amount, 12) &&
   /^\d*(\.\d{0,2})?$/.test(row.amount) &&
   isText(row.reference, 60);

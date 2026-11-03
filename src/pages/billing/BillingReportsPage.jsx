@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useId, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Download } from "lucide-react";
 import {
@@ -10,60 +10,15 @@ import { errorOf, fromPaise } from "../../components/billing/format";
 import { receptionBillHref } from "../../components/billing/counter/billHref";
 import { saveBlob } from "../../components/billing/importText";
 import { toast } from "../../stores/uiStore";
+import Shimmer from "../../components/Shimmer";
+import { DEFAULT_RANGE, QUICK_RANGES, RANGES } from "../../components/billing/reportRanges";
+import { Choice, DateField } from "../../components/billing/ReportFields";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
 import "../SettingsLayout.css";
 import "./billing.css";
 import "./billingUi.css";
 import "./billingReports.css";
-
-const DAY_MS = 86400000;
-const dayText = (ms) => new Date(ms).toISOString().slice(0, 10);
-const dayMs = (text) => Date.parse(`${text}T00:00:00Z`);
-
-const RANGES = [
-  { key: "today", label: "Today", range: (today) => ({ from: today, to: today }) },
-  {
-    key: "yesterday",
-    label: "Yesterday",
-    range: (today) => {
-      const day = dayText(dayMs(today) - DAY_MS);
-      return { from: day, to: day };
-    },
-  },
-  {
-    key: "month",
-    label: "This month",
-    range: (today) => ({ from: `${today.slice(0, 8)}01`, to: today }),
-  },
-  {
-    key: "last_month",
-    label: "Last month",
-    range: (today) => {
-      const end = dayMs(`${today.slice(0, 8)}01`) - DAY_MS;
-      return { from: `${dayText(end).slice(0, 8)}01`, to: dayText(end) };
-    },
-  },
-  {
-    key: "last_30",
-    label: "Last 30 days",
-    range: (today) => ({ from: dayText(dayMs(today) - 29 * DAY_MS), to: today }),
-  },
-  {
-    key: "fy",
-    label: "This financial year",
-    range: (today) => {
-      const year = Number(today.slice(0, 4));
-      const start = Number(today.slice(5, 7)) >= 4 ? year : year - 1;
-      return { from: `${start}-04-01`, to: today };
-    },
-  },
-  { key: "all", label: "All dates", openOnly: true, range: (today) => ({ from: "", to: today }) },
-  { key: "custom", label: "Custom range", range: null },
-];
-
-const DEFAULT_RANGE = RANGES.find((r) => r.key === "month");
-const QUICK_RANGES = RANGES.filter((r) => r.key === "today" || r.key === "yesterday");
 
 const IST_TIME = new Intl.DateTimeFormat("en-IN", {
   timeZone: "Asia/Kolkata",
@@ -95,7 +50,7 @@ const CELL = {
 const NUMERIC = new Set(["money", "count", "quantity", "limit", "days", "percent"]);
 const TOTALLED = new Set(["money", "count", "quantity"]);
 
-function ReportSection({ part }) {
+function ReportSection({ part, onClear, cleared }) {
   const deepest = Math.max(0, ...part.rows.map((row) => row.depth ?? 0));
   const labelKey = part.columns.find((column) => column.kind === "text")?.key;
   const shown = part.columns.filter((column) => column.key !== "level");
@@ -169,47 +124,20 @@ function ReportSection({ part }) {
           </table>
         </div>
       ) : (
-        <div className="bill-allclear">Nothing for these filters.</div>
+        <div className="bill-allclear">
+          Nothing for these filters.{" "}
+          {cleared ? null : (
+            <button
+              type="button"
+              className="flow-btn flow-btn-mini flow-btn-ghost"
+              onClick={onClear}
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
       )}
     </section>
-  );
-}
-
-function Choice({ label, value, onChange, options, anyLabel }) {
-  const id = useId();
-  return (
-    <div className="fset__field brep-field">
-      <label htmlFor={id}>{label}</label>
-      <select
-        id={id}
-        className="jb-assign"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">{anyLabel}</option>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
-function DateField({ label, value, onChange }) {
-  const id = useId();
-  return (
-    <div className="fset__field brep-field">
-      <label htmlFor={id}>{label}</label>
-      <input
-        id={id}
-        type="date"
-        className="jb-assign"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </div>
   );
 }
 
@@ -361,6 +289,29 @@ const EMPTY = {
   user: "",
 };
 
+const FILTER_KEYS = Object.keys(EMPTY);
+const LINK_KEYS = ["range", ...FILTER_KEYS];
+
+function filtersFrom(params, today, report) {
+  const asked = params.get("range");
+  const dated = params.has("from") || params.has("to");
+  let preset = RANGES.find((r) => r.key === (asked || (dated ? "custom" : DEFAULT_RANGE.key)));
+  if (!preset || (preset.openOnly && report && !report.open_start)) preset = DEFAULT_RANGE;
+  const filters = Object.fromEntries(FILTER_KEYS.map((key) => [key, params.get(key) ?? ""]));
+  if (!today) return { rangeKey: preset.key, filters };
+  if (preset.range)
+    return { rangeKey: preset.key, filters: { ...filters, ...preset.range(today) } };
+  const fallback = DEFAULT_RANGE.range(today);
+  return {
+    rangeKey: preset.key,
+    filters: {
+      ...filters,
+      to: filters.to || today,
+      from: filters.from || (report?.open_start ? "" : fallback.from),
+    },
+  };
+}
+
 const sentFor = (report, filters) => {
   if (!report) return {};
   const keys = ["from", "to", ...report.filters];
@@ -370,8 +321,6 @@ const sentFor = (report, filters) => {
 export default function BillingReportsPage() {
   const catalog = useBillingReportCatalog();
   const [params, setParams] = useSearchParams();
-  const [filters, setFilters] = useState(EMPTY);
-  const [rangeKey, setRangeKey] = useState("month");
   const download = useBillingReportExport();
   const tabsId = useId();
 
@@ -379,42 +328,49 @@ export default function BillingReportsPage() {
   const asked = params.get("report");
   const report = reports.find((r) => r.key === asked) ?? reports[0] ?? null;
   const today = catalog.data?.today;
-
-  useEffect(() => {
-    if (!today) return;
-    setFilters((f) => (f.to ? f : { ...f, ...DEFAULT_RANGE.range(today) }));
-  }, [today]);
-
-  useEffect(() => {
-    if (!report || !today || report.open_start || filters.from) return;
-    setRangeKey("month");
-    setFilters((f) => ({ ...f, ...DEFAULT_RANGE.range(today) }));
-  }, [report, today, filters.from]);
+  const { rangeKey, filters } = useMemo(
+    () => filtersFrom(params, today, report),
+    [params, today, report],
+  );
 
   const sent = useMemo(() => sentFor(report, filters), [report, filters]);
   const ready = Boolean(report && filters.to);
   const result = useBillingReport(report?.key, sent, { enabled: ready });
 
-  const setFilter = (key, value, dated = false) => {
-    if (dated) setRangeKey("custom");
-    setFilters((f) => ({ ...f, [key]: value }));
-  };
+  const update = (patch) =>
+    setParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        for (const [key, value] of Object.entries(patch)) {
+          if (value) next.set(key, value);
+          else next.delete(key);
+        }
+        return next;
+      },
+      { replace: true },
+    );
 
-  const defaults = today ? { ...EMPTY, ...DEFAULT_RANGE.range(today) } : null;
-  const cleared =
-    !defaults ||
-    (rangeKey === DEFAULT_RANGE.key && Object.keys(EMPTY).every((k) => filters[k] === defaults[k]));
-  const clearFilters = () => {
-    if (!defaults) return;
-    setRangeKey(DEFAULT_RANGE.key);
-    setFilters(defaults);
-  };
+  const setFilter = (key, value, dated = false) =>
+    update(
+      dated
+        ? { range: "custom", from: filters.from, to: filters.to, [key]: value }
+        : { [key]: value },
+    );
 
-  const pickRange = (key) => {
-    setRangeKey(key);
-    const range = RANGES.find((r) => r.key === key)?.range;
-    if (range && today) setFilters((f) => ({ ...f, ...range(today) }));
-  };
+  const cleared = !LINK_KEYS.some((key) => params.get(key));
+  const clearFilters = () =>
+    setParams((current) => {
+      const next = new URLSearchParams();
+      if (current.get("report")) next.set("report", current.get("report"));
+      return next;
+    });
+
+  const pickRange = (key) =>
+    update(
+      key === "custom"
+        ? { range: key, from: filters.from, to: filters.to }
+        : { range: key, from: "", to: "" },
+    );
 
   const choose = (key) => {
     setParams((p) => {
@@ -437,12 +393,25 @@ export default function BillingReportsPage() {
     );
 
   if (catalog.isLoading) {
-    return <div className="flow-root fset bill-ui brep-page">Loading…</div>;
+    return (
+      <div className="flow-root fset bill-ui brep-page">
+        <Shimmer type="table" count={6} />
+      </div>
+    );
   }
   if (catalog.isError) {
     return (
       <div className="flow-root fset bill-ui brep-page">
-        <div className="flow-card">{errorOf(catalog.error, "Could not load the reports")}</div>
+        <div className="flow-card brep-error" role="alert">
+          {errorOf(catalog.error, "Could not load the reports")}{" "}
+          <button
+            type="button"
+            className="flow-btn flow-btn-mini"
+            onClick={() => catalog.refetch()}
+          >
+            Try again
+          </button>
+        </div>
       </div>
     );
   }
@@ -502,12 +471,21 @@ export default function BillingReportsPage() {
       >
         {result.isError ? (
           <div className="flow-card brep-error" role="alert">
-            {errorOf(result.error, "Could not load this report")}
+            {errorOf(result.error, "Could not load this report")}{" "}
+            <button
+              type="button"
+              className="flow-btn flow-btn-mini"
+              onClick={() => result.refetch()}
+            >
+              Try again
+            </button>
           </div>
         ) : !result.data ? (
-          <div className="flow-card">Loading…</div>
+          <Shimmer type="table" count={6} />
         ) : (
-          result.data.sections.map((part) => <ReportSection key={part.key} part={part} />)
+          result.data.sections.map((part) => (
+            <ReportSection key={part.key} part={part} onClear={clearFilters} cleared={cleared} />
+          ))
         )}
       </div>
     </div>

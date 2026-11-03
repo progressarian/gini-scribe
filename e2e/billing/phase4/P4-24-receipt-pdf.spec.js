@@ -155,7 +155,7 @@ test.describe.serial("P4-24 receipt PDF", () => {
         payments: [
           { mode: "cash", amount: 500 },
           { mode: "card", amount: 400, reference: CARD_REF },
-          { mode: "upi", amount: 400, reference: UPI_REF },
+          { mode: "upi", upi_app: "paytm", amount: 400, reference: UPI_REF },
         ],
       },
       desk,

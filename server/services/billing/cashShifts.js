@@ -12,9 +12,10 @@ import {
 } from "./common.js";
 import { CAPABILITIES, hasAnyCapability } from "../../../shared/permissions.js";
 import { paise } from "../../../shared/labPayment.js";
-import { HEALTHRAY_MODE, PREPAID_MODE } from "../../../shared/billingVocab.js";
+import { HEALTHRAY_MODE, NEFT_MODE, PREPAID_MODE } from "../../../shared/billingVocab.js";
 
 export const PAYMENT_MODES = ["cash", "card", "upi"];
+export const TAKE_MODES = [...PAYMENT_MODES, NEFT_MODE];
 export const DRAWER_MODE = "cash";
 
 export const NOTE_MAX = 500;
@@ -85,7 +86,7 @@ const FLOWS = { collected: "in", refunded: "out" };
 
 const TOTALS = Object.entries(FLOWS)
   .flatMap(([flow, direction]) =>
-    PAYMENT_MODES.map(
+    TAKE_MODES.map(
       (mode) =>
         `COALESCE(SUM(p.amount) FILTER (WHERE p.direction = '${direction}' AND p.mode = '${mode}'), 0) AS ${mode}_${flow}`,
     ),
@@ -93,7 +94,7 @@ const TOTALS = Object.entries(FLOWS)
   .join(",\n           ");
 
 const TOTAL_COLUMNS = Object.keys(FLOWS)
-  .flatMap((flow) => PAYMENT_MODES.map((mode) => `t.${mode}_${flow}`))
+  .flatMap((flow) => TAKE_MODES.map((mode) => `t.${mode}_${flow}`))
   .join(", ");
 
 const DRAWER_SQL = `
@@ -145,9 +146,9 @@ const IST_DAY = `(s.opened_at AT TIME ZONE 'Asia/Kolkata')::date`;
 
 function flowOf(row, flow) {
   const byMode = Object.fromEntries(
-    PAYMENT_MODES.map((mode) => [mode, money(row[`${mode}_${flow}`])]),
+    TAKE_MODES.map((mode) => [mode, money(row[`${mode}_${flow}`])]),
   );
-  const total = PAYMENT_MODES.reduce((sum, mode) => sum + paise(byMode[mode]), 0);
+  const total = TAKE_MODES.reduce((sum, mode) => sum + paise(byMode[mode]), 0);
   return { ...byMode, total: total / 100 };
 }
 

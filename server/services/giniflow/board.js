@@ -33,9 +33,7 @@ import {
   TESTS_HOLD_SQL,
   LIVE_LAB_CASE_SQL,
   caseReportedBeforeVisit,
-  caseSampledBeforeVisit,
   caseFromEarlierLabOnlyVisit,
-  caseTime,
   chiefWaitClock,
 } from "./testsHold.js";
 import { getMachines } from "./machineCatalog.js";
@@ -83,7 +81,6 @@ const TODAY_CASES = (v, p) => `
             AND NOT EXISTS (SELECT 1 FROM giniflow_lab_orders lo
                              WHERE lo.visit_id = ${v}.id AND lo.urgency = 'today' AND lo.kind = 'lab')
             AND NOT ${caseReportedBeforeVisit(v)}
-            AND NOT ${caseSampledBeforeVisit(v)}
             AND NOT ${caseFromEarlierLabOnlyVisit(v)}
             AND ${LIVE_LAB_CASE_SQL("lc")}`;
 
@@ -958,21 +955,6 @@ export async function getTestSegments(visitId, now = new Date(), db = pool) {
                 WHERE e.visit_id = v.id AND e.status = 'vitals_done'
                   AND e.actor_role <> 'system' AND e.occurred_at >= m.vitals_at) AS vitals_done_at,
               m.lab_drawn_at, m.lab_ordered_at, m.lab_unpaid,
-              (SELECT json_build_object(
-                        'registeredAt', min(${caseTime("registered_at")}),
-                        'collectedAt', min(LEAST(${caseTime("collected_on")}, ${caseTime("received_on")},
-                                                 ${caseTime("reported_on")})),
-                        'reportedAt', max(${caseTime("reported_on")}))
-                 FROM lab_cases lc
-                WHERE lc.case_date = v.visit_date
-                  AND (lc.patient_id = v.patient_id
-                       OR (lc.patient_id IS NULL
-                           AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
-                  AND ${LIVE_LAB_CASE_SQL("lc")}
-                  AND ${caseSampledBeforeVisit("v")}
-                  AND NOT ${caseFromEarlierLabOnlyVisit("v")}) AS earlier_lab,
-              (SELECT min(ce.occurred_at) FROM giniflow_visit_events ce
-                WHERE ce.visit_id = v.id) AS arrived_at,
               (SELECT max(lb.completed_at) FROM giniflow_visit_steps lb
                 WHERE lb.visit_id = v.id AND lb.step_catalog_id = 'lab_billing'
                   AND lb.status = 'done') AS lab_billing_done_at,
@@ -1075,39 +1057,7 @@ export async function getTestSegments(visitId, now = new Date(), db = pool) {
     },
     now,
   );
-  return {
-    segments: [...earlierLabSegments(r.earlier_lab, r.arrived_at), ...segments].sort(
-      (a, b) => a.from - b.from,
-    ),
-    orderTimes: (r.order_times || []).map((t) => new Date(t)),
-  };
-}
-
-export function earlierLabSegments(lab, arrivedAt) {
-  if (!lab?.collectedAt || !arrivedAt) return [];
-  const arrived = new Date(arrivedAt);
-  const registered = lab.registeredAt ? new Date(lab.registeredAt) : null;
-  const collected = new Date(lab.collectedAt);
-  const cap = (t) => (t && t < arrived ? t : arrived);
-  return [
-    registered && registered < collected
-      ? {
-          status: "lab_room",
-          label: "At the lab — sample taken",
-          from: registered,
-          to: cap(collected),
-        }
-      : null,
-    collected < arrived
-      ? {
-          status: "awaiting_check_in",
-          label: "Sample given — waiting for check-in at reception",
-          from: collected,
-          to: arrived,
-          isWait: true,
-        }
-      : null,
-  ].filter((seg) => seg && seg.to > seg.from);
+  return { segments, orderTimes: (r.order_times || []).map((t) => new Date(t)) };
 }
 
 export async function getScribeLabMarks(visitId, db = pool) {

@@ -1,19 +1,21 @@
 import pool from "../../config/db.js";
 import { CAPABILITIES, hasAnyCapability } from "../../../shared/permissions.js";
-import { HEALTHRAY_MODE } from "../../../shared/billingVocab.js";
+import { HEALTHRAY_MODE, NEFT_LABEL, NEFT_MODE } from "../../../shared/billingVocab.js";
 import { paise } from "../../../shared/labPayment.js";
 import { writeAudit } from "./audit.js";
-import { DRAWER_MODE, PAYMENT_MODES, refreshClosedDrawer } from "./cashShifts.js";
+import { DRAWER_MODE, refreshClosedDrawer, TAKE_MODES } from "./cashShifts.js";
 import { auditFields } from "./common.js";
 import { REFERENCE_MAX } from "./payments.js";
 import { httpError, inTransaction } from "./transaction.js";
+import { cleanUpiApp } from "./upiApp.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MODE_LABEL = { cash: "Cash", card: "Card", upi: "UPI" };
+const MODE_LABEL = { cash: "Cash", card: "Card", upi: "UPI", [NEFT_MODE]: NEFT_LABEL };
 const REASON_MAX = 300;
 
 const PAYMENT_SQL = `
-  SELECT p.id, p.bill_id, p.direction, p.mode, p.amount, p.reference, p.paid_via, p.receipt_no,
+  SELECT p.id, p.bill_id, p.direction, p.mode, p.amount, p.reference, p.upi_app, p.paid_via,
+         p.receipt_no,
          p.shift_id, p.received_by, p.received_at, p.deposit_patient_id,
          b.status AS bill_status, b.bill_no,
          s.closed_at AS shift_closed_at,
@@ -24,7 +26,7 @@ const PAYMENT_SQL = `
     LEFT JOIN doctors d ON d.id = p.received_by`;
 
 const correctable = (row) =>
-  row.direction === "in" && PAYMENT_MODES.includes(row.mode) && !row.deposit_patient_id;
+  row.direction === "in" && TAKE_MODES.includes(row.mode) && !row.deposit_patient_id;
 
 const paidInHealthray = (row) => row.direction === "in" && row.mode === HEALTHRAY_MODE;
 
@@ -38,9 +40,10 @@ export function mayCorrect(row, ctx) {
 
 function cleanCorrection(input) {
   const mode = typeof input?.mode === "string" ? input.mode.trim().toLowerCase() : "";
-  if (!PAYMENT_MODES.includes(mode)) {
-    throw httpError(400, `Choose the mode it was really paid by: ${PAYMENT_MODES.join(", ")}`);
+  if (!TAKE_MODES.includes(mode)) {
+    throw httpError(400, `Choose the mode it was really paid by: ${TAKE_MODES.join(", ")}`);
   }
+  const upiApp = cleanUpiApp(mode, input?.upi_app);
   const typed = typeof input?.reference === "string" ? input.reference.trim() : "";
   if (mode !== DRAWER_MODE && !typed) {
     throw httpError(400, `A ${MODE_LABEL[mode]} payment needs its reference number`);
@@ -53,8 +56,13 @@ function cleanCorrection(input) {
   if (reason.length > REASON_MAX) {
     throw httpError(400, `The reason is too long — keep it under ${REASON_MAX} letters`);
   }
-  return { mode, reference: mode === DRAWER_MODE ? null : typed, reason };
+  return { mode, reference: mode === DRAWER_MODE ? null : typed, upi_app: upiApp, reason };
 }
+
+const unchanged = (mode, before, wanted) =>
+  mode === wanted.mode &&
+  (before.reference ?? null) === wanted.reference &&
+  (before.upi_app ?? null) === wanted.upi_app;
 
 function refusal(row, ctx) {
   if (row.bill_status === "cancelled") {
@@ -63,7 +71,7 @@ function refusal(row, ctx) {
   if (!correctable(row)) {
     return httpError(
       409,
-      "Only a cash, card, UPI or HealthRay payment can have its mode corrected",
+      "Only a cash, card, UPI, NEFT / cheque or HealthRay payment can have its mode corrected",
     );
   }
   return httpError(
@@ -84,22 +92,28 @@ export async function correctPaymentMode(paymentId, input, ctx, db = pool) {
     const before = rows[0];
     if (!mayCorrect(before, ctx)) throw refusal(before, ctx);
     if (paidInHealthray(before)) return recordHealthrayMode(client, before, wanted, ctx);
-    if (before.mode === wanted.mode && (before.reference ?? null) === wanted.reference) {
+    if (unchanged(before.mode, before, wanted)) {
       throw httpError(400, "That is already the payment's mode and reference");
     }
     const { rows: updated } = await client.query(
-      `UPDATE payments SET mode = $2, reference = $3, updated_at = NOW(), updated_by = $4
+      `UPDATE payments SET mode = $2, reference = $3, upi_app = $5, updated_at = NOW(),
+                           updated_by = $4
         WHERE id = $1
-        RETURNING id, bill_id, direction, mode, amount, reference, receipt_no, shift_id,
+        RETURNING id, bill_id, direction, mode, amount, reference, upi_app, receipt_no, shift_id,
                   received_by, received_at`,
-      [id, wanted.mode, wanted.reference, ctx?.actorId ?? null],
+      [id, wanted.mode, wanted.reference, ctx?.actorId ?? null, wanted.upi_app],
     );
     await writeAudit(client, {
       entity: "payments",
       entityId: id,
       action: "update",
-      before: { mode: before.mode, reference: before.reference },
-      after: { mode: wanted.mode, reference: wanted.reference, reason: wanted.reason },
+      before: { mode: before.mode, reference: before.reference, upi_app: before.upi_app },
+      after: {
+        mode: wanted.mode,
+        reference: wanted.reference,
+        upi_app: wanted.upi_app,
+        reason: wanted.reason,
+      },
       ...auditFields(ctx),
     });
     const drawerMoved = before.mode === DRAWER_MODE || wanted.mode === DRAWER_MODE;
@@ -109,22 +123,28 @@ export async function correctPaymentMode(paymentId, input, ctx, db = pool) {
 }
 
 async function recordHealthrayMode(client, before, wanted, ctx) {
-  if (before.paid_via === wanted.mode && (before.reference ?? null) === wanted.reference) {
+  if (unchanged(before.paid_via, before, wanted)) {
     throw httpError(400, "That is already the payment's mode and reference");
   }
   const { rows: updated } = await client.query(
-    `UPDATE payments SET paid_via = $2, reference = $3, updated_at = NOW(), updated_by = $4
+    `UPDATE payments SET paid_via = $2, reference = $3, upi_app = $5, updated_at = NOW(),
+                         updated_by = $4
       WHERE id = $1
-      RETURNING id, bill_id, direction, mode, amount, reference, paid_via, receipt_no, shift_id,
-                received_by, received_at`,
-    [before.id, wanted.mode, wanted.reference, ctx?.actorId ?? null],
+      RETURNING id, bill_id, direction, mode, amount, reference, upi_app, paid_via, receipt_no,
+                shift_id, received_by, received_at`,
+    [before.id, wanted.mode, wanted.reference, ctx?.actorId ?? null, wanted.upi_app],
   );
   await writeAudit(client, {
     entity: "payments",
     entityId: before.id,
     action: "update",
-    before: { paid_via: before.paid_via, reference: before.reference },
-    after: { paid_via: wanted.mode, reference: wanted.reference, reason: wanted.reason },
+    before: { paid_via: before.paid_via, reference: before.reference, upi_app: before.upi_app },
+    after: {
+      paid_via: wanted.mode,
+      reference: wanted.reference,
+      upi_app: wanted.upi_app,
+      reason: wanted.reason,
+    },
     ...auditFields(ctx),
   });
   return { ...updated[0], amount: paise(updated[0].amount) };

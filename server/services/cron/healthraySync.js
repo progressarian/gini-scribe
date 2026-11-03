@@ -1,6 +1,12 @@
 // ── HealthRay → Gini Scribe sync orchestrator ──────────────────────────────
 
-import { markNotesRead, markNotesReadHash, notesHash } from "../healthray/notesRead.js";
+import {
+  markNotesRead,
+  markNotesReadHash,
+  notesHash,
+  notesRetryDue,
+  NOTES_RETRY,
+} from "../healthray/notesRead.js";
 import {
   fetchDoctors,
   fetchAppointments,
@@ -12,7 +18,7 @@ import {
 } from "../healthray/client.js";
 import {
   extractClinicalText,
-  parsePrescriptionWithAi,
+  readPrescriptionNotes,
   extractVitalsFromAnswers,
   buildHealthrayParseRequest,
   extractFollowUpFromNote,
@@ -590,7 +596,11 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
         // the text itself changes (e.g. P_175172: text stayed at 382 chars
         // after checkout, so cron kept short-circuiting and the row stayed
         // `in_visit` even after Rx PDF landed).
-        if (!force && rawText === (existing?.healthray_clinical_notes || "")) {
+        if (
+          !force &&
+          rawText === (existing?.healthray_clinical_notes || "") &&
+          !notesRetryDue(existing)
+        ) {
           await syncAppointmentDocs(healthrayId, patientId, apptDate);
           if (status && status !== existing.status) {
             if (status === "completed" && existing.patient_id) {
@@ -638,7 +648,9 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
         }
 
         // Parse with AI
-        const parsed = skipParse ? null : await parsePrescriptionWithAi(rawText, apptDate);
+        const { parsed, apiError: parseApiError } = skipParse
+          ? { parsed: null, apiError: false }
+          : await readPrescriptionNotes(rawText, apptDate);
 
         // Drop any labs the AI tagged as "today" when a matching FOLLOW UP
         // section exists — those "today" entries come from the OBSERVATIONS
@@ -663,11 +675,13 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
             (parsed.previous_medications?.length || 0) > 0);
         notesReadStatus = skipParse
           ? "skipped_date_mismatch"
-          : !parsed
-            ? "failed"
-            : parseHasContent
-              ? "read"
-              : "empty";
+          : parseApiError
+            ? NOTES_RETRY
+            : !parsed
+              ? "failed"
+              : parseHasContent
+                ? "read"
+                : "empty";
 
         if (!parseHasContent && existing?.id) {
           const prior = await getAppointmentEnrichmentCounts(existing.id);
@@ -1458,9 +1472,12 @@ export async function backfillPatientOpd(
     return { status: "enqueued", apptId: appt.id };
   }
 
-  const parsed = await parsePrescriptionWithAi(appt.healthray_clinical_notes, apptDateStr);
+  const { parsed, apiError } = await readPrescriptionNotes(
+    appt.healthray_clinical_notes,
+    apptDateStr,
+  );
   if (!parsed) {
-    await markNotesRead(appt.id, "failed", appt.healthray_clinical_notes);
+    await markNotesRead(appt.id, apiError ? NOTES_RETRY : "failed", appt.healthray_clinical_notes);
     return { status: "parse_failed", apptId: appt.id };
   }
 

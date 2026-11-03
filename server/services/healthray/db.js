@@ -377,7 +377,10 @@ export async function syncFollowUpDate(appointmentId, followUpDate) {
 export async function findAppointment(healthrayId, fileNo, apptDate) {
   // First try exact healthray_id match
   const { rows } = await pool.query(
-    `SELECT id, patient_id, healthray_clinical_notes, compliance, source, healthray_investigations, healthray_follow_up FROM appointments WHERE healthray_id = $1`,
+    `SELECT id, patient_id, healthray_clinical_notes, compliance, source, healthray_investigations, healthray_follow_up,
+            to_jsonb(appointments)->>'notes_read_status' AS notes_read_status,
+            to_jsonb(appointments)->>'notes_read_at' AS notes_read_at
+       FROM appointments WHERE healthray_id = $1`,
     [healthrayId],
   );
   if (rows[0]) return rows[0];
@@ -385,7 +388,10 @@ export async function findAppointment(healthrayId, fileNo, apptDate) {
   // Then try matching a sheet-imported appointment by file_no + date
   if (fileNo && apptDate) {
     const { rows: sheetRows } = await pool.query(
-      `SELECT id, patient_id, healthray_clinical_notes, compliance, source FROM appointments
+      `SELECT id, patient_id, healthray_clinical_notes, compliance, source,
+            to_jsonb(appointments)->>'notes_read_status' AS notes_read_status,
+            to_jsonb(appointments)->>'notes_read_at' AS notes_read_at
+       FROM appointments
        WHERE file_no = $1 AND appointment_date = $2 AND healthray_id IS NULL
        LIMIT 1`,
       [fileNo, apptDate],

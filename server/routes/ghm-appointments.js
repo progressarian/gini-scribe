@@ -17,6 +17,8 @@ import {
 import {
   ownFu,
   dayWindowWhere,
+  NOT_REPLACED_CANCEL,
+  replacedBookingDoctor,
   callStatusToday,
   isLatestFollowUpVisit,
   upcomingBookingElsewhere,
@@ -1557,6 +1559,7 @@ router.get("/ghm-appointments", async (req, res) => {
     // takes the whole day list down.
     // See docs/PATIENT_BLOCKLIST_PLAN.md §4.3
     where += NOT_BLOCKED("a");
+    where += NOT_REPLACED_CANCEL("a");
     where += homeCond;
     where += modeCond;
     where += callsCond;
@@ -1608,6 +1611,7 @@ router.get("/ghm-appointments", async (req, res) => {
                 ${BOOKING_NO_SLOT("a")} AS booking_no_slot,
                 ${BOOKED_DATE("a")} AS booked_for_date,
                 COALESCE(${upcomingBookingElsewhere("a")}, ${PREFERRED_BOOKING_ELSEWHERE("a", dayRef)}) AS booked_on,
+                ${replacedBookingDoctor("a")} AS replaced_doctor,
                 -- Follow-up date shown for THIS visit:
                 --   1. the visit's OWN effective follow-up date (column, synced
                 --      HealthRay appointment value, or prescription-extracted date —

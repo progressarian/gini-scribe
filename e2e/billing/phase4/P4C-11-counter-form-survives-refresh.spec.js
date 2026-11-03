@@ -74,6 +74,7 @@ async function typeSplitPayment(page) {
   await pad(page).getByLabel("Reference").fill(`CARD-${tag}`);
   await pad(page).getByRole("button", { name: "Split payment" }).click();
   await pad(page).getByLabel("Mode").nth(1).selectOption("upi");
+  await pad(page).getByLabel("UPI app").selectOption("bharatpe");
   await pad(page).getByLabel("Amount").nth(1).fill("500");
   await pad(page).getByLabel("Reference").nth(1).fill(`UPI-${tag}`);
 }
@@ -83,6 +84,7 @@ async function expectSplitPayment(page) {
   await expect(pad(page).getByLabel("Amount").nth(0)).toHaveValue("300");
   await expect(pad(page).getByLabel("Reference").nth(0)).toHaveValue(`CARD-${tag}`);
   await expect(pad(page).getByLabel("Mode").nth(1)).toHaveValue("upi");
+  await expect(pad(page).getByLabel("UPI app")).toHaveValue("bharatpe");
   await expect(pad(page).getByLabel("Amount").nth(1)).toHaveValue("500");
   await expect(pad(page).getByLabel("Reference").nth(1)).toHaveValue(`UPI-${tag}`);
 }
@@ -308,6 +310,7 @@ test.describe.serial("P4C-11 the counter form survives a refresh", () => {
     await open(page, bill.visit);
 
     await pad(page).getByLabel("Mode").selectOption("upi");
+    await pad(page).getByLabel("UPI app").selectOption("paytm");
     await pad(page).getByLabel("Amount").fill("300");
     await pad(page).getByLabel("Reference").fill(`UPI-PAY-${tag}`);
     await settle(page);

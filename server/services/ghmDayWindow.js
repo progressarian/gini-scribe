@@ -165,3 +165,28 @@ export const upcomingBookingElsewhere = (a = "a") => `CASE
        AND COALESCE(NULLIF(TRIM(b.time_slot), ''), NULLIF(TRIM(b.reporting_time_slot), '')) IS NOT NULL
        AND ${NOT_LAB_ONLY("b")}
   ) END`;
+
+const cancelledBooking = (a) =>
+  `(COALESCE(${a}.booking_status, '') = 'cancelled' OR COALESCE(${a}.status, '') = 'cancelled' OR COALESCE(${a}.call_status, '') = 'cancelled')`;
+
+const sameDayBooking = (a, other) =>
+  `${other}.file_no = ${a}.file_no AND ${other}.appointment_date = ${a}.appointment_date AND ${other}.id <> ${a}.id`;
+
+export const NOT_REPLACED_CANCEL = (a = "a") => ` AND NOT (
+    ${a}.file_no IS NOT NULL
+    AND ${cancelledBooking(a)}
+    AND EXISTS (
+      SELECT 1 FROM appointments live
+       WHERE ${sameDayBooking(a, "live")}
+         AND NOT ${cancelledBooking("live")}
+    )
+  )`;
+
+export const replacedBookingDoctor = (a = "a") => `CASE
+  WHEN ${a}.file_no IS NOT NULL AND NOT ${cancelledBooking(a)} THEN (
+    SELECT string_agg(DISTINCT dead.doctor_name, ', ')
+      FROM appointments dead
+     WHERE ${sameDayBooking(a, "dead")}
+       AND ${cancelledBooking("dead")}
+       AND ${NOT_LAB_ONLY("dead")}
+  ) END`;

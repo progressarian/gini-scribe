@@ -12,6 +12,7 @@ import {
   infoGridHtml,
   letterhead,
   modeText,
+  paymentModeText,
   printsTax,
   renderBillPdf,
   slug,
@@ -29,7 +30,7 @@ export async function depositReceiptView(paymentId, db = pool) {
   const id = typeof paymentId === "string" ? paymentId.trim() : "";
   if (!UUID.test(id)) throw httpError(400, "Choose a valid deposit receipt");
   const { rows } = await db.query(
-    `SELECT p.id, p.mode, p.amount, p.reference, p.receipt_no, p.received_at,
+    `SELECT p.id, p.mode, p.upi_app, p.amount, p.reference, p.receipt_no, p.received_at,
             p.voided_at, p.void_reason, COALESCE(vd.short_name, vd.name) AS voided_by_name,
             e.balance_after, e.note,
             COALESCE(d.short_name, d.name) AS received_by_name,
@@ -49,6 +50,7 @@ export async function depositReceiptView(paymentId, db = pool) {
     payment: {
       id: row.id,
       mode: row.mode,
+      upi_app: row.upi_app,
       amount: paise(row.amount),
       reference: row.reference,
       receipt_no: row.receipt_no,
@@ -95,7 +97,7 @@ export function buildDepositReceiptHtml(view) {
   const right = [
     field("Receipt No", payment.receipt_no, true),
     field("Date", stampText(payment.received_at)),
-    field("Mode", modeText(payment.mode)),
+    field("Mode", paymentModeText(payment)),
   ];
   if (payment.reference) right.push(field("Reference", payment.reference));
   if (payment.note) left.push(field("Note", payment.note));

@@ -27,6 +27,16 @@ export const HEALTHRAY_MODE = "healthray";
 export const DEPOSIT_MODE = "deposit";
 export const PREPAID_MODE = "prepaid";
 export const PREPAID_LABEL = "Paid earlier / online";
+export const UPI_MODE = "upi";
+export const NEFT_MODE = "neft";
+export const NEFT_LABEL = "NEFT / Cheque";
+export const UPI_APP_LABEL = { bharatpe: "BharatPe (QR)", paytm: "Paytm", other: "Other UPI" };
+export const UPI_APPS = Object.keys(UPI_APP_LABEL);
+export const UPI_APP_UNKNOWN = "UPI (app not recorded)";
+
+export function upiAppText(app) {
+  return UPI_APP_LABEL[app] ?? null;
+}
 export const ORDER_STATE = {
   CLAIM_AT_RECEPTION: "claim_at_reception",
   PAID_AT_RECEPTION: "paid_at_reception",

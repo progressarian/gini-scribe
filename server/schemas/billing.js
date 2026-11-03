@@ -27,6 +27,7 @@ import {
   DRAWER_MODE,
   NOTE_MAX as SHIFT_NOTE_MAX,
   STATUSES as SHIFT_STATUSES,
+  TAKE_MODES,
 } from "../services/billing/cashShifts.js";
 import {
   KINDS as REQUEST_KIND_LABELS,
@@ -46,6 +47,7 @@ import {
   PATIENT_PAYS,
   REFUND_MODES,
   REMAINDERS,
+  UPI_APPS,
   VISIT_TYPES,
   YES_NO,
 } from "../../shared/billingVocab.js";
@@ -1014,6 +1016,7 @@ export const billingCategorySetSchema = deskObject({
 export const billingPaymentModeSchema = deskObject({
   mode: z.string().trim().min(1).max(10),
   reference: z.union([z.string().trim().max(60), z.null()]).optional(),
+  upi_app: z.enum(UPI_APPS).nullish(),
   reason: z.string().trim().min(1).max(300),
 });
 
@@ -1049,6 +1052,7 @@ const paymentEntry = (modes) =>
         mode: z.enum(modes, { message: `must be one of: ${modes.join(", ")}` }),
         amount: paymentAmount,
         reference: z.union([z.string().trim().max(PAYMENT_REFERENCE_MAX), z.null()]).optional(),
+        upi_app: z.enum(UPI_APPS).nullish(),
         ...NO_PRICE,
       },
       objectOnly('must be a payment, like { mode: "cash", amount: 500 }'),
@@ -1060,15 +1064,16 @@ const paymentEntry = (modes) =>
       "needs its reference number when it isn't cash",
     );
 
-const takenPayment = paymentEntry([...PAYMENT_MODES, DEPOSIT_MODE, PREPAID_MODE]);
+const takenPayment = paymentEntry([...TAKE_MODES, DEPOSIT_MODE, PREPAID_MODE]);
 
-const paidOutPayment = paymentEntry([...PAYMENT_MODES, HEALTHRAY_MODE, PREPAID_MODE]);
+const paidOutPayment = paymentEntry([...TAKE_MODES, HEALTHRAY_MODE, PREPAID_MODE]);
 
 export const billingDepositReceiveSchema = z.strictObject(
   {
-    mode: z.enum(PAYMENT_MODES, { message: `must be one of: ${PAYMENT_MODES.join(", ")}` }),
+    mode: z.enum(TAKE_MODES, { message: `must be one of: ${TAKE_MODES.join(", ")}` }),
     amount: paymentAmount,
     reference: z.union([z.string().trim().max(PAYMENT_REFERENCE_MAX), z.null()]).optional(),
+    upi_app: z.enum(UPI_APPS).nullish(),
     note: z.union([z.string().trim().max(300), z.null()]).optional(),
   },
   objectOnly('must be a deposit, like { mode: "cash", amount: 2000 }'),

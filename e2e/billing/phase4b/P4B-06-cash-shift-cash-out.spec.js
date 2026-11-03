@@ -58,8 +58,8 @@ test.describe.serial("P4B-06 cash shift includes cash out", () => {
 
     const shift = await shifts.currentShift(desk, db);
     expect(shift.id).toBe(opened.id);
-    expect(shift.collected).toEqual({ cash: 800, card: 500, upi: 0, total: 1300 });
-    expect(shift.refunded).toEqual({ cash: 200.25, card: 500, upi: 0, total: 700.25 });
+    expect(shift.collected).toEqual({ cash: 800, card: 500, upi: 0, neft: 0, total: 1300 });
+    expect(shift.refunded).toEqual({ cash: 200.25, card: 500, upi: 0, neft: 0, total: 700.25 });
     expect(shift.payment_count).toBe(2);
     expect(shift.refund_count).toBe(2);
     expect(shift.credit_note_count).toBe(2);

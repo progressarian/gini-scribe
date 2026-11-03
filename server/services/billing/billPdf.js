@@ -11,7 +11,10 @@ import {
   BILL_DEPARTMENT,
   BILL_DOCUMENT_TITLES,
   HEALTHRAY_MODE,
+  NEFT_LABEL,
+  NEFT_MODE,
   PREPAID_MODE,
+  upiAppText,
 } from "../../../shared/billingVocab.js";
 import { rupeesInWords } from "./amountInWords.js";
 import { getSettings } from "./billingSettings.js";
@@ -294,6 +297,7 @@ const MODE_LABEL = {
   cash: "Cash",
   card: "Card",
   upi: "UPI",
+  [NEFT_MODE]: NEFT_LABEL,
   healthray: "Paid in HealthRay",
   deposit: "Paid from deposit",
   prepaid: "Paid earlier / online",
@@ -309,10 +313,13 @@ export const modeText = (mode) => MODE_LABEL[mode] ?? String(mode ?? "");
 
 export const refundModeText = (mode) => REFUND_MODE_LABEL[mode] ?? modeText(mode);
 
+const withUpiApp = (payment) =>
+  [modeText(payment?.mode), upiAppText(payment?.upi_app)].filter(Boolean).join(" · ");
+
 export const paymentModeText = (payment) =>
   payment?.direction === "out"
     ? (REFUND_MODE_LABEL[payment.mode] ?? `${modeText(payment.mode)} (refund)`)
-    : modeText(payment?.mode);
+    : withUpiApp(payment);
 
 export const paymentAmount = (payment) =>
   payment?.direction === "out" ? -payment.amount : (payment?.amount ?? 0);

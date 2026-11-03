@@ -115,7 +115,7 @@ test.describe.serial("P4-22 shifts and cash closing", () => {
     expect(shift.closed_at).toBeNull();
     expect(shift.counted_cash).toBeNull();
     expect(shift.difference).toBeNull();
-    expect(shift.collected).toEqual({ cash: 0, card: 0, upi: 0, total: 0 });
+    expect(shift.collected).toEqual({ cash: 0, card: 0, upi: 0, neft: 0, total: 0 });
     expect(shift.expected_cash).toBe(1000);
     expect(shift.payment_count).toBe(0);
     expect(shift.bill_count).toBe(0);
@@ -157,7 +157,7 @@ test.describe.serial("P4-22 shifts and cash closing", () => {
     await addPayment({ bill: ids.bill, mode: "upi", amount: 6666, shift: null });
 
     const shift = await svc.getShift(ids.shift, db);
-    expect(shift.collected).toEqual({ cash: 750, card: 300, upi: 200, total: 1250 });
+    expect(shift.collected).toEqual({ cash: 750, card: 300, upi: 200, neft: 0, total: 1250 });
     expect(shift.expected_cash).toBe(1750);
     expect(shift.payment_count).toBe(4);
     expect(shift.bill_count).toBe(2);
@@ -182,7 +182,7 @@ test.describe.serial("P4-22 shifts and cash closing", () => {
     await addPayment({ bill: ids.bill, mode: "card", amount: 80, shift: ids.otherShift });
 
     const theirs = await svc.getShift(ids.otherShift, db);
-    expect(theirs.collected).toEqual({ cash: 120, card: 80, upi: 0, total: 200 });
+    expect(theirs.collected).toEqual({ cash: 120, card: 80, upi: 0, neft: 0, total: 200 });
     expect(theirs.expected_cash).toBe(620);
 
     const mine = await svc.currentShift(desk, db);
@@ -253,7 +253,7 @@ test.describe.serial("P4-22 shifts and cash closing", () => {
     expect(closed.counted_cash).toBe(1700);
     expect(closed.difference).toBe(-50);
     expect(closed.note).toBe("Two fifty-rupee notes short");
-    expect(closed.collected).toEqual({ cash: 750, card: 300, upi: 200, total: 1250 });
+    expect(closed.collected).toEqual({ cash: 750, card: 300, upi: 200, neft: 0, total: 1250 });
 
     const stored = await one(
       `SELECT expected_cash, counted_cash, difference, closed_at, updated_by

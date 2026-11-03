@@ -50,6 +50,7 @@ test.describe.serial("D06 void a wrongly taken deposit receipt", () => {
     const shiftBefore = (await shifts.currentShift(desk, db)).deposits;
     const taken = await receive(bill.patient_id, {
       mode: "upi",
+      upi_app: "paytm",
       amount: 1125,
       reference: `UPI-${tag}`,
     });
@@ -107,7 +108,12 @@ test.describe.serial("D06 void a wrongly taken deposit receipt", () => {
     };
     const bill = await patient("VoidReport");
     const before = await upiDeposits();
-    await receive(bill.patient_id, { mode: "upi", amount: 300, reference: `UPI-R-${tag}` });
+    await receive(bill.patient_id, {
+      mode: "upi",
+      upi_app: "paytm",
+      amount: 300,
+      reference: `UPI-R-${tag}`,
+    });
     expect(await upiDeposits()).toBe(before + 30000);
     const received = (await account(bill.patient_id)).entries[0];
     await voidIt(received.id);
@@ -122,7 +128,12 @@ test.describe.serial("D06 void a wrongly taken deposit receipt", () => {
 
   test("4. part of the deposit already used on a bill: refused, nothing changes", async () => {
     const bill = await patient("VoidUsed");
-    await receive(bill.patient_id, { mode: "upi", amount: 1000, reference: `UPI-U-${tag}` });
+    await receive(bill.patient_id, {
+      mode: "upi",
+      upi_app: "paytm",
+      amount: 1000,
+      reference: `UPI-U-${tag}`,
+    });
     const received = (await account(bill.patient_id)).entries[0];
     await payOn(bill.id, [{ mode: "deposit", amount: 100 }]);
     await expect(voidIt(received.id)).rejects.toMatchObject({ status: 409 });

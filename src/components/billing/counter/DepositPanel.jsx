@@ -10,7 +10,8 @@ import {
 } from "../../../queries/hooks/useBilling";
 import { errorOf, fromPaise } from "../format";
 import { when } from "../importText";
-import { PAYMENT_MODE_LABEL } from "./lineText";
+import { needsUpiApp, PAYMENT_MODE_LABEL, TAKE_MODE_LABEL, takenModeText } from "./lineText";
+import UpiAppField from "./UpiAppField";
 import { PdfButton } from "./PdfViewer";
 import DepositMoves, { AmountField } from "./DepositMoves";
 import VoidDepositDialog from "./VoidDepositDialog";
@@ -30,13 +31,14 @@ const KIND_LABEL = {
 const REFERENCE_HINT = {
   card: "e.g. last 4 digits or slip no.",
   upi: "e.g. UPI transaction ID",
+  neft: "e.g. UTR or cheque no.",
 };
 
-const blankForm = () => ({ mode: "cash", amount: "", reference: "", note: "" });
+const blankForm = () => ({ mode: "cash", amount: "", reference: "", upiApp: "", note: "" });
 
 function detailOf(entry) {
   if (entry.kind === "received") {
-    return [PAYMENT_MODE_LABEL[entry.mode] ?? entry.mode, entry.reference, entry.receipt_no]
+    return [takenModeText(entry.mode, entry.upi_app), entry.reference, entry.receipt_no]
       .filter(Boolean)
       .join(" · ");
   }
@@ -88,8 +90,13 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
   const amount = Math.round(Number(form.amount || 0) * 100);
   const needsReference = form.mode !== "cash";
   const needsShift = form.mode === "cash" && !shift?.is_open;
+  const needsApp = needsUpiApp(form.mode);
   const ready =
-    amount > 0 && (!needsReference || form.reference.trim()) && !needsShift && !receive.isPending;
+    amount > 0 &&
+    (!needsReference || form.reference.trim()) &&
+    (!needsApp || form.upiApp) &&
+    !needsShift &&
+    !receive.isPending;
 
   const change = (patch) => {
     setForm((was) => ({ ...was, ...patch }));
@@ -112,6 +119,7 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
         mode: form.mode,
         amount: form.amount.trim(),
         ...(form.reference.trim() ? { reference: form.reference.trim() } : {}),
+        ...(needsApp ? { upi_app: form.upiApp } : {}),
         ...(form.note.trim() ? { note: form.note.trim() } : {}),
       });
       setForm(blankForm());
@@ -200,9 +208,9 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
               <select
                 className="bc-field__in"
                 value={form.mode}
-                onChange={(e) => change({ mode: e.target.value, reference: "" })}
+                onChange={(e) => change({ mode: e.target.value, reference: "", upiApp: "" })}
               >
-                {Object.entries(PAYMENT_MODE_LABEL).map(([mode, label]) => (
+                {Object.entries(TAKE_MODE_LABEL).map(([mode, label]) => (
                   <option key={mode} value={mode}>
                     {label}
                   </option>
@@ -215,6 +223,13 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
               reason={`One deposit can be at most ${fromPaise(DEPOSIT_MAX * 100)}`}
               onChange={(amount) => change({ amount })}
             />
+            {needsApp && (
+              <UpiAppField
+                label="UPI app *"
+                value={form.upiApp}
+                onChange={(upiApp) => change({ upiApp })}
+              />
+            )}
             {needsReference && (
               <label className="bc-field">
                 <span className="bc-field__lbl">Reference *</span>
@@ -244,7 +259,7 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
             )}
             {confirming && (
               <div className="bc-note" role="status">
-                Take {fromPaise(amount)} by {PAYMENT_MODE_LABEL[form.mode]} as a deposit for{" "}
+                Take {fromPaise(amount)} by {takenModeText(form.mode, form.upiApp)} as a deposit for{" "}
                 {patientName || "this patient"}? Their deposit becomes {fromPaise(balance + amount)}
                 .
               </div>
