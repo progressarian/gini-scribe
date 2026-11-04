@@ -18,6 +18,10 @@ import { emptyPaymentRow } from "./counterForm";
 import PaymentsReceived from "./PaymentsReceived";
 import UpiAppField from "./UpiAppField";
 import { announcePaid } from "./paidSignal";
+import { longDay } from "./CounterDate";
+
+const IST_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" });
+const istToday = () => IST_DAY.format(new Date());
 
 const paiseOf = (typed) => Math.round(Number(typed || 0) * 100);
 
@@ -380,6 +384,12 @@ export default function TotalsAndPayment({
             <Plus size={14} aria-hidden="true" />
             Split payment
           </button>
+
+          {bill.bill_date && bill.bill_date < istToday() && (
+            <div className="bc-hint bc-pay__olddate" role="note">
+              Bill dated {longDay(bill.bill_date)} · this payment is recorded today, in your shift.
+            </div>
+          )}
 
           <dl className="bc-pay__mini">
             <div>

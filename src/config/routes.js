@@ -159,7 +159,6 @@ export const PAGE_CAPABILITIES = {
   "/giniflow/station/billing": CAP.BILLING_DESK,
   "/billing/reports": CAP.BILLING_REPORTS,
   "/billing/dashboard": CAP.BILLING_REPORTS,
-  "/billing/dashboard/columns": CAP.BILLING_MASTER,
   "/reports/monthly": CAP.OPD_SUMMARY,
   "/billing/cghs-register": CAP.BILLING_CLAIMS,
   "/billing/dues": CAP.BILLING_DUES,

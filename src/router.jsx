@@ -92,7 +92,6 @@ const BillingImportPage = lazyWithRetry(() => import("./pages/billing/BillingImp
 const BillingCounterPage = lazyWithRetry(() => import("./pages/billing/BillingCounterPage"));
 const BillingReportsPage = lazyWithRetry(() => import("./pages/billing/BillingReportsPage"));
 const BillingDashboardPage = lazyWithRetry(() => import("./pages/billing/BillingDashboardPage"));
-const MisColumnsPage = lazyWithRetry(() => import("./pages/billing/MisColumnsPage"));
 const MonthlySummaryPage = lazyWithRetry(() => import("./pages/reports/MonthlySummaryPage"));
 const CghsRegisterPage = lazyWithRetry(() => import("./pages/billing/CghsRegisterPage"));
 const DuesRegisterPage = lazyWithRetry(() => import("./pages/billing/DuesRegisterPage"));
@@ -313,7 +312,6 @@ const router = createBrowserRouter([
               { path: "/giniflow/station/billing", element: lazyEl(BillingCounterPage) },
               { path: "/billing/reports", element: lazyEl(BillingReportsPage) },
               { path: "/billing/dashboard", element: lazyEl(BillingDashboardPage) },
-              { path: "/billing/dashboard/columns", element: lazyEl(MisColumnsPage) },
               { path: "/reports/monthly", element: lazyEl(MonthlySummaryPage) },
               { path: "/billing/cghs-register", element: lazyEl(CghsRegisterPage) },
               { path: "/billing/dues", element: lazyEl(DuesRegisterPage) },

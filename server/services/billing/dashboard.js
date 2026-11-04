@@ -2,12 +2,23 @@ import pool from "../../config/db.js";
 import { paise } from "../../../shared/labPayment.js";
 import { DEPOSIT_MODE, HEALTHRAY_MODE, PREPAID_MODE } from "../../../shared/billingVocab.js";
 import { indiaToday } from "./categoryResolver.js";
+import { unsettledOf } from "../../../shared/billingDashboardText.js";
 import { bucketsOf, cleanDashboardFilters, previousRange } from "./dashboardPeriods.js";
 import { DUE_BILLS, DUE_MONEY, DUE_OUTSTANDING } from "./dues.js";
-import { chargeColumns, lineKind, misColumnJoin, PHARMACY_COLUMN } from "./misColumns.js";
-import { CATEGORY, FINAL, LINE_CONSULTANT, SCHEME_JOIN, SIGN, VISIT_JOIN } from "./reports.js";
+import { chargeColumnsFor, GROUP_KEY, LINE_KIND, PHARMACY_COLUMN } from "./dashboardCharges.js";
+import { CATEGORY, LINE_CONSULTANT, SCHEME_JOIN, SIGN, VISIT_JOIN } from "./reports.js";
 import { dayOfInstant, reportScope } from "./reportsFilters.js";
-import { BILL_COLUMNS, bucketOf, narrowed, PAYMENT_COLUMNS } from "./dashboardSql.js";
+import {
+  BILL_COLUMNS,
+  BILLED,
+  bucketOf,
+  CATEGORY_REDUCTION,
+  CONCESSION,
+  GROSS,
+  narrowed,
+  PAID_DRAFT,
+  PAYMENT_COLUMNS,
+} from "./dashboardSql.js";
 import { discountsFor } from "./dashboardDiscounts.js";
 
 export const MONEY_COLUMNS = [
@@ -30,6 +41,12 @@ const CACHE_LIMIT = 50;
 
 const PAID_DAY = dayOfInstant("m.received_at");
 
+const BUCKET_END = {
+  day: (start) => start,
+  week: (start) => `(${start} + 6)`,
+  month: (start) => `((${start} + INTERVAL '1 month')::date - 1)`,
+};
+
 const MONEY_COLUMN = `CASE
     WHEN m.mode = '${PREPAID_MODE}' THEN '${PREPAID_MODE}'
     WHEN (CASE WHEN m.mode = '${HEALTHRAY_MODE}' THEN m.paid_via ELSE m.mode END) = 'upi'
@@ -44,16 +61,18 @@ async function billFacts(filters, db) {
   const { rows } = await db.query(
     `WITH picked AS (
        SELECT ${bucketOf(filters.period, "b.bill_date")} AS bucket, b.bill_type, b.patient_id,
-              ${SIGN} AS sign, b.patient_payable, b.round_off
+              ${SIGN} AS sign, b.patient_payable, b.round_off, ${PAID_DRAFT} AS not_final
          FROM bills b ${SCHEME_JOIN} ${VISIT_JOIN}
-        WHERE ${FINAL} AND ${scope.sql}
+        WHERE ${BILLED} AND ${scope.sql}
      )
      SELECT bucket::text AS bucket, GROUPING(bucket) AS rolled,
             COUNT(*) FILTER (WHERE bill_type = 'invoice') AS bills,
             COUNT(*) FILTER (WHERE bill_type = 'credit_note') AS credit_notes,
             COUNT(DISTINCT patient_id) FILTER (WHERE bill_type = 'invoice') AS patients,
             COALESCE(SUM(sign * patient_payable), 0) AS net_revenue,
-            COALESCE(SUM(sign * round_off), 0) AS round_off
+            COALESCE(SUM(sign * round_off), 0) AS round_off,
+            COUNT(*) FILTER (WHERE not_final) AS not_final_bills,
+            COALESCE(SUM(patient_payable) FILTER (WHERE not_final), 0) AS not_final_revenue
        FROM picked
       GROUP BY GROUPING SETS ((bucket), ())`,
     scope.params,
@@ -66,20 +85,23 @@ async function lineFacts(filters, db) {
   const { rows } = await db.query(
     `WITH lined AS (
        SELECT ${bucketOf(filters.period, "b.bill_date")} AS bucket,
-              COALESCE(mc.key, 'misc') AS col, ${lineKind()} AS kind,
-              ${SIGN} * l.actual_amount AS actual, ${SIGN} * l.discount AS discount,
+              ${GROUP_KEY} AS col, ${LINE_KIND} AS kind,
+              ${SIGN} * ${GROSS} AS actual, ${SIGN} * ${CONCESSION} AS discount,
+              ${SIGN} * l.discount AS rule_discount,
+              ${SIGN} * ${CATEGORY_REDUCTION} AS category_reduction,
               ${SIGN} * (l.cgst + l.sgst) AS tax, ${SIGN} * l.claim_amount AS claim,
               ${SIGN} * l.adjustment_amount AS adjustment
          FROM bills b JOIN bill_lines l ON l.bill_id = b.id ${SCHEME_JOIN} ${VISIT_JOIN}
          LEFT JOIN service_items si ON si.id = l.service_item_id
-         ${misColumnJoin()}
-        WHERE ${FINAL} AND ${scope.sql}
+        WHERE ${BILLED} AND ${scope.sql}
      )
      SELECT bucket::text AS bucket, col, GROUPING(col) AS col_rolled,
             COALESCE(SUM(actual), 0) AS charges, COALESCE(SUM(discount), 0) AS discount,
             COALESCE(SUM(discount) FILTER (WHERE kind = 'consultation'), 0)
               AS discount_consultation,
             COALESCE(SUM(discount) FILTER (WHERE kind = 'test'), 0) AS discount_tests,
+            COALESCE(SUM(rule_discount), 0) AS rule_discount,
+            COALESCE(SUM(category_reduction), 0) AS category_reduction,
             COALESCE(SUM(tax), 0) AS tax, COALESCE(SUM(claim), 0) AS claim,
             COALESCE(SUM(adjustment), 0) AS adjustment
        FROM lined
@@ -91,10 +113,9 @@ async function lineFacts(filters, db) {
 
 async function moneyFacts(filters, db) {
   const scope = reportScope(filters, PAYMENT_COLUMNS);
-  const start =
-    filters.period === "none"
-      ? scope.bind(filters.from) + "::date"
-      : bucketOf(filters.period, PAID_DAY);
+  const whole = filters.period === "none";
+  const start = whole ? `${scope.bind(filters.from)}::date` : bucketOf(filters.period, PAID_DAY);
+  const end = whole ? `${scope.bind(filters.to)}::date` : BUCKET_END[filters.period](start);
   const { rows } = await db.query(
     `WITH moved AS (
        SELECT ${bucketOf(filters.period, PAID_DAY)} AS bucket,
@@ -104,11 +125,13 @@ async function moneyFacts(filters, db) {
                    WHEN m.direction = 'in' THEN m.amount ELSE -m.amount END AS amount,
               CASE WHEN m.mode = '${DEPOSIT_MODE}' AND m.direction = 'in' THEN m.amount ELSE 0 END
                 AS from_deposit,
+              CASE WHEN m.mode = '${DEPOSIT_MODE}' AND m.direction = 'out' THEN m.amount ELSE 0 END
+                AS kept_as_deposit,
               m.direction,
               m.bill_id IS NULL AS deposit,
-              m.direction = 'in' AND b.bill_type = 'invoice' AND b.status = 'final'
-                AND b.bill_date < ${start} AS earlier,
-              m.direction = 'in' AND b.id IS NOT NULL AND b.status <> 'final' AS unbilled
+              m.mode <> '${DEPOSIT_MODE}' AND ${BILLED}
+                AND (b.bill_date < ${start} OR b.bill_date > ${end}) AS earlier,
+              m.direction = 'in' AND b.id IS NOT NULL AND NOT ${BILLED} AS unbilled
          FROM payments m LEFT JOIN bills b ON b.id = m.bill_id ${SCHEME_JOIN} ${VISIT_JOIN}
         WHERE m.voided_at IS NULL AND ${scope.sql}
      )
@@ -118,7 +141,8 @@ async function moneyFacts(filters, db) {
             COALESCE(SUM(amount) FILTER (WHERE earlier), 0) AS earlier_dues,
             COALESCE(SUM(amount) FILTER (WHERE deposit), 0) AS to_deposit,
             COALESCE(SUM(amount) FILTER (WHERE unbilled), 0) AS unbilled,
-            COALESCE(SUM(from_deposit), 0) AS from_deposit
+            COALESCE(SUM(from_deposit), 0) AS from_deposit,
+            COALESCE(SUM(kept_as_deposit), 0) AS kept_as_deposit
        FROM moved
       GROUP BY GROUPING SETS ((bucket, col), (bucket))`,
     scope.params,
@@ -149,9 +173,9 @@ async function mixFacts(filters, db) {
     `WITH lined AS (
        SELECT lower(l.group_code) AS gkey, l.group_code, ${CATEGORY} AS category,
               ${LINE_CONSULTANT} AS consultant,
-              ${SIGN} * (l.actual_amount - l.discount) AS net
+              ${SIGN} * (${GROSS} - ${CONCESSION}) AS net
          FROM bills b JOIN bill_lines l ON l.bill_id = b.id ${SCHEME_JOIN} ${VISIT_JOIN}
-        WHERE ${FINAL} AND ${scope.sql}
+        WHERE ${BILLED} AND ${scope.sql}
      ), rolled AS (
        SELECT gkey, MAX(group_code) AS group_code, category, consultant,
               GROUPING(gkey) AS g_rolled, GROUPING(category) AS c_rolled,
@@ -168,6 +192,38 @@ async function mixFacts(filters, db) {
     scope.params,
   );
   return rows;
+}
+
+export const NOT_FINAL_LIST_MAX = 500;
+
+async function notFinalBills(filters, db) {
+  const scope = reportScope(filters, BILL_COLUMNS);
+  const { rows } = await db.query(
+    `SELECT b.id AS bill_id, b.bill_date::text AS bill_date, b.patient_id, b.visit_id,
+            b.patient_payable, b.paid_amount, b.scheme_label,
+            p.name AS patient_name, p.file_no, p.health_id
+       FROM bills b ${SCHEME_JOIN} ${VISIT_JOIN}
+       JOIN patients p ON p.id = b.patient_id
+      WHERE ${PAID_DRAFT} AND b.bill_type = 'invoice' AND ${scope.sql}
+      ORDER BY b.bill_date, p.name, b.id
+      LIMIT ${NOT_FINAL_LIST_MAX + 1}`,
+    scope.params,
+  );
+  return {
+    truncated: rows.length > NOT_FINAL_LIST_MAX,
+    bills: rows.slice(0, NOT_FINAL_LIST_MAX).map((row) => ({
+      bill_id: row.bill_id,
+      bill_date: row.bill_date,
+      patient_id: row.patient_id,
+      visit_id: row.visit_id,
+      patient_name: row.patient_name,
+      file_no: row.file_no,
+      health_id: row.health_id,
+      category: row.scheme_label,
+      payable: paise(row.patient_payable),
+      paid: paise(row.paid_amount),
+    })),
+  };
 }
 
 async function duesFacts(filters, db) {
@@ -197,14 +253,25 @@ function blankRow(bucket, charges) {
     collected: 0,
     paid_back: 0,
     pending: 0,
-    pending_parts: { earlier_dues: 0, to_deposit: 0, unbilled: 0, from_deposit: 0 },
+    pending_parts: {
+      earlier_dues: 0,
+      to_deposit: 0,
+      unbilled: 0,
+      from_deposit: 0,
+      kept_as_deposit: 0,
+      unsettled: 0,
+    },
     charges: Object.fromEntries(charges.map((column) => [column.key, 0])),
     charges_total: 0,
     discount: 0,
     discount_consultation: 0,
     discount_tests: 0,
+    rule_discount: 0,
+    category_reduction: 0,
     tax: 0,
     round_off: 0,
+    not_final_bills: 0,
+    not_final_revenue: 0,
     claim: 0,
     adjustment: 0,
     cash_taken_out: null,
@@ -219,6 +286,8 @@ function fill(row, { bills, lines, money, cashOut }) {
     row.patients = Number(bills.patients);
     row.net_revenue = paise(bills.net_revenue);
     row.round_off = paise(bills.round_off);
+    row.not_final_bills = Number(bills.not_final_bills);
+    row.not_final_revenue = paise(bills.not_final_revenue);
   }
   for (const line of lines) {
     if (line.col_rolled) {
@@ -229,6 +298,8 @@ function fill(row, { bills, lines, money, cashOut }) {
       row.tax = paise(line.tax);
       row.claim = paise(line.claim);
       row.adjustment = paise(line.adjustment);
+      row.rule_discount = paise(line.rule_discount);
+      row.category_reduction = paise(line.category_reduction);
     } else {
       row.charges[line.col] = (row.charges[line.col] ?? 0) + paise(line.charges);
     }
@@ -242,6 +313,7 @@ function fill(row, { bills, lines, money, cashOut }) {
         to_deposit: paise(part.to_deposit),
         unbilled: paise(part.unbilled),
         from_deposit: paise(part.from_deposit),
+        kept_as_deposit: paise(part.kept_as_deposit),
       };
     } else if (part.col !== DEPOSIT_MODE) {
       row.money[part.col] = (row.money[part.col] ?? 0) + paise(part.amount);
@@ -249,9 +321,9 @@ function fill(row, { bills, lines, money, cashOut }) {
   }
   if (cashOut !== undefined) row.cash_taken_out = cashOut === null ? null : paise(cashOut);
   row.pending = row.net_revenue - row.collected;
+  row.pending_parts.unsettled = unsettledOf(row.pending, row.pending_parts);
   row.rev_per_patient = row.patients ? Math.round(row.net_revenue / row.patients) : null;
-  const fromLines =
-    row.charges_total - row.discount + row.tax + row.round_off - row.claim - row.adjustment;
+  const fromLines = row.charges_total - row.discount + row.tax + row.round_off - row.claim;
   row.check = { difference: fromLines - row.net_revenue, ok: fromLines === row.net_revenue };
   return row;
 }
@@ -278,8 +350,12 @@ function addInto(total, row) {
     "discount",
     "discount_consultation",
     "discount_tests",
+    "rule_discount",
+    "category_reduction",
     "tax",
     "round_off",
+    "not_final_bills",
+    "not_final_revenue",
     "claim",
     "adjustment",
   ]) {
@@ -353,6 +429,9 @@ function kpisOf(row) {
     net_revenue: row.net_revenue,
     gross: row.charges_total,
     discount: row.discount,
+    rule_discount: row.rule_discount,
+    category_reduction: row.category_reduction,
+    written_off: row.adjustment,
     discount_pct: row.charges_total
       ? Math.round((10000 * row.discount) / row.charges_total) / 100
       : null,
@@ -364,6 +443,8 @@ function kpisOf(row) {
     patients: row.patients,
     avg_bill: row.bills ? Math.round(row.net_revenue / row.bills) : null,
     rev_per_patient: row.rev_per_patient,
+    not_final_bills: row.not_final_bills,
+    not_final_revenue: row.not_final_revenue,
   };
 }
 
@@ -382,7 +463,6 @@ async function totalsFor(filters, charges, db) {
 }
 
 async function buildDashboard(filters, db) {
-  const charges = await chargeColumns(db);
   const range = { from: filters.from, to: filters.to };
   const previous = previousRange(range);
   const [bills, lines, money] = await Promise.all([
@@ -390,11 +470,16 @@ async function buildDashboard(filters, db) {
     lineFacts(filters, db),
     moneyFacts(filters, db),
   ]);
+  const charges = await chargeColumnsFor(
+    lines.filter((row) => !row.col_rolled).map((row) => row.col),
+    db,
+  );
   const [cashOut, mix, dues] = await Promise.all([
     cashTakenOut(filters, db),
     mixFacts(filters, db),
     duesFacts(filters, db),
   ]);
+  const notFinal = await notFinalBills(filters, db);
   const buckets = bucketsOf(filters);
   const discounts = await discountsFor(filters, buckets, db);
   const before = await totalsFor(ranged(filters, previous, "none"), charges, db);
@@ -428,6 +513,7 @@ async function buildDashboard(filters, db) {
     mix: shapeMix(mix),
     discounts,
     dues,
+    not_final: notFinal,
   };
 }
 

@@ -3,9 +3,17 @@ import { changeOf, count, money, rangeLabel } from "./dashboardText";
 const ARROW = { 1: "▲", 0: "■", [-1]: "▼" };
 const WORD = { 1: "up", 0: "same", [-1]: "down" };
 
-function Change({ current, previous, points, against }) {
+function Change({ current, previous, points, against, format = money }) {
   const change = changeOf(current, previous, { points });
   if (!change) return <span className="bdash-tile__change">Nothing in {against} to compare</span>;
+  if (change.text === null) {
+    return (
+      <span className="bdash-tile__change">
+        <span aria-hidden="true">{ARROW[change.direction]}</span>{" "}
+        {change.direction < 0 ? "Down" : "Up"} from {format(change.from)} in {against}
+      </span>
+    );
+  }
   return (
     <span className="bdash-tile__change">
       <span aria-hidden="true">{ARROW[change.direction]}</span>{" "}
@@ -39,9 +47,15 @@ export default function KpiTiles({ data }) {
       <Tile
         label="Net revenue"
         value={money(now.net_revenue)}
-        hint="What patients owe on final bills dated in this period, less credit notes. CGHS claims are not included."
+        hint="What patients owe on bills dated in this period (final bills and fully paid drafts), less credit notes. CGHS claims are not included."
       >
         {compare("net_revenue")}
+        {now.not_final_bills ? (
+          <span className="bdash-tile__change">
+            Includes {money(now.not_final_revenue)} on {count(now.not_final_bills)} paid{" "}
+            {now.not_final_bills === 1 ? "bill" : "bills"} not finalised yet
+          </span>
+        ) : null}
       </Tile>
       <Tile
         label="Collected"
@@ -62,20 +76,28 @@ export default function KpiTiles({ data }) {
       <Tile
         label="Discount"
         value={money(now.discount)}
-        hint="All discounts on final bills, less discounts credited back"
+        hint="Everything patients were not charged: discount rules (automatic, code, manual), lower category rates (CGHS and other price lists, against the base price) and amounts written off. CGHS claims are not a discount — they are still owed."
       >
         <span className="bdash-tile__change">
           {now.discount_pct === null ? "No charges" : `${now.discount_pct}% of charges`}
         </span>
+        <span className="bdash-tile__change">
+          Rules {money(now.rule_discount)} · Category rates {money(now.category_reduction)} ·
+          Written off {money(now.written_off)}
+        </span>
         {compare("discount_pct", { points: true })}
       </Tile>
-      <Tile label="Bills" value={count(now.bills)} hint="Final bills, not counting credit notes">
+      <Tile
+        label="Bills"
+        value={count(now.bills)}
+        hint="Final bills and fully paid drafts, not counting credit notes"
+      >
         <span className="bdash-tile__change">
           {now.credit_notes
             ? `${count(now.credit_notes)} credit ${now.credit_notes === 1 ? "note" : "notes"}`
             : "No credit notes"}
         </span>
-        {compare("bills")}
+        {compare("bills", { format: count })}
       </Tile>
       <Tile
         label="Average bill"

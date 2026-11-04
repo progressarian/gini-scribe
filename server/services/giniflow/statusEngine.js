@@ -390,11 +390,20 @@ export async function getStationTimes(
           (st) => chainIndex(st) > chainIndex(from) && chainIndex(st) < chainIndex(to),
         )
       : [];
+  const { rows: planRows } = await db.query(
+    `SELECT chain_status, status FROM giniflow_visit_steps WHERE visit_id = $1`,
+    [visitId],
+  );
+  const plannedStations = new Set(
+    planRows.filter((s) => s.chain_status && s.status !== "skipped").map((s) => s.chain_status),
+  );
+  const outsidePlan = (st) => planRows.length > 0 && !plannedStations.has(st);
   const chiefNotPlanned = (next) =>
     next?.meta?.reason === NO_CHIEF_STEP_REASON || next?.meta?.chief_not_planned === true;
   const skippedBetween = (row, next) =>
     stationsSkipped(row.status, next.status).filter(
       (st) =>
+        !outsidePlan(st) &&
         !(st === "with_vitals" && next.status === "vitals_done" && next.actor_role !== "system") &&
         !(st === "with_sd" && chiefNotPlanned(next)),
     );

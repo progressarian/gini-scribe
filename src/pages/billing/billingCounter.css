@@ -2826,3 +2826,65 @@ body > [role="dialog"][aria-modal="true"] .bc-cc__warn {
   grid-column: 1 / -1;
   color: var(--ink2);
 }
+.gf .bc-date {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.gf .bc-date__input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+}
+.gf .bc-date__step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  min-width: 32px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.gf .bc-date__step:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.gf .bc-date__input:focus-visible,
+.gf .bc-date__step:focus-visible {
+  outline: none;
+  border-color: var(--tl);
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
+}
+.gf .bc-pastday {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--amb);
+  border-radius: var(--r, 8px);
+  background: var(--amb-l);
+  color: var(--ink);
+  font-size: 13px;
+}
+.gf .bc-pay__olddate {
+  border-left: 3px solid var(--amb);
+  padding-left: 8px;
+}

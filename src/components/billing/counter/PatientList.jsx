@@ -173,6 +173,7 @@ export default function PatientList({
   onPick,
   feeChanges = [],
   feeFocus = 0,
+  pastDay = false,
 }) {
   const toBill = data?.toBill || [];
   const billed = data?.billed || [];
@@ -264,7 +265,7 @@ export default function PatientList({
           />
           <Group
             id="bc-billed"
-            label="Billed today / Exited"
+            label={pastDay ? "Billed / Exited" : "Billed today / Exited"}
             rows={billed}
             open={open.billed}
             onToggle={toggle("billed")}

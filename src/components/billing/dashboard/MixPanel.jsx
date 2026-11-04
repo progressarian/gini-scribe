@@ -146,7 +146,7 @@ export function RevenueMix({ data }) {
         </div>
       </div>
       <div className="fset__cardsub">
-        Charges less discounts on final bills, before tax.{" "}
+        Charges less discounts on billed visits, before tax.{" "}
         <ReportLink report={chosen.report} title={chosen.title} filters={data.filters} />
       </div>
       <HorizontalBars

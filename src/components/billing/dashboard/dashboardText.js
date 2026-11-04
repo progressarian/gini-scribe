@@ -1,5 +1,5 @@
 import { fromPaise } from "../format";
-import { PENDING_PARTS } from "../../../../shared/billingDashboardText.js";
+import { pendingEffects } from "../../../../shared/billingDashboardText.js";
 
 export {
   bucketLabel,
@@ -17,8 +17,9 @@ export const negativeMoney = (paise) => (paise ? money(-paise) : fromPaise(0));
 export function compactMoney(paise) {
   const rupees = Math.abs(paise) / 100;
   const sign = paise < 0 ? "−" : "";
-  if (rupees >= 10000000) return `${sign}₹${(rupees / 10000000).toFixed(1).replace(/\.0$/, "")}Cr`;
-  if (rupees >= 100000) return `${sign}₹${(rupees / 100000).toFixed(1).replace(/\.0$/, "")}L`;
+  const short = (value, digits) => value.toFixed(digits).replace(/\.?0+$/, "");
+  if (rupees >= 10000000) return `${sign}₹${short(rupees / 10000000, 2)}Cr`;
+  if (rupees >= 100000) return `${sign}₹${short(rupees / 100000, 2)}L`;
   if (rupees >= 1000) return `${sign}₹${(rupees / 1000).toFixed(1).replace(/\.0$/, "")}k`;
   return `${sign}₹${Math.round(rupees)}`;
 }
@@ -33,16 +34,20 @@ export function changeOf(current, previous, { points = false } = {}) {
     const diff = Math.round((current - previous) * 100) / 100;
     return { direction: Math.sign(diff), text: `${Math.abs(diff)} pt` };
   }
-  if (previous === 0) return current === 0 ? { direction: 0, text: "no change" } : null;
+  if (previous === 0) {
+    return current === 0
+      ? { direction: 0, text: "no change" }
+      : { direction: Math.sign(current), text: null, from: 0 };
+  }
   const pct = Math.round((1000 * (current - previous)) / Math.abs(previous)) / 10;
+  if (Math.abs(pct) >= 1000) return { direction: Math.sign(pct), text: null, from: previous };
   return { direction: Math.sign(pct), text: `${Math.abs(pct)}%` };
 }
 
 export function pendingNote(row) {
-  const parts = PENDING_PARTS.filter((part) => row.pending_parts?.[part.key]).map(
-    (part) => `${part.label}: ${money(row.pending_parts[part.key])}`,
-  );
-  return parts.join("\n");
+  return pendingEffects(row.pending_parts)
+    .map((part) => `${part.amount > 0 ? "+" : ""}${money(part.amount)}  ${part.label}`)
+    .join("\n");
 }
 
 const CARRIED = ["category", "sub_category", "consultant"];

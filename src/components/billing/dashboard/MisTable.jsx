@@ -70,6 +70,11 @@ function Cells({ row, data, layout }) {
       <td className="brep-num">{negativeMoney(row.discount)}</td>
       <td className="brep-num">{negativeMoney(row.discount_consultation)}</td>
       <td className="brep-num">{negativeMoney(row.discount_tests)}</td>
+      {layout.discountParts.map((column) => (
+        <td key={column.key} className="brep-num">
+          {negativeMoney(row[column.key])}
+        </td>
+      ))}
       {layout.extras.map((column) => (
         <td key={column.key} className="brep-num">
           {money(row[column.key])}
@@ -88,7 +93,7 @@ function Cells({ row, data, layout }) {
   );
 }
 
-export default function MisTable({ data, onPick }) {
+export default function MisTable({ data, onPick, onOpenGroup, openGroup }) {
   const period = data.filters.period;
   const layout = misLayout(data);
   const charges = data.columns.charges;
@@ -123,7 +128,7 @@ export default function MisTable({ data, onPick }) {
               <th scope="colgroup" colSpan={chargeSpan}>
                 Charges
               </th>
-              <th scope="colgroup" colSpan={3}>
+              <th scope="colgroup" colSpan={3 + layout.discountParts.length}>
                 Discounts
               </th>
               <th scope="colgroup" colSpan={otherSpan}>
@@ -150,7 +155,15 @@ export default function MisTable({ data, onPick }) {
               </th>
               {charges.map((column) => (
                 <th key={column.key} scope="col" className="brep-num">
-                  {column.label}
+                  <button
+                    type="button"
+                    className="bdash-link"
+                    aria-expanded={openGroup === column.key}
+                    aria-label={`Open ${column.label} detail`}
+                    onClick={() => onOpenGroup(column.key)}
+                  >
+                    {column.label} ›
+                  </button>
                 </th>
               ))}
               <th scope="col" className="brep-num" title={data.columns.pharmacy.note}>
@@ -166,6 +179,11 @@ export default function MisTable({ data, onPick }) {
               <th scope="col" className="brep-num">
                 Discount on Tests
               </th>
+              {layout.discountParts.map((column) => (
+                <th key={column.key} scope="col" className="brep-num">
+                  {column.label}
+                </th>
+              ))}
               {layout.extras.map((column) => (
                 <th key={column.key} scope="col" className="brep-num">
                   {column.label}

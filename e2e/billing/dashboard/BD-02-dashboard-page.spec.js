@@ -21,7 +21,6 @@ const tag = newTag();
 const CODE = `BDP${tag}`.toUpperCase();
 const SHOTS = process.env.BD_SCREENSHOTS;
 let ids;
-let xrayBefore;
 
 const heading = (page) => page.getByRole("heading", { name: "Billing dashboard" });
 const mis = (page) => page.getByRole("table", { name: /wise summary$/ });
@@ -57,15 +56,10 @@ test.describe.serial("BD-02 billing dashboard page", () => {
       payLater: true,
       codes: [CODE],
     });
-    xrayBefore = (await query(`SELECT label FROM billing_mis_columns WHERE key = 'x_ray'`)).rows[0]
-      ?.label;
     dashboard.clearDashboardCache();
   });
 
   test.afterAll(async () => {
-    if (xrayBefore) {
-      await query(`UPDATE billing_mis_columns SET label = $1 WHERE key = 'x_ray'`, [xrayBefore]);
-    }
     await tearDown(ids);
     await dropShifts();
   });
@@ -141,18 +135,34 @@ test.describe.serial("BD-02 billing dashboard page", () => {
     await expect(page).not.toHaveURL(/\/billing\/dashboard/);
   });
 
-  test("6. MIS columns: rename a column and see it on the dashboard", async ({ page }) => {
+  test("6. a service group opens to its subgroups, then items, and closes again", async ({
+    page,
+  }) => {
     await loginAs(page, "reception_admin");
-    await gotoReady(page, "/billing/dashboard/columns", () =>
-      page.getByRole("heading", { name: "MIS columns" }),
-    );
-    const form = page.getByRole("form", { name: xrayBefore });
-    await form.getByLabel("Column name").fill(`X-Ray ${tag}`);
-    await form.getByRole("button", { name: "Save column" }).click();
-    const renamed = page.getByRole("form", { name: `X-Ray ${tag}` });
-    await expect(renamed.getByRole("status")).toContainText("saved");
     await open(page, "&range=today");
-    await expect(mis(page).getByRole("columnheader", { name: `X-Ray ${tag}` })).toBeVisible();
+    await mis(page)
+      .getByRole("button", { name: `Open P4 Group ${tag} detail` })
+      .click();
+    await expect(page).toHaveURL(new RegExp(`group=p4g-${tag}`));
+    const detail = page.getByRole("region", { name: "Charges detail" });
+    await expect(detail.getByRole("navigation", { name: "Charges detail" })).toContainText(
+      `P4 Group ${tag}`,
+    );
+    const bySub = detail.getByRole("table", { name: `P4 Group ${tag} by subgroup` });
+    await expect(bySub.locator("tfoot")).toContainText("₹2,100");
+    await bySub.getByRole("button", { name: `Open P4 Subgroup ${tag} items` }).click();
+    await expect(page).toHaveURL(new RegExp(`subgroup=p4s-${tag}`));
+    const items = detail.getByRole("table", { name: `P4 Subgroup ${tag} items` });
+    await expect(items).toContainText(`Ankle brace ${tag}`);
+    await expect(items).toContainText(`Dressing ${tag}`);
+    await expect(items.locator("tfoot")).toContainText("₹2,100");
+    await page.reload();
+    await expect(page.getByRole("table", { name: `P4 Subgroup ${tag} items` })).toBeVisible();
+    await detail.getByRole("button", { name: `P4 Group ${tag}` }).click();
+    await expect(page).not.toHaveURL(/subgroup=/);
+    await detail.getByRole("button", { name: "Close charges detail" }).click();
+    await expect(page.getByRole("region", { name: "Charges detail" })).toHaveCount(0);
+    await expect(page).not.toHaveURL(/group=/);
   });
 
   test("6b. the discount section shows the code, its share of charges and the bill it was on", async ({
@@ -241,6 +251,19 @@ test.describe.serial("BD-02 billing dashboard page", () => {
     expect(overflowing).toEqual([]);
     const pageWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(pageWidth).toBeLessThanOrEqual(390);
+    const pinned = await mis(page).evaluate((table) => {
+      const scroller = table.parentElement;
+      scroller.scrollLeft = scroller.scrollWidth;
+      const cell = table.querySelector("tfoot th");
+      return {
+        scrolled: scroller.scrollLeft > 0,
+        offset: Math.round(
+          cell.getBoundingClientRect().left - scroller.getBoundingClientRect().left,
+        ),
+      };
+    });
+    expect(pinned.scrolled).toBe(true);
+    expect(pinned.offset).toBeGreaterThanOrEqual(-1);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/dashboard-phone.png`, fullPage: true });
   });
 });

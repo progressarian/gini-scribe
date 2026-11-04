@@ -17,10 +17,10 @@ import RevenueTrend from "../../components/billing/dashboard/RevenueTrend";
 import MisTable from "../../components/billing/dashboard/MisTable";
 import { PaymentModes, RevenueMix } from "../../components/billing/dashboard/MixPanel";
 import DiscountPanel from "../../components/billing/dashboard/DiscountPanel";
+import ChargeDetail from "../../components/billing/dashboard/ChargeDetail";
+import NotFinalPanel from "../../components/billing/dashboard/NotFinalPanel";
 import { PERIOD_LABELS, reportHref } from "../../components/billing/dashboard/dashboardText";
-import useAuthStore from "../../stores/authStore";
 import { toast } from "../../stores/uiStore";
-import { CAPABILITIES, hasCapability } from "../../../shared/permissions";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
 import "../SettingsLayout.css";
@@ -215,8 +215,6 @@ const isEmpty = (data) =>
 export default function BillingDashboardPage() {
   const catalog = useBillingReportCatalog();
   const [params, setParams] = useSearchParams();
-  const role = useAuthStore((s) => s.currentDoctor?.role);
-  const canMap = hasCapability(role, CAPABILITIES.BILLING_MASTER);
   const today = catalog.data?.today;
   const filters = useMemo(() => readFilters(params, today), [params, today]);
   const problem = today ? rangeProblem(filters) : null;
@@ -243,6 +241,24 @@ export default function BillingDashboardPage() {
   const clear = () => setParams(new URLSearchParams());
 
   const pick = (row) => update({ range: "custom", from: row.start, to: row.end, period: "day" });
+
+  const openGroup = params.get("group") || "";
+  const openSubgroup = params.get("subgroup") || "";
+  const openCharges = (group, subgroup = "") =>
+    setParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("group", group);
+      if (subgroup) next.set("subgroup", subgroup);
+      else next.delete("subgroup");
+      return next;
+    });
+  const closeCharges = () =>
+    setParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete("group");
+      next.delete("subgroup");
+      return next;
+    });
 
   const downloadNow = () =>
     download.mutate(
@@ -307,14 +323,6 @@ export default function BillingDashboardPage() {
             >
               <RefreshCw size={13} aria-hidden="true" /> Refresh
             </button>
-            {canMap ? (
-              <Link
-                className="flow-btn flow-btn-mini flow-btn-ghost"
-                to="/billing/dashboard/columns"
-              >
-                MIS columns
-              </Link>
-            ) : null}
             <Link
               className="flow-btn flow-btn-mini flow-btn-ghost"
               to={data ? reportHref("revenue_categories", data.filters) : "/billing/reports"}
@@ -333,8 +341,11 @@ export default function BillingDashboardPage() {
           </div>
         </div>
         <div className="fset__cardsub">
-          Final bills only; credit notes are taken off. Days are India dates. Figures refresh every
-          few minutes — use Refresh for the latest.
+          Counts final bills and drafts already paid in full (not finalised yet); credit notes are
+          taken off. The Billing Reports tabs count final bills only, so they can be lower until
+          those drafts are finalised. Discount here also counts lower category rates (CGHS and other
+          price lists) and amounts written off. Days are India dates. Figures refresh every few
+          minutes — use Refresh for the latest.
         </div>
         <Filters
           catalog={catalog.data}
@@ -374,8 +385,19 @@ export default function BillingDashboardPage() {
       ) : (
         <>
           <KpiTiles data={data} />
+          <NotFinalPanel data={data} />
           <RevenueTrend data={data} onPick={pick} />
-          <MisTable data={data} onPick={pick} />
+          <MisTable data={data} onPick={pick} onOpenGroup={openCharges} openGroup={openGroup} />
+          {openGroup ? (
+            <ChargeDetail
+              filters={sent}
+              period={data.filters.period}
+              group={openGroup}
+              subgroup={openSubgroup}
+              onOpen={openCharges}
+              onClose={closeCharges}
+            />
+          ) : null}
           <div className="bdash-grid">
             <RevenueMix data={data} />
             <PaymentModes data={data} />

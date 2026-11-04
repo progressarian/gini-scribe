@@ -39,12 +39,14 @@ function useVisitMutation(mutationFn, options = {}) {
   });
 }
 
-export function useCounterPatients(q = "", { enabled = true } = {}) {
+export function useCounterPatients(q = "", { enabled = true, date = "" } = {}) {
+  const params = { ...(q ? { q } : {}), ...(date ? { date } : {}) };
   return useQuery({
-    queryKey: [...COUNTER_PATIENTS, q],
-    queryFn: () => read(`${DESK}/counter/patients`, q ? { q } : undefined),
+    queryKey: [...COUNTER_PATIENTS, q, date || "today"],
+    queryFn: () =>
+      read(`${DESK}/counter/patients`, Object.keys(params).length ? params : undefined),
     enabled,
-    refetchInterval: pollInterval,
+    refetchInterval: date ? false : pollInterval,
     refetchIntervalInBackground: false,
     placeholderData: (prev) => prev,
   });

@@ -33,6 +33,7 @@ import DuesList from "./DuesList";
 import LabSiteControl from "../../giniflow/LabSiteControl";
 import EarlierDues from "./EarlierDues";
 import ShiftPanel from "./ShiftPanel";
+import CounterDate, { PastDayBanner } from "./CounterDate";
 import RefundsBoard from "./RefundsBoard";
 import DeskRequestsInbox from "../DeskRequestsInbox";
 import LeaveDraftDialog from "./LeaveDraftDialog";
@@ -242,6 +243,8 @@ export default function BillingDesk({
   billId,
   sentPatient,
   onOpen,
+  date = "",
+  onDate = () => {},
   feeChanges = [],
   feeFocus = 0,
 }) {
@@ -273,7 +276,8 @@ export default function BillingDesk({
     return () => clearTimeout(timer);
   }, [search]);
 
-  const { data, isLoading } = useCounterPatients(debounced.trim());
+  const { data, isLoading } = useCounterPatients(debounced.trim(), { date });
+  const pastDay = Boolean(date) && data?.isToday === false;
   const openDraft = useOpenDraft();
   const reread = useRereadBill();
   const peek = useRereadBill();
@@ -435,11 +439,20 @@ export default function BillingDesk({
       {leave.dialog}
       {showList ? (
         <>
-          <aside className="bc-list" aria-label="Today's patients">
+          <aside
+            className="bc-list"
+            aria-label={pastDay ? "Patients on this day" : "Today's patients"}
+          >
             <div className="bc-list__head">
               <div className="bc-list__title">
                 Patients<span className="bc-count">{rows.length}</span>
               </div>
+              <CounterDate
+                date={date}
+                today={data?.today}
+                firstDay={data?.firstDay}
+                onDate={onDate}
+              />
               <button
                 type="button"
                 className="bc-list__toggle"
@@ -455,7 +468,7 @@ export default function BillingDesk({
                 type="search"
                 value={search}
                 placeholder="Search name, file no, phone…"
-                aria-label="Search today's patients"
+                aria-label={pastDay ? "Search this day's patients" : "Search today's patients"}
                 onChange={(e) => {
                   setSearch(e.target.value);
                   setListOpen(true);
@@ -466,8 +479,10 @@ export default function BillingDesk({
               id="bc-list-panel"
               className={`bc-list__panel${listOpen ? "" : " bc-list__panel--shut"}`}
             >
+              {pastDay && <PastDayBanner date={date} onToday={() => onDate("")} />}
               <PatientList
                 data={data}
+                pastDay={pastDay}
                 isLoading={isLoading}
                 visitId={visitId}
                 searching={debounced.trim().length >= 2}
@@ -561,7 +576,7 @@ export default function BillingDesk({
                       )}
                       <PreviousBills bills={earlier} onOpen={openEarlier} />
                       <BillLinesTable bill={bill} onBill={setBill} form={form} />
-                      {bill.visit_id && <LabSiteControl visitId={bill.visit_id} card />}
+                      {bill.visit_id && !pastDay && <LabSiteControl visitId={bill.visit_id} card />}
                       <AddItems bill={bill} onBill={setBill} form={form} />
                       <ConsultationSuggestion
                         key={bill.id}
@@ -613,7 +628,9 @@ export default function BillingDesk({
                         needsCategory={needsCategory}
                         form={form}
                         stillOnFloor={
-                          !!selected && !["dispensed", "exited"].includes(selected.status)
+                          !pastDay &&
+                          !!selected &&
+                          !["dispensed", "exited"].includes(selected.status)
                         }
                       />
                       <BillRefunds bill={bill} onRefunded={refreshBill} />

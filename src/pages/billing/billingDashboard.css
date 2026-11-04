@@ -234,86 +234,6 @@
     margin-left: 0;
   }
 }
-.bdash-page .bdash-col__name {
-  flex: 0 1 320px;
-}
-.bdash-page .bdash-col__matches {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 4px 0 12px;
-}
-.bdash-page .bdash-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-  padding: 2px 4px 2px 8px;
-  border: 1px solid var(--fbd2);
-  border-radius: 999px;
-  background: var(--ui-soft, #f8fafc);
-  font-size: 12px;
-  color: var(--fink);
-  overflow-wrap: anywhere;
-}
-.bdash-page .bdash-chip__x {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border: 0;
-  border-radius: 999px;
-  background: none;
-  color: var(--fink2);
-  cursor: pointer;
-}
-.bdash-page .bdash-chip__x:hover {
-  background: var(--fbd);
-}
-.bdash-page .bdash-chip__x:focus-visible {
-  outline: 2px solid var(--ui-accent);
-}
-.bdash-page .bdash-picker {
-  position: relative;
-  flex: 1 1 260px;
-}
-.bdash-page .bdash-picker__list {
-  list-style: none;
-  margin: 4px 0 0;
-  padding: 6px 8px;
-  border: 1px solid var(--fbd);
-  border-radius: 8px;
-  background: var(--fwhite);
-  display: grid;
-  gap: 4px;
-  max-height: 220px;
-  overflow-y: auto;
-  font-size: 13px;
-}
-.bdash-page .bdash-kinds {
-  border: 0;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 12px;
-  font-size: 13px;
-}
-.bdash-page .bdash-kinds legend {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--fink2);
-  padding: 0;
-  margin-bottom: 4px;
-}
-.bdash-page .bdash-kinds label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  text-transform: capitalize;
-}
 .bdash-page .fset__scroll {
   position: relative;
 }
@@ -392,4 +312,15 @@
 }
 .bdash-page .fset__cardsub .bdash-report-link {
   margin-left: 0;
+}
+.bdash-page .bdash-crumbs {
+  font-size: 13px;
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+.bdash-page .bdash-close {
+  margin-left: auto;
+}
+.bdash-page .bdash-mis {
+  overflow: visible;
 }

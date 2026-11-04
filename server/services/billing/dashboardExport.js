@@ -9,6 +9,7 @@ import {
   rangeLabel,
 } from "../../../shared/billingDashboardText.js";
 import { billingDashboard } from "./dashboard.js";
+import { chargeTree } from "./dashboardCharges.js";
 import { filterNames, stamp } from "./reportsExport.js";
 
 const MONEY_FORMAT = "#,##0.00;-#,##0.00";
@@ -28,7 +29,7 @@ function rowLabel(row, period) {
   return `${bucketLabel(row, period)}${row.partial ? " (part)" : ""}`;
 }
 
-function misColumns(data) {
+function sheetColumns(data) {
   const layout = misLayout(data);
   const period = data.filters.period;
   const money = (group, header, value) => ({ group, header, value, money: true, width: 14 });
@@ -53,6 +54,9 @@ function misColumns(data) {
     money("Discounts", "Discount given", (row) => -row.discount),
     money("Discounts", "Discount on Consultation", (row) => -row.discount_consultation),
     money("Discounts", "Discount on Tests", (row) => -row.discount_tests),
+    ...layout.discountParts.map((column) =>
+      money("Discounts", column.label, (row) => -row[column.key]),
+    ),
     ...layout.extras.map((column) => money("Checks", column.label, (row) => row[column.key])),
     ...(layout.cashOut ? [money("Checks", "Cash taken out", (row) => row.cash_taken_out)] : []),
     { group: "Checks", header: "Bills", width: 8, value: (row) => row.bills },
@@ -64,21 +68,21 @@ function misColumns(data) {
       value: (row) => (row.check.ok ? "OK" : `Off by ${(row.check.difference / 100).toFixed(2)}`),
     },
     ...PENDING_PARTS.map((part) =>
-      money("Pending explained", part.label, (row) => row.pending_parts[part.key]),
+      money("Pending explained", part.label, (row) => part.effect * row.pending_parts[part.key]),
     ),
   ];
 }
 
 function addMisSheet(workbook, data) {
   const period = data.filters.period;
-  const columns = misColumns(data);
+  const columns = sheetColumns(data);
   const ws = workbook.addWorksheet(`${PERIOD_LABELS[period]} wise Summary`, {
     views: [{ state: "frozen", xSplit: 1, ySplit: 2 }],
   });
   ws.columns = columns.map((column) => ({ width: column.width }));
   const groups = ws.addRow(columns.map((column) => column.group));
   const headers = ws.addRow(columns.map((column) => column.header));
-  for (let start = 0; start < columns.length; ) {
+  for (let start = 0; start < columns.length;) {
     let end = start;
     while (end + 1 < columns.length && columns[end + 1].group === columns[start].group) end += 1;
     if (end > start && columns[start].group) ws.mergeCells(1, start + 1, 1, end + 1);
@@ -111,7 +115,7 @@ function addMisSheet(workbook, data) {
   total.eachCell((cell) => (cell.border = { top: { style: "thin" } }));
   ws.addRow([]);
   ws.addRow([
-    "Net Revenue is the patients' share on final bills (credit notes taken off). Pending = Net Revenue − all money collected in the period; a minus means more came in than was billed.",
+    "Net Revenue is the patients' share on final bills and fully paid drafts (credit notes taken off). Pending = Net Revenue − all money collected in the period; a minus means more came in than was billed.",
   ]);
 }
 
@@ -273,7 +277,7 @@ function addDiscounts(workbook, data) {
       : "Biggest discounts",
     ["Bill", "Bill date", "Patient", "UHID", "Charged", "Discount", "% of charges", "Applied by"],
     block.top_bills.map((b) => [
-      b.bill_no,
+      b.bill_no ?? "Not final yet",
       dateOf(b.bill_date),
       b.patient_name,
       b.file_no || b.health_id || "",
@@ -283,6 +287,57 @@ function addDiscounts(workbook, data) {
       b.applied_by ?? "",
     ]),
     [null, "d-mmm-yyyy", null, null, MONEY_FORMAT, MONEY_FORMAT, PCT_FORMAT],
+  );
+}
+
+function addChargeDetail(workbook, rows) {
+  const ws = workbook.addWorksheet("Charges detail", { views: [{ state: "frozen", ySplit: 1 }] });
+  ws.columns = [
+    { width: 30 },
+    { width: 30 },
+    { width: 44 },
+    { width: 10 },
+    { width: 14 },
+    { width: 14 },
+  ];
+  addTable(
+    ws,
+    null,
+    ["Service group", "Subgroup", "Item", "Quantity", "Charges", "Discount"],
+    rows.map((row) => [
+      row.group,
+      row.subgroup ?? "",
+      row.item ?? "",
+      row.quantity,
+      rupees(row.charges),
+      rupees(row.discount),
+    ]),
+    [null, null, null, null, MONEY_FORMAT, MONEY_FORMAT],
+  );
+  ws.eachRow((row, number) => {
+    const level = rows[number - 2]?.level;
+    if (level === "group") row.font = { bold: true };
+    if (level === "subgroup") row.font = { italic: true };
+  });
+}
+
+function addNotFinal(workbook, data) {
+  const bills = data.not_final?.bills ?? [];
+  if (!bills.length) return;
+  const ws = workbook.addWorksheet("Paid not finalised");
+  ws.columns = [{ width: 12 }, { width: 30 }, { width: 14 }, { width: 24 }, { width: 14 }];
+  addTable(
+    ws,
+    null,
+    ["Bill date", "Patient", "UHID", "Category", "Paid"],
+    bills.map((bill) => [
+      dateOf(bill.bill_date),
+      bill.patient_name,
+      bill.file_no || bill.health_id || "",
+      bill.category || "",
+      rupees(bill.paid),
+    ]),
+    ["d-mmm-yyyy", null, null, null, MONEY_FORMAT],
   );
 }
 
@@ -323,7 +378,10 @@ function addFilters(workbook, data, names) {
       ...(f.sub_category ? [["Sub-category", names.sub_category]] : []),
       ...(f.consultant ? [["Consultant", names.consultant]] : []),
       ["Generated", stamp(data.generated_at)],
-      ["Bills counted", "Final bills only; credit notes taken off. Days are India dates."],
+      [
+        "Bills counted",
+        "Final bills, plus drafts already paid in full that aren't finalised yet; credit notes taken off. Days are India dates.",
+      ],
     ],
   );
 }
@@ -335,7 +393,9 @@ export async function dashboardWorkbook(input = {}, db = pool) {
   addMisSheet(workbook, data);
   addHeadline(workbook, data);
   addDiscounts(workbook, data);
+  addChargeDetail(workbook, await chargeTree(data.filters, db));
   addSplit(workbook, data);
+  addNotFinal(workbook, data);
   addFilters(workbook, data, await filterNames(data.filters, db));
   return {
     buffer: Buffer.from(await workbook.xlsx.writeBuffer()),

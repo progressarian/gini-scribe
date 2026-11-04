@@ -745,6 +745,7 @@ test.describe.serial("P4C-43 check in and bill in one step", () => {
       await split.getByLabel("Part 1 amount").fill("1200");
       await split.getByLabel("Part 2 amount").fill("800");
       await split.getByLabel("Part 2 reference").fill(`CU-${tag}`);
+      await split.getByLabel("Part 2 UPI app").selectOption("paytm");
       await expect(bill.getByText("Open your shift")).toHaveCount(0);
       await press.click();
       await expect.poll(() => checkedIn).toBe(1);

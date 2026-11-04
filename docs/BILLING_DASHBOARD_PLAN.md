@@ -320,3 +320,56 @@ Reception keeps a Google Sheet, **"2026 Master Data w/o MO & CC"**, with three t
   - **Excel:** the top-bills heading no longer reads "top 0 bills" when there are no discounts.
   - **Test:** BD-02 test 6e (11 tests in all).
 - **Already failing, not caused by this work:** P5-06 test 2 expects every section to be empty on the day after its data. The deposits report's "Patients holding a deposit now" section is a today snapshot that ignores dates by design (added in commit `a325d794`, 29 Oct), so the test fails whenever any deposit exists. It needs that test to skip the snapshot section; I left it as is.
+
+## 11. Review on production data (2026-11-04)
+
+Checked against October on the local app, which reads the production database:
+
+- **Totals reconcile:** Collected equals the Collections report, the bill lines balance on every day, and the discount figures reconcile.
+
+Fixed:
+
+- **Paid drafts count as revenue (decided):** a bill counts if it's final, or a draft paid in full (`PAID_DRAFT_SQL`, the counter's "Paid · not final" rule). October had ₹2,63,605 on 135 such bills. The Net revenue tile says how much, and the MIS table and Excel file have a "Paid, not finalised" column. The page says the Billing Reports tabs count final bills only.
+- **Previous period:** whole calendar months compare with the previous calendar month(s); other ranges compare with the same number of days before.
+- **No silly percentages:** when the earlier figure is zero or the change is 1000% or more, the tile says "Up/Down from ₹X in …" instead.
+- **Axis labels:** lakh and crore keep 2 decimals (₹1.05L, not ₹1.1L).
+- **Pending explained in full:** the parts are now money for bills dated on other days (both directions), extra kept as deposit, part-paid drafts, bills paid from deposit, refunds kept as deposit, and "Not settled in this period". The page tooltip and the Excel columns show each part's signed effect, and they add up exactly to Pending.
+
+Data issues (need the counter, not code):
+
+- **Card and UPI:** none were recorded in October; every counter payment was entered as Cash.
+- **HealthRay payments:** ₹4.59 lakh was "Paid in HealthRay" with no mode set; reception can use "Update mode" to record it.
+
+Tests: BD-01 tests 9f (paid and part-paid drafts) and 9g (refund kept as deposit), plus the calendar-month cases. 29 dashboard tests in all, all passing.
+
+## 12. Charges by service group, with drill-down (2026-11-04, decided)
+
+The MIS columns mapping is replaced by the service master's own groups:
+
+- **MIS table:** its Charges columns are the service groups that have charges in the chosen dates, in service-master order. Lines with no group go to "No group".
+- **Drill-down:** clicking a group header opens "Charges detail" below the table:
+  - the group's subgroups for each period, with a Grand Total;
+  - clicking a subgroup lists its items for the whole range (quantity, charges, discount, after discount).
+  - The open group and subgroup are kept in the URL (`group=`, `subgroup=`), and a breadcrumb and Close button go back.
+- **API:** `GET /api/billing/dashboard/charges?group=&subgroup=` (`BILLING_REPORTS`), in `server/services/billing/dashboardCharges.js`.
+- **Excel:** the main sheet has group columns, and a new "Charges detail" sheet lists group › subgroup › item totals.
+- **Discount on Consultation / on Tests:** now based on the item's kind (`consultation`; `test` or a lab order).
+- **Removed:**
+  - the MIS columns screen, its route and capability entry;
+  - `misColumns.js` and its `GET/PUT /api/billing/dashboard/columns` endpoints, which now return 404;
+  - the client hooks and the one-off fix script.
+
+  The `billing_mis_columns` table stays on production, unused; dropping it needs its own migration.
+
+- **Fixed:** the MIS table's first column (dates, Grand Total) now stays pinned when the table scrolls sideways; the table's `overflow: hidden` had been stopping it.
+- **Tests:** BD-01 test 7 (group columns, subgroup and item detail), test 9 (charges route 200/403/400, removed route 404) and 9e (Charges detail sheet). BD-02 test 6 (click a group → subgroup → items → reload → back → close) and test 7 (pinned column). 29 tests in all, all passing.
+
+## 13. Category rates and write-offs count as discount (2026-11-04, decided)
+
+- **Discount** = discount rules (automatic, code, manual) + **category rate reduction** (`GREATEST(quantity × base_rate − actual, 0)`; CGHS and other price lists below the base price) + **written off** (the `adjustment` share neither the patient nor a claim pays). The CGHS **claim** is not a discount; it's still owed.
+- **Charges are now gross at base price** (`actual + category reduction`), so charges − discount + tax + round-off − claim = net revenue still balances on every row.
+- **Discount tile:** shows the split as Rules · Category rates · Written off. The MIS table and Excel get "of which category rates" and "of which written off" columns when non-zero; "Adjusted" moved out of Checks.
+- **Discount section:** "Category rate" and "Written off" are added as methods (5-slot palette validated; the table view gives the contrast relief). The rule table gets "<category> rates" and "<category> — written off" rows. Groups and consultants include all of it, the top bills list ranks by the full concession and shows the category, and the staff table is discount rules only.
+- **Not the same as the Discounts report:** that tab counts discount rules only, and the page says so.
+- **October on production data:** Discount is ₹44,228.76 — rules ₹37,389.76, category rates ₹6,839 (Senior Citizen ₹4,000, CGHS Paid ₹2,580, CGHS Pensioner ₹309), written off ₹0. The claim of ₹741 is not in it.
+- **Test:** BD-01 test 9h (category rate ₹600 against an ₹800 base, patient pays 50% and the rest is written off: discount ₹500, net revenue ₹300).

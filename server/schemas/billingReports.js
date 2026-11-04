@@ -2,8 +2,6 @@ import { z } from "zod";
 import { cleanDate, INT_MAX } from "../services/billing/common.js";
 import { CODE_MAX, FILTER_LABELS, PERIODS } from "../services/billing/reportsFilters.js";
 import { DASHBOARD_PERIODS } from "../services/billing/dashboardPeriods.js";
-import { LABEL_MAX, TARGETS_MAX } from "../services/billing/misColumns.js";
-import { ITEM_KINDS } from "../../shared/billingVocab.js";
 
 const blank = z.literal("");
 
@@ -45,13 +43,17 @@ export const billingReportQuerySchema = z.strictObject({
 
 export const BILLING_REPORT_LABELS = FILTER_LABELS;
 
-export const billingDashboardQuerySchema = z.strictObject({
+const dashboardFields = {
   from: optional(day),
   to: optional(day),
   period: optional(z.enum(DASHBOARD_PERIODS, { message: "must be day, week or month" })),
   category: optional(code),
   sub_category: optional(code),
   consultant: optional(id),
+};
+
+export const billingDashboardQuerySchema = z.strictObject({
+  ...dashboardFields,
   refresh: optional(z.literal("1")),
 });
 
@@ -65,20 +67,14 @@ export const BILLING_DASHBOARD_LABELS = {
   refresh: "Refresh",
 };
 
-const targets = (schema) => z.array(schema).max(TARGETS_MAX).optional();
-
-export const billingMisColumnSchema = z.strictObject({
-  label: z.string().trim().min(1).max(LABEL_MAX).optional(),
-  item_kinds: targets(z.enum(ITEM_KINDS)),
-  group_codes: targets(code),
-  subgroup_codes: targets(code),
-  item_ids: targets(z.number().int().positive().max(INT_MAX)),
+export const billingDashboardChargesQuerySchema = z.strictObject({
+  ...dashboardFields,
+  group: code,
+  subgroup: optional(code),
 });
 
-export const BILLING_MIS_COLUMN_LABELS = {
-  label: "Column name",
-  item_kinds: "Item kinds",
-  group_codes: "Groups",
-  subgroup_codes: "Subgroups",
-  item_ids: "Items",
+export const BILLING_DASHBOARD_CHARGES_LABELS = {
+  ...BILLING_DASHBOARD_LABELS,
+  group: "Service group",
+  subgroup: "Subgroup",
 };

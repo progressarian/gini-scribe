@@ -63,8 +63,23 @@ export function cleanDashboardFilters(input = {}, today = indiaToday()) {
   return filters;
 }
 
+const monthsSpanned = (from, to) =>
+  (Number(to.slice(0, 4)) - Number(from.slice(0, 4))) * 12 +
+  Number(to.slice(5, 7)) -
+  Number(from.slice(5, 7)) +
+  1;
+
+const wholeMonths = (from, to) => from.slice(8) === "01" && to === monthEnd(`${to.slice(0, 8)}01`);
+
 export function previousRange({ from, to }) {
   const before = addDays(from, -1);
+  if (wholeMonths(from, to)) {
+    const date = new Date(ms(from));
+    const start = dayText(
+      Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - monthsSpanned(from, to), 1),
+    );
+    return { from: start, to: before };
+  }
   return { from: addDays(before, -(daysBetween(from, to) - 1)), to: before };
 }
 
@@ -85,7 +100,7 @@ export function isoWeek(day) {
 
 export function bucketsOf({ from, to, period }) {
   const buckets = [];
-  for (let start = STARTS[period](from); start <= to; ) {
+  for (let start = STARTS[period](from); start <= to;) {
     const end = ENDS[period](start);
     buckets.push({
       bucket: start,

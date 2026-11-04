@@ -6,7 +6,15 @@ import { one, query } from "../../helpers/db.mjs";
 import { tokensFor } from "../../helpers/auth.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import { repoRoot } from "../../setup/testEnv.mjs";
-import { desk, discountCode, newTag, setUp, tearDown } from "../phase4/p4-bills-fixture.mjs";
+import {
+  desk,
+  discountCode,
+  newTag,
+  payRule,
+  setUp,
+  subCategory,
+  tearDown,
+} from "../phase4/p4-bills-fixture.mjs";
 import {
   db,
   draftWith,
@@ -23,7 +31,7 @@ const deposits = await import("../../../server/services/billing/deposits.js");
 const reports = await import("../../../server/services/billing/reports.js");
 const dashboard = await import("../../../server/services/billing/dashboard.js");
 const periods = await import("../../../server/services/billing/dashboardPeriods.js");
-const misColumns = await import("../../../server/services/billing/misColumns.js");
+const charges = await import("../../../server/services/billing/dashboardCharges.js");
 const exporter = await import("../../../server/services/billing/dashboardExport.js");
 const { readWorkbook } = await import("../phase5/p5-http.mjs");
 const { correctPaymentMode } =
@@ -34,6 +42,8 @@ const { authMiddleware, requireAuth } = await import("../../../server/middleware
 const { default: router } = await import("../../../server/routes/billingDashboard.js");
 
 const tag = newTag();
+const GROUP = `p4g-${tag}`;
+const SUBGROUP = `p4s-${tag}`;
 const CODE = `BD${tag}`.toUpperCase();
 const DAY1 = "2025-02-03";
 const DAY2 = "2025-02-04";
@@ -43,7 +53,6 @@ const WINDOW = { from: DAY1, to: "2025-02-16" };
 const at = (day, time = "11:00") => `${day} ${time}:00+05:30`;
 
 let ids;
-let columnsBefore;
 let server;
 let base;
 const made = {};
@@ -97,16 +106,6 @@ test.describe.serial("BD-01 billing dashboard API", () => {
     await prepareCategory(ids);
     await discountCode(ids, CODE, { value: 10, service_item_ids: [ids.brace] });
     await openDeskShift(0);
-    columnsBefore = (await query(`SELECT * FROM billing_mis_columns`)).rows;
-    const abi = columnsBefore.find((row) => row.key === "abi");
-    const blood = columnsBefore.find((row) => row.key === "blood_tests");
-    await misColumns.updateMisColumn("abi", { item_ids: [...abi.item_ids, ids.brace] }, desk, db);
-    await misColumns.updateMisColumn(
-      "blood_tests",
-      { group_codes: [...blood.group_codes, `p4g-${tag}`] },
-      desk,
-      db,
-    );
 
     made.a = await finalBill("DashA", [ids.brace], {
       codes: [CODE],
@@ -218,14 +217,6 @@ test.describe.serial("BD-01 billing dashboard API", () => {
   });
 
   test.afterAll(async () => {
-    for (const row of columnsBefore ?? []) {
-      await query(
-        `UPDATE billing_mis_columns
-            SET label = $2, item_kinds = $3, group_codes = $4, subgroup_codes = $5, item_ids = $6
-          WHERE key = $1`,
-        [row.key, row.label, row.item_kinds, row.group_codes, row.subgroup_codes, row.item_ids],
-      );
-    }
     if (server) await new Promise((resolve) => server.close(resolve));
     await tearDown(ids);
     await dropShifts();
@@ -242,7 +233,19 @@ test.describe.serial("BD-01 billing dashboard API", () => {
       { bucket: "2026-03-01", start: "2026-03-01", end: "2026-03-31", partial: false },
     ]);
     expect(periods.previousRange({ from: "2026-11-01", to: "2026-11-30" })).toEqual({
-      from: "2026-10-02",
+      from: "2026-10-01",
+      to: "2026-10-31",
+    });
+    expect(periods.previousRange({ from: "2026-10-01", to: "2026-10-31" })).toEqual({
+      from: "2026-09-01",
+      to: "2026-09-30",
+    });
+    expect(periods.previousRange({ from: "2026-04-01", to: "2026-06-30" })).toEqual({
+      from: "2026-01-01",
+      to: "2026-03-31",
+    });
+    expect(periods.previousRange({ from: "2026-11-01", to: "2026-11-04" })).toEqual({
+      from: "2026-10-28",
       to: "2026-10-31",
     });
     expect(periods.cleanDashboardFilters({ from: "2026-11-01", to: "2026-11-20" }).period).toBe(
@@ -266,13 +269,13 @@ test.describe.serial("BD-01 billing dashboard API", () => {
       net_revenue: 202000,
       charges_total: 210000,
       discount: 8000,
-      discount_tests: 8000,
+      discount_tests: 0,
       discount_consultation: 0,
       collected: 152000,
       pending: 50000,
       check: { difference: 0, ok: true },
     });
-    expect(day1.charges).toMatchObject({ abi: 160000, blood_tests: 50000, misc: 0 });
+    expect(day1.charges).toEqual({ [GROUP]: 210000 });
     expect(day1.money).toMatchObject({ upi_bharatpe: 72000, cash: 80000, neft: 0 });
     expect(day1.rev_per_patient).toBe(101000);
   });
@@ -306,7 +309,7 @@ test.describe.serial("BD-01 billing dashboard API", () => {
       paid_back: 50000,
       check: { difference: 0, ok: true },
     });
-    expect(day8.charges.blood_tests).toBe(0);
+    expect(day8.charges[GROUP]).toBe(80000);
   });
 
   test("4c. a bill paid from an earlier deposit is positive pending, explained as from deposit", async () => {
@@ -355,21 +358,41 @@ test.describe.serial("BD-01 billing dashboard API", () => {
     expect(data.mix.groups.find((group) => group.key === `p4g-${tag}`).net).toBe(332000);
   });
 
-  test("7. the most specific mapping wins, and a mapping can't be claimed twice", async () => {
+  test("7. charges columns are the service groups; a group opens to subgroups, then items", async () => {
     const data = await scoped();
-    expect(data.total.charges.abi).toBe(240000);
-    expect(data.total.charges.blood_tests).toBe(100000);
-    await expect(
-      misColumns.updateMisColumn("x_ray", { item_ids: [ids.brace] }, desk, db),
-    ).rejects.toMatchObject({ status: 409, message: /already counted under ABI Charges/ });
-    await expect(
-      misColumns.updateMisColumn("x_ray", { group_codes: ["no-such-group"] }, desk, db),
-    ).rejects.toMatchObject({ status: 400, message: /no such group/ });
-    const audit = await one(
-      `SELECT count(*)::int AS n FROM billing_audit
-        WHERE entity = 'billing_mis_columns' AND entity_id = 'abi'`,
+    expect(data.columns.charges).toEqual([{ key: GROUP, label: `P4 Group ${tag}` }]);
+    expect(data.total.charges).toEqual({ [GROUP]: 340000 });
+    expect(data.total.charges_total).toBe(340000);
+
+    const filters = { ...WINDOW, sub_category: ids.pensioner, period: "week" };
+    const bySubgroup = await charges.chargeDetail({ ...filters, group: GROUP }, db, {
+      today: "2026-11-03",
+    });
+    expect(bySubgroup).toMatchObject({
+      level: "subgroup",
+      group: { key: GROUP, label: `P4 Group ${tag}` },
+      columns: [{ key: SUBGROUP, label: `P4 Subgroup ${tag}` }],
+      total: { total: 340000, discount: 8000 },
+    });
+    expect(bySubgroup.rows.map((row) => [row.bucket, row.total])).toEqual([
+      [DAY1, 210000],
+      [DAY8, 130000],
+    ]);
+
+    const items = await charges.chargeDetail(
+      { ...filters, group: GROUP, subgroup: SUBGROUP.toUpperCase() },
+      db,
+      { today: "2026-11-03" },
     );
-    expect(audit.n).toBeGreaterThan(0);
+    expect(items.level).toBe("item");
+    expect(
+      items.items.map((item) => [item.item_id, item.quantity, item.charges, item.discount]),
+    ).toEqual([
+      [ids.brace, 3, 240000, 8000],
+      [ids.dressing, 2, 100000, 0],
+    ]);
+    expect(items.total).toEqual({ quantity: 5, charges: 340000, discount: 8000, net: 332000 });
+    await expect(charges.chargeDetail({ ...filters }, db)).rejects.toMatchObject({ status: 400 });
   });
 
   test("8. bad filters are refused with a reason", async () => {
@@ -385,7 +408,7 @@ test.describe.serial("BD-01 billing dashboard API", () => {
     });
   });
 
-  test("9. routes: reports capability to read, master capability to change columns", async () => {
+  test("9. routes: the reports capability reads the dashboard and its charges detail", async () => {
     const search = { ...WINDOW, sub_category: ids.pensioner };
     expect((await call("reception", "/api/billing/dashboard", { search })).status).toBe(403);
     const read = await call("reception_admin", "/api/billing/dashboard", { search });
@@ -395,25 +418,25 @@ test.describe.serial("BD-01 billing dashboard API", () => {
       (await call("reception_admin", "/api/billing/dashboard", { search: { period: "year" } }))
         .status,
     ).toBe(400);
-    const columns = await call("reception_admin", "/api/billing/dashboard/columns");
-    expect(columns.status).toBe(200);
-    expect(columns.body.columns.find((column) => column.key === "abi").items).toContainEqual(
-      expect.objectContaining({ id: ids.brace }),
-    );
+    const detail = await call("reception_admin", "/api/billing/dashboard/charges", {
+      search: { ...search, group: GROUP },
+    });
+    expect(detail.status).toBe(200);
+    expect(detail.body.total.total).toBe(340000);
     expect(
       (
-        await call("reception", "/api/billing/dashboard/columns/x_ray", {
-          method: "PUT",
-          body: { label: "X-Ray" },
+        await call("reception", "/api/billing/dashboard/charges", {
+          search: { ...search, group: GROUP },
         })
       ).status,
     ).toBe(403);
-    const renamed = await call("reception_admin", "/api/billing/dashboard/columns/x_ray", {
-      method: "PUT",
-      body: { label: "X-Ray (all views)" },
+    expect(
+      (await call("reception_admin", "/api/billing/dashboard/charges", { search })).status,
+    ).toBe(400);
+    const removed = await fetch(`${base}/api/billing/dashboard/columns`, {
+      headers: { authorization: `Bearer ${(await tokensFor("reception_admin")).access}` },
     });
-    expect(renamed.status).toBe(200);
-    expect(renamed.body.label).toBe("X-Ray (all views)");
+    expect(removed.status).toBe(404);
   });
 
   test("9b. the consultant filter keeps whole bills, so every row still checks", async () => {
@@ -536,6 +559,7 @@ test.describe.serial("BD-01 billing dashboard API", () => {
       "Day wise Summary",
       "Headline",
       "Discounts",
+      "Charges detail",
       "Revenue split",
       "Filters",
     ]);
@@ -563,7 +587,19 @@ test.describe.serial("BD-01 billing dashboard API", () => {
     expect(headline.find((row) => row[0] === "Net revenue")[1]).toBe(
       data.kpis.current.net_revenue / 100,
     );
-    const filters = sheets[4].rows;
+    expect(header).toContain(`P4 Group ${tag}`);
+    const detailRows = sheets[3].rows;
+    expect(detailRows[0]).toEqual([
+      "Service group",
+      "Subgroup",
+      "Item",
+      "Quantity",
+      "Charges",
+      "Discount",
+    ]);
+    expect(detailRows[1]).toEqual([`P4 Group ${tag}`, "", "", 5, 3400, 80]);
+    expect(detailRows[2]).toEqual([`P4 Group ${tag}`, `P4 Subgroup ${tag}`, "", 5, 3400, 80]);
+    const filters = sheets[5].rows;
     expect(filters.find((row) => row[0] === "Sub-category")[1]).toContain(ids.pensioner);
 
     const search = { ...WINDOW, sub_category: ids.pensioner };
@@ -574,6 +610,132 @@ test.describe.serial("BD-01 billing dashboard API", () => {
     expect(res.headers.get("content-type")).toContain("spreadsheetml");
     expect(res.headers.get("content-disposition")).toContain("billing-mis-");
     expect((await call("reception", "/api/billing/dashboard/export", { search })).status).toBe(403);
+  });
+
+  test("9f. a draft paid in full counts as revenue (flagged as not final); a part-paid draft does not", async () => {
+    const DAY = "2025-03-10";
+    const { bill: paid } = await draftWith(ids, "DashPaidDraft", [{ item: ids.dressing }]);
+    await payments.takePayments(
+      paid.id,
+      { version: paid.version, payments: [{ mode: "cash", amount: paid.totals.payable / 100 }] },
+      desk,
+      db,
+    );
+    const { bill: part } = await draftWith(ids, "DashPartDraft", [{ item: ids.dressing }]);
+    await payments.takePayments(
+      part.id,
+      { version: part.version, payments: [{ mode: "cash", amount: 100 }] },
+      desk,
+      db,
+    );
+    for (const id of [paid.id, part.id]) {
+      await query(`UPDATE bills SET bill_date = $2::date WHERE id = $1`, [id, DAY]);
+      await query(`UPDATE payments SET received_at = $2::timestamptz WHERE bill_id = $1`, [
+        id,
+        at(DAY),
+      ]);
+    }
+    expect((await one(`SELECT status FROM bills WHERE id = $1`, [paid.id])).status).toBe("draft");
+    const day = rowFor(await run({ from: DAY, to: DAY, sub_category: ids.pensioner }), DAY);
+    expect(day).toMatchObject({
+      bills: 1,
+      net_revenue: paid.totals.payable,
+      not_final_bills: 1,
+      not_final_revenue: paid.totals.payable,
+      collected: paid.totals.payable + 10000,
+      pending: -10000,
+      pending_parts: { unbilled: 10000 },
+      check: { ok: true },
+    });
+    expect(day.charges[GROUP]).toBe(50000);
+  });
+
+  test("9g. a refund kept as deposit lowers revenue with no money out, and says so", async () => {
+    const DAY = "2025-03-17";
+    const bill = await finalBill("DashKeep", [ids.dressing], {
+      pay: [{ mode: "cash", amount: "all" }],
+      day: DAY,
+    });
+    const approved = await refundApproved(bill.id, "whole", { ask: { requested_mode: "deposit" } });
+    await query(`UPDATE bills SET bill_date = $2::date WHERE id = $1`, [
+      approved.credit_note.id,
+      DAY,
+    ]);
+    await query(`UPDATE payments SET received_at = $2::timestamptz WHERE bill_id = $1`, [
+      approved.credit_note.id,
+      at(DAY, "17:00"),
+    ]);
+    const day = rowFor(await run({ from: DAY, to: DAY, sub_category: ids.pensioner }), DAY);
+    expect(day).toMatchObject({
+      net_revenue: 0,
+      collected: 50000,
+      pending: -50000,
+      credit_notes: 1,
+      paid_back: 0,
+      pending_parts: { kept_as_deposit: 50000 },
+      check: { ok: true },
+    });
+  });
+
+  test("9h. a lower category rate and a written-off share count as discount; a claim does not", async () => {
+    const DAY = "2025-03-24";
+    const scheme = await subCategory(ids, "Dashcg");
+    await query(
+      `INSERT INTO category_item_rates (scheme_code, service_item_id, rate, valid_from)
+       VALUES ($1, $2, 600, '2020-01-01')`,
+      [scheme, ids.brace],
+    );
+    await payRule(ids, scheme, {
+      name: "cghs half",
+      patient_pays: "percent",
+      patient_value: 50,
+      remainder: "adjustment",
+    });
+    const { bill: draft } = await draftWith(ids, "DashCghs", [{ item: ids.brace }], {
+      category: scheme,
+    });
+    const line = draft.lines.find((row) => row.service_item_id === ids.brace);
+    expect(line).toMatchObject({ rate: 60000 });
+    const paid = await payments.takePayments(
+      draft.id,
+      {
+        version: draft.version,
+        payments: [{ mode: "cash", amount: draft.totals.payable / 100 }],
+      },
+      desk,
+      db,
+    );
+    const bill = await bills.finaliseBill(draft.id, { version: paid.version }, desk, db);
+    await query(`UPDATE bills SET bill_date = $2::date WHERE id = $1`, [bill.id, DAY]);
+
+    const data = await run({ from: DAY, to: DAY, sub_category: scheme });
+    expect(data.total).toMatchObject({
+      charges_total: 80000,
+      category_reduction: 20000,
+      adjustment: 30000,
+      rule_discount: 0,
+      discount: 50000,
+      net_revenue: 30000,
+      claim: 0,
+      check: { ok: true },
+    });
+    expect(data.kpis.current).toMatchObject({
+      discount: 50000,
+      category_reduction: 20000,
+      written_off: 30000,
+      discount_pct: 62.5,
+    });
+    expect(data.discounts.total).toMatchObject({
+      category: 20000,
+      written_off: 30000,
+      given: 50000,
+      charges: 80000,
+    });
+    expect(data.discounts.rules.map((rule) => [rule.label, rule.method, rule.amount])).toEqual([
+      ["Dashcg — written off", "Written off", 30000],
+      ["Dashcg rates", "Category rate", 20000],
+    ]);
+    expect(data.discounts.top_bills[0]).toMatchObject({ discount: 50000, charges: 80000 });
   });
 
   test("10. the pool result is cached; refresh rebuilds it", async () => {

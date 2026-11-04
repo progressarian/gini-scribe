@@ -8,7 +8,7 @@ const DASHBOARD = "/api/billing/dashboard";
 export const billingDashboardKeys = {
   all: ["billing", "dashboard"],
   view: (filters) => ["billing", "dashboard", "view", filters ?? {}],
-  columns: () => ["billing", "dashboard", "columns"],
+  charges: (filters) => ["billing", "dashboard", "charges", filters ?? {}],
 };
 
 const withoutBlanks = (filters = {}) =>
@@ -58,20 +58,14 @@ export function useBillingDashboardExport() {
   });
 }
 
-export function useMisColumns() {
+export function useChargeDetail(filters) {
+  const params = withoutBlanks(filters);
   return useQuery({
-    queryKey: billingDashboardKeys.columns(),
-    queryFn: async () => (await api.get(`${DASHBOARD}/columns`)).data,
+    queryKey: billingDashboardKeys.charges(params),
+    queryFn: async () => (await api.get(`${DASHBOARD}/charges`, { params })).data,
+    enabled: Boolean(params.group),
+    placeholderData: (previous) => previous,
     staleTime: 60_000,
     retry: retryUnlessRefused,
-  });
-}
-
-export function useSaveMisColumn() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ key, ...body }) =>
-      (await api.put(`${DASHBOARD}/columns/${encodeURIComponent(key)}`, body)).data,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: billingDashboardKeys.all }),
   });
 }

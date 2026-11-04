@@ -113,8 +113,10 @@ export default function DiscountPanel({ data }) {
         <ReportLink report="discounts" title="Discounts" filters={data.filters} />
       </div>
       <div className="fset__cardsub">
-        Discounts given on final bills: {money(block.total.given)} — {pctText(block.total.pct)} of{" "}
-        {money(block.total.charges)} charged.
+        Everything patients weren't charged on billed visits: {money(block.total.given)} —{" "}
+        {pctText(block.total.pct)} of {money(block.total.charges)} at base prices. Category rate is
+        a lower CGHS or category price than the base price; Written off is the part neither the
+        patient nor a claim pays. The Discounts report tab counts discount rules only.
         {block.total.credited
           ? ` ${money(block.total.credited)} of discount was credited back on refunds, so the Discount tile shows the net figure.`
           : ""}
@@ -257,7 +259,7 @@ export default function DiscountPanel({ data }) {
               ]}
             />
             <SmallTable
-              title="By staff who applied it"
+              title="By staff who applied it (discount rules only)"
               rows={block.users}
               columns={[
                 { key: "label", label: "Applied by", render: (row) => row.label },
@@ -282,11 +284,12 @@ export default function DiscountPanel({ data }) {
                 label: "Bill",
                 render: (row) => (
                   <>
-                    {row.bill_no}
+                    {row.bill_no ?? "Not final yet"}
                     <span className="bdash-muted"> · {fullDayLabel(row.bill_date)}</span>
                   </>
                 ),
               },
+              { key: "category", label: "Category", render: (row) => row.category || "—" },
               {
                 key: "patient",
                 label: "Patient",
@@ -315,8 +318,8 @@ export default function DiscountPanel({ data }) {
                 render: (row) => (
                   <Link
                     className="brep-open"
-                    to={receptionBillHref({ patient: row.patient_id })}
-                    aria-label={`Open bill ${row.bill_no} for ${row.patient_name} at the counter`}
+                    to={receptionBillHref({ patient: row.patient_id, date: row.bill_date })}
+                    aria-label={`Open bill ${row.bill_no ?? "(not final yet)"} for ${row.patient_name} at the counter`}
                   >
                     Open at counter
                   </Link>

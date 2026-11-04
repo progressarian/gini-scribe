@@ -2855,8 +2855,19 @@ function useReceptionTab(canBill, canApprove) {
     [setParams],
   );
 
+  const deskDate = params.get("date") || "";
+
   const openBill = useCallback(
-    (next, options) => setParams({ tab: DESK_TABS.bill.key, ...next }, options),
+    (next, options) =>
+      setParams(
+        { tab: DESK_TABS.bill.key, ...(deskDate ? { date: deskDate } : {}), ...next },
+        options,
+      ),
+    [setParams, deskDate],
+  );
+
+  const setDeskDate = useCallback(
+    (day) => setParams({ tab: DESK_TABS.bill.key, ...(day ? { date: day } : {}) }),
     [setParams],
   );
 
@@ -2865,6 +2876,8 @@ function useReceptionTab(canBill, canApprove) {
     deskTabs,
     setTab,
     openBill,
+    deskDate,
+    setDeskDate,
     visitId: params.get("visit") || "",
     patientId: params.get("patient") || "",
     billId: params.get("bill") || "",
@@ -3322,6 +3335,8 @@ export default function ReceptionStationPage() {
             billId={desk.billId}
             sentPatient={sentPatient}
             onOpen={desk.openBill}
+            date={desk.deskDate}
+            onDate={desk.setDeskDate}
             feeChanges={feeChanges}
             feeFocus={feeFocus}
           />

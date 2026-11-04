@@ -21,6 +21,7 @@ import {
 } from "./labCaseLines.js";
 import { REMOVED_BY_DESK_SQL } from "./visitLines.js";
 import { LIVE_BILL_ITEM_SQL } from "../giniflow/testsHold.js";
+import { httpError } from "./transaction.js";
 import { HELD_AT_RECEPTION, RECEPTION_MONEY_SQL, SETTLED_AT_RECEPTION } from "./orderLinks.js";
 import { LINE_ORDERED_AT_SQL, ORDERED_AFTER_CONSULT_SQL } from "./afterConsult.js";
 
@@ -268,9 +269,25 @@ function sharedDayRows(date, db) {
   return run.rows;
 }
 
+const FIRST_DAY_TTL_MS = 60 * 60_000;
+let firstDayCache = null;
+
+async function firstBilledDay(db) {
+  if (db === pool && firstDayCache && Date.now() - firstDayCache.at < FIRST_DAY_TTL_MS) {
+    return firstDayCache.day;
+  }
+  const { rows } = await db.query(`SELECT MIN(bill_date)::text AS day FROM bills`);
+  const day = rows[0]?.day ?? null;
+  if (db === pool) firstDayCache = { at: Date.now(), day };
+  return day;
+}
+
 export async function counterPatients(visitDate, q = "", now = new Date(), db = pool) {
-  const date = visitDate || (await istToday(db));
-  const rows = await sharedDayRows(date, db);
+  const today = await istToday(db);
+  const date = visitDate || today;
+  if (date > today) throw httpError(400, "The counter can't show a future date");
+  const isToday = date === today;
+  const [rows, firstDay] = await Promise.all([sharedDayRows(date, db), firstBilledDay(db)]);
 
   let visible = rows;
   const query = String(q || "").trim();
@@ -305,6 +322,9 @@ export async function counterPatients(visitDate, q = "", now = new Date(), db = 
 
   return {
     date,
+    today,
+    isToday,
+    firstDay,
     toBill: inGroup(COUNTER_GROUP.TO_BILL),
     billed: inGroup(COUNTER_GROUP.BILLED),
     waiting: inGroup(COUNTER_GROUP.WAITING),
