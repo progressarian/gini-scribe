@@ -1,0 +1,16 @@
+.tdue-lead {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--fink3);
+}
+.tdue-list {
+  display: grid;
+  gap: 8px;
+}
+.tdue-row {
+  flex-wrap: wrap;
+}
+.tdue-row span {
+  font-size: 13px;
+  color: var(--fink3);
+}

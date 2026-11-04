@@ -93,6 +93,7 @@ const BillingCounterPage = lazyWithRetry(() => import("./pages/billing/BillingCo
 const BillingReportsPage = lazyWithRetry(() => import("./pages/billing/BillingReportsPage"));
 const BillingDashboardPage = lazyWithRetry(() => import("./pages/billing/BillingDashboardPage"));
 const StaffDashboardPage = lazyWithRetry(() => import("./pages/billing/StaffDashboardPage"));
+const StaffShiftPage = lazyWithRetry(() => import("./pages/billing/StaffShiftPage"));
 const ShiftSlipPage = lazyWithRetry(() => import("./pages/billing/ShiftSlipPage"));
 const MonthlySummaryPage = lazyWithRetry(() => import("./pages/reports/MonthlySummaryPage"));
 const CghsRegisterPage = lazyWithRetry(() => import("./pages/billing/CghsRegisterPage"));
@@ -316,6 +317,7 @@ const router = createBrowserRouter([
               { path: "/billing/reports", element: lazyEl(BillingReportsPage) },
               { path: "/billing/dashboard", element: lazyEl(BillingDashboardPage) },
               { path: "/billing/staff", element: lazyEl(StaffDashboardPage) },
+              { path: "/billing/staff/shifts/:id", element: lazyEl(StaffShiftPage) },
               { path: "/reports/monthly", element: lazyEl(MonthlySummaryPage) },
               { path: "/billing/cghs-register", element: lazyEl(CghsRegisterPage) },
               { path: "/billing/dues", element: lazyEl(DuesRegisterPage) },

@@ -16,6 +16,7 @@ import {
   getRxNotTaken,
 } from "../services/giniflow/rxFollowups.js";
 import { fetchRxFile, regenerateRx } from "../services/giniflow/printRx.js";
+import { decideTestsDue, getTestsDue } from "../services/giniflow/testsDue.js";
 import {
   addOrderedService,
   addOtherProcedure,
@@ -90,6 +91,7 @@ import {
   giniflowMachineAddSchema,
   giniflowOrderTestsSchema,
   giniflowBackForTestsSchema,
+  giniflowTestsDueDecisionSchema,
   giniflowCatalogTestSchema,
   giniflowCatalogTestPatchSchema,
   giniflowFloorSettingSchema,
@@ -1086,6 +1088,39 @@ router.post(
       );
     } catch (e) {
       doctorError(res, e, "Gini Flow doctor order tests");
+    }
+  },
+);
+
+router.get(
+  "/giniflow/stations/doctor/:visitId/tests-due",
+  doctorGate,
+  requireOwnVisit,
+  async (req, res) => {
+    try {
+      res.json(await getTestsDue(req.params.visitId));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow doctor tests due");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/doctor/:visitId/tests-due",
+  doctorGate,
+  requireOwnVisit,
+  validate(giniflowTestsDueDecisionSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await decideTestsDue(req.params.visitId, {
+          ...req.body,
+          actorId: req.doctor?.doctor_id ?? null,
+          station: "doctor",
+        }),
+      );
+    } catch (e) {
+      doctorError(res, e, "Gini Flow doctor tests due decision");
     }
   },
 );
@@ -3065,6 +3100,33 @@ router.post(
       );
     } catch (e) {
       handleError(res, e, "Gini Flow order tests");
+    }
+  },
+);
+
+router.get("/giniflow/stations/mo/:visitId/tests-due", moGate, async (req, res) => {
+  try {
+    res.json(await getTestsDue(req.params.visitId));
+  } catch (e) {
+    handleError(res, e, "Gini Flow MO tests due");
+  }
+});
+
+router.post(
+  "/giniflow/stations/mo/:visitId/tests-due",
+  moGate,
+  validate(giniflowTestsDueDecisionSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await decideTestsDue(req.params.visitId, {
+          ...req.body,
+          actorId: req.doctor?.doctor_id ?? null,
+          station: "mo",
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Gini Flow MO tests due decision");
     }
   },
 );

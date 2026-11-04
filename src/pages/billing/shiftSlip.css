@@ -29,15 +29,15 @@
   outline: 2px solid #009e8c;
   outline-offset: 2px;
 }
-.slip-head h1 {
+.slip-body .slip-head :is(h1, h2, h3) {
   margin: 0 0 4px;
   font-size: 20px;
 }
-.slip-head p {
+.slip-body .slip-head p {
   margin: 2px 0;
   color: #3d4f63;
 }
-.slip h2 {
+.slip-body section > :is(h2, h3, h4) {
   margin: 20px 0 6px;
   font-size: 15px;
 }
@@ -84,5 +84,57 @@
   }
   .slip-table tr {
     break-inside: avoid;
+  }
+}
+.slip-head .slip-hospital {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #1a2332;
+}
+.bill-dialog.slip-dialog {
+  max-width: min(760px, 100vw);
+  max-height: 90vh;
+  background: #fff;
+}
+.slip-dialog .slip-body {
+  color: #1a2332;
+  font-size: 14px;
+}
+.slip-dialog__actions {
+  display: flex;
+  gap: 8px;
+}
+@media print {
+  body.slip-printing {
+    background: #fff;
+  }
+  body.slip-printing > :not(.bill-dialog-layer) {
+    display: none !important;
+  }
+  body.slip-printing .bill-dialog-layer,
+  body.slip-printing .bill-dialog-layer .flow-dialog-backdrop {
+    position: static !important;
+    display: block !important;
+    inset: auto !important;
+    width: auto !important;
+    height: auto !important;
+    padding: 0 !important;
+    background: none !important;
+    overflow: visible !important;
+  }
+  body.slip-printing .bill-dialog.slip-dialog {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: 0 !important;
+  }
+  body.slip-printing .slip-dialog .bill-dialog__head {
+    display: none !important;
   }
 }

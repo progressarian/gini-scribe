@@ -405,7 +405,7 @@
   color: var(--fink2);
 }
 .bdash-page .bdash-bridge th {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   padding-right: 8px;
 }
 .bdash-page .bdash-bridge td.brep-num {
@@ -495,11 +495,7 @@
 .bdash-page .sd-staff tr[aria-current="true"] td {
   background: var(--ftll);
 }
-.bdash-page .sd-exc-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 24px;
-}
+
 .bdash-page .sd-exc__title,
 .sd-drawer .sd-drawer__sub {
   margin: 12px 0 6px;
@@ -542,11 +538,6 @@
 .sd-drawer .sd-voided td {
   color: var(--fink3);
 }
-@media (max-width: 760px) {
-  .bdash-page .sd-exc-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
 .sd-drawer .sd-close {
   margin: 8px 0;
   padding: 12px;
@@ -572,4 +563,148 @@
 }
 .sd-drawer .sd-close__note {
   flex: 1 1 200px;
+}
+.fset.bill-ui button.brep-open {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ui-accent);
+  cursor: pointer;
+}
+.fset.bill-ui button.brep-open:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 2px;
+}
+.sd-drawer .flow-table td,
+.sd-drawer .flow-table th {
+  white-space: nowrap;
+}
+.sd-drawer .flow-table td.bdash-wrap {
+  min-width: 160px;
+  white-space: normal;
+  overflow-wrap: normal;
+}
+@media (max-width: 640px) {
+  .bdash-page .bdash-bridge__bar {
+    display: none;
+  }
+}
+.bdash-page .sd-showing {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--fink2);
+}
+.bdash-page .sd-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--fink2);
+  font-variant-numeric: tabular-nums;
+}
+.bdash-page .sd-line span:last-child {
+  color: var(--fink);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.bdash-page .sd-warn {
+  color: #b45309;
+  font-weight: 600;
+}
+.bdash-page .sd-exc + .sd-exc {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--fbd);
+}
+.fset.bill-ui button.sd-more {
+  margin-top: 6px;
+}
+.fset.bill-ui .sd-staff thead th,
+.fset.bill-ui .brep-table.sd-staff thead th.brep-num {
+  white-space: normal;
+  vertical-align: bottom;
+  min-width: 72px;
+}
+.fset.bill-ui .sd-staff thead th.bdash-sticky {
+  min-width: 0;
+}
+.bdash-page .sd-staff .sd-col-key {
+  background: var(--ftll);
+}
+@media (max-width: 520px) {
+  .bdash-page .bdash-tiles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.fset.bill-ui .sd-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ui-accent);
+}
+.bdash-page .sd-toolbar {
+  align-items: flex-end;
+  margin: 12px 0;
+}
+.fset.bill-ui .brep-filters .sd-toolbar__search {
+  flex: 1 1 320px;
+  max-width: 440px;
+}
+.bdash-page .sd-found {
+  margin: 0 0 8px auto;
+  font-size: 13px;
+  color: var(--fink2);
+  font-variant-numeric: tabular-nums;
+}
+.bdash-page .sd-tabnote {
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+.bdash-page .sd-wide td {
+  white-space: nowrap;
+}
+.bdash-page .sd-wide td.bdash-wrap,
+.bdash-page .sd-wide td.sd-for {
+  white-space: normal;
+  min-width: 160px;
+}
+.bdash-page .sd-wide td.sd-for {
+  max-width: 420px;
+}
+.bdash-page .sd-wide .sd-voided td {
+  color: var(--fink3);
+}
+.bdash-page .sd-close__field {
+  flex: 1 1 220px;
+}
+.bdash-page .sd-field-msg {
+  display: block;
+  min-height: 18px;
+  font-size: 12px;
+  color: var(--fink3);
+}
+.bdash-page .sd-field-msg--error {
+  color: #b42318;
+  font-weight: 600;
+}
+.bdash-page .sd-field-msg--warn,
+.sd-field-msg--warn {
+  color: #b45309;
+  font-weight: 600;
+}
+.bdash-page .sd-close input[aria-invalid="true"] {
+  border-color: #b42318;
+}
+.sd-drawer .sd-close__row {
+  align-items: flex-start;
+}
+.sd-drawer .sd-close__check,
+.sd-drawer .sd-close__row > button {
+  margin-top: 22px;
 }

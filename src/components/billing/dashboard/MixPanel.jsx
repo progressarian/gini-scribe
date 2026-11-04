@@ -10,6 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import { SERIES } from "../../crm/progress/progressText";
+import { useIsMobile } from "../../../hooks/useIsMobile";
 import { HEALTHRAY_MODE } from "../../../../shared/billingVocab.js";
 import { compactMoney, money, shareOf } from "./dashboardText";
 import ReportLink from "./ReportLink";
@@ -62,6 +63,8 @@ function BarTag({ x, y, width, height, value }) {
 }
 
 function HorizontalBars({ rows, title, valueLabel }) {
+  const narrow = useIsMobile(640);
+  const nameMax = narrow ? 14 : 28;
   if (!rows.length) return <div className="bill-allclear">Nothing in this range.</div>;
   return (
     <>
@@ -70,10 +73,11 @@ function HorizontalBars({ rows, title, valueLabel }) {
           <BarChart
             data={rows}
             layout="vertical"
-            margin={{ top: 4, right: 120, bottom: 4, left: 8 }}
+            margin={{ top: 4, right: narrow ? 92 : 120, bottom: 4, left: narrow ? 0 : 8 }}
           >
             <CartesianGrid stroke="#e2e8f0" horizontal={false} />
             <XAxis
+              hide={narrow}
               type="number"
               tick={AXIS}
               tickLine={false}
@@ -86,9 +90,11 @@ function HorizontalBars({ rows, title, valueLabel }) {
               tick={AXIS}
               tickLine={false}
               axisLine={{ stroke: "#cbd5e1" }}
-              width={190}
+              width={narrow ? 104 : 190}
               interval={0}
-              tickFormatter={(name) => (name.length > 28 ? `${name.slice(0, 27)}…` : name)}
+              tickFormatter={(name) =>
+                name.length > nameMax ? `${name.slice(0, nameMax - 1)}…` : name
+              }
             />
             <Tooltip content={<NetTip />} cursor={{ fill: "rgba(148, 163, 184, 0.15)" }} />
             <Bar

@@ -1,9 +1,11 @@
 import { useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
-import { RefreshCw } from "lucide-react";
+import { Navigate, useLocation, useSearchParams } from "react-router-dom";
+import { Download, RefreshCw } from "lucide-react";
 import Shimmer from "../../components/Shimmer";
 import { useBillingReportCatalog } from "../../queries/hooks/useBillingReports";
-import { useStaffDashboard } from "../../queries/hooks/useStaffDashboard";
+import { useStaffDashboard, useStaffDashboardExport } from "../../queries/hooks/useStaffDashboard";
+import { saveBlob } from "../../components/billing/importText";
+import { toast } from "../../stores/uiStore";
 import { errorOf } from "../../components/billing/format";
 import { dayMs, DAY_MS, RANGES } from "../../components/billing/reportRanges";
 import { Choice, DateField } from "../../components/billing/ReportFields";
@@ -12,7 +14,6 @@ import StaffTable from "../../components/billing/staff/StaffTable";
 import ShiftsTable from "../../components/billing/staff/ShiftsTable";
 import StaffExceptions from "../../components/billing/staff/StaffExceptions";
 import HoursChart from "../../components/billing/staff/HoursChart";
-import ShiftDrawer from "../../components/billing/staff/ShiftDrawer";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
 import "../SettingsLayout.css";
@@ -22,10 +23,29 @@ import "./billingReports.css";
 import "./billingDashboard.css";
 
 const RANGE_DAYS_MAX = 366;
+const weekStart = (day) =>
+  new Date(dayMs(day) - ((new Date(dayMs(day)).getUTCDay() + 6) % 7) * DAY_MS)
+    .toISOString()
+    .slice(0, 10);
+const byKey = (key) => RANGES.find((r) => r.key === key);
 const PRESETS = [
-  ...RANGES.filter((r) => ["today", "yesterday", "month", "last_month", "last_30"].includes(r.key)),
-  { key: "custom", label: "Custom range", range: null },
+  byKey("today"),
+  byKey("yesterday"),
+  { key: "week", label: "This week", range: (today) => ({ from: weekStart(today), to: today }) },
+  byKey("month"),
+  byKey("last_month"),
+  { key: "custom", label: "Custom", range: null },
 ];
+
+const SHOWN_DAY = new Intl.DateTimeFormat("en-IN", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
+const shownDay = (day) => SHOWN_DAY.format(new Date(`${day}T00:00:00Z`));
+const shownRange = ({ from, to }) =>
+  from === to ? shownDay(from) : `${shownDay(from)} – ${shownDay(to)}`;
 const DEFAULT_PRESET = "today";
 
 const IST_TIME = new Intl.DateTimeFormat("en-IN", {
@@ -46,8 +66,16 @@ function readFilters(params, today) {
   };
 }
 
+const realDay = (text) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+  const parsed = new Date(`${text}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === text;
+};
+
 function rangeProblem(filters, today) {
   if (!filters.from || !filters.to) return "Choose a start and an end date.";
+  if (!realDay(filters.from)) return "Choose a valid start date.";
+  if (!realDay(filters.to)) return "Choose a valid end date.";
   if (filters.from > filters.to) return "The start date is after the end date.";
   if (filters.to > today) return "The end date can't be after today.";
   const days = Math.round((dayMs(filters.to) - dayMs(filters.from)) / DAY_MS) + 1;
@@ -66,7 +94,17 @@ export default function StaffDashboardPage() {
     [filters],
   );
   const result = useStaffDashboard(sent, { enabled: Boolean(today) && !problem });
-  const openShift = params.get("shift") || "";
+  const location = useLocation();
+  const oldShiftLink = params.get("shift");
+  const download = useStaffDashboardExport();
+  const downloadNow = () =>
+    download.mutate(sent, {
+      onSuccess: (file) => {
+        saveBlob(file);
+        toast(`Downloaded ${file.fileName}`, "success");
+      },
+      onError: (e) => toast(errorOf(e, "Could not download the staff report"), "error"),
+    });
 
   const setParam = (patch) =>
     setParams((current) => {
@@ -82,6 +120,8 @@ export default function StaffDashboardPage() {
     const merged = { ...filters, ...patch };
     setParam({ range: merged.range, from: merged.from, to: merged.to, staff: merged.staff });
   };
+
+  if (oldShiftLink) return <Navigate to={`/billing/staff/shifts/${oldShiftLink}`} replace />;
 
   if (catalog.isLoading) {
     return (
@@ -110,6 +150,9 @@ export default function StaffDashboardPage() {
   const users = catalog.data.options.users ?? [];
   const data = result.data;
   const cleared = !["range", "from", "to", "staff"].some((key) => params.get(key));
+  const staffName = filters.staff
+    ? (users.find((u) => String(u.id) === filters.staff)?.name ?? "one person")
+    : null;
   return (
     <div className="flow-root fset bill-ui bdash-page">
       <div className="flow-card bill-stack">
@@ -129,6 +172,15 @@ export default function StaffDashboardPage() {
             >
               <RefreshCw size={13} aria-hidden="true" /> Refresh
             </button>
+            <button
+              type="button"
+              className="flow-btn flow-btn-primary brep-export"
+              onClick={downloadNow}
+              disabled={!data || download.isPending || Boolean(problem)}
+            >
+              <Download size={14} aria-hidden="true" />
+              {download.isPending ? "Preparing…" : "Download Excel"}
+            </button>
           </div>
         </div>
         <div className="fset__cardsub">
@@ -136,34 +188,36 @@ export default function StaffDashboardPage() {
           cash handover. Money counts on the day it was taken.
         </div>
         <div className="bill-form brep-filters" role="search" aria-label="Staff dashboard filters">
-          <div className="fset__field brep-field">
-            <label htmlFor="sd-dates">Dates</label>
-            <select
-              id="sd-dates"
-              className="jb-assign"
-              value={filters.range}
-              onChange={(e) => {
-                const preset = PRESETS.find((p) => p.key === e.target.value);
-                update({ range: e.target.value, ...(preset?.range ? preset.range(today) : {}) });
-              }}
-            >
+          <div className="bdash-field-seg">
+            <span id="sd-dates">Dates</span>
+            <div className="bdash-seg" role="group" aria-labelledby="sd-dates">
               {PRESETS.map((p) => (
-                <option key={p.key} value={p.key}>
+                <button
+                  key={p.key}
+                  type="button"
+                  className={`flow-btn flow-btn-mini ${filters.range === p.key ? "flow-btn-primary" : "flow-btn-ghost"}`}
+                  aria-pressed={filters.range === p.key}
+                  onClick={() => update({ range: p.key, ...(p.range ? p.range(today) : {}) })}
+                >
                   {p.label}
-                </option>
+                </button>
               ))}
-            </select>
+            </div>
           </div>
-          <DateField
-            label="From"
-            value={filters.from}
-            onChange={(from) => update({ range: "custom", from })}
-          />
-          <DateField
-            label="To"
-            value={filters.to}
-            onChange={(to) => update({ range: "custom", to })}
-          />
+          {filters.range === "custom" ? (
+            <>
+              <DateField
+                label="From"
+                value={filters.from}
+                onChange={(from) => update({ range: "custom", from })}
+              />
+              <DateField
+                label="To"
+                value={filters.to}
+                onChange={(to) => update({ range: "custom", to })}
+              />
+            </>
+          ) : null}
           <Choice
             label="Staff"
             value={filters.staff}
@@ -171,17 +225,24 @@ export default function StaffDashboardPage() {
             anyLabel="All staff"
             options={users.map((u) => ({ value: String(u.id), label: u.name }))}
           />
-          <div className="brep-quick">
-            <button
-              type="button"
-              className="flow-btn flow-btn-mini flow-btn-ghost"
-              disabled={cleared}
-              onClick={() => setParams(new URLSearchParams())}
-            >
-              Clear filters
-            </button>
-          </div>
+          {!cleared ? (
+            <div className="brep-quick">
+              <button
+                type="button"
+                className="flow-btn flow-btn-mini flow-btn-ghost"
+                onClick={() => setParams(new URLSearchParams())}
+              >
+                Reset to today
+              </button>
+            </div>
+          ) : null}
         </div>
+        {data && !problem ? (
+          <p className="sd-showing" role="status">
+            Showing <strong>{shownRange(data.filters)}</strong> ·{" "}
+            <strong>{staffName ?? "all staff"}</strong>
+          </p>
+        ) : null}
         {problem ? (
           <div className="brep-error" role="alert">
             {problem}
@@ -202,17 +263,16 @@ export default function StaffDashboardPage() {
       {data ? (
         <>
           <StaffTiles data={data} />
-          <StaffExceptions data={data} onOpen={(shift) => setParam({ shift })} />
           <StaffTable
             data={data}
             picked={filters.staff ? Number(filters.staff) : null}
             onPick={(id) => update({ staff: String(id) })}
           />
-          <ShiftsTable data={data} onOpen={(shift) => setParam({ shift })} />
+          <ShiftsTable data={data} back={location.search} />
+          <StaffExceptions data={data} back={location.search} />
           <HoursChart hours={data.hours} />
         </>
       ) : null}
-      <ShiftDrawer id={openShift} onClose={() => setParam({ shift: "" })} />
     </div>
   );
 }

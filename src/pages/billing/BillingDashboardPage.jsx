@@ -193,8 +193,17 @@ function Filters({ catalog, filters, update, onClear, cleared }) {
   );
 }
 
-function rangeProblem(filters) {
+const realDay = (text) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+  const parsed = new Date(`${text}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === text;
+};
+
+function rangeProblem(filters, today) {
   if (!filters.from || !filters.to) return "Choose a start and an end date.";
+  if (!realDay(filters.from)) return "Choose a valid start date.";
+  if (!realDay(filters.to)) return "Choose a valid end date.";
+  if (filters.to > today) return "The end date can't be after today.";
   if (filters.from > filters.to) return "The start date is after the end date.";
   const days = daysIn(filters.from, filters.to);
   if (days > RANGE_DAYS_MAX) return `Choose at most ${RANGE_DAYS_MAX} days at a time.`;
@@ -218,7 +227,7 @@ export default function BillingDashboardPage() {
   const [params, setParams] = useSearchParams();
   const today = catalog.data?.today;
   const filters = useMemo(() => readFilters(params, today), [params, today]);
-  const problem = today ? rangeProblem(filters) : null;
+  const problem = today ? rangeProblem(filters, today) : null;
   const sent = useMemo(
     () => Object.fromEntries(FILTER_KEYS.map((key) => [key, filters[key]])),
     [filters],

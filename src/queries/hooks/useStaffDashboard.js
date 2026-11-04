@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "../../services/api";
+import { fileNameOf, readBlobError } from "./useBillingMaster";
 
 const STAFF = "/api/billing/staff";
 
@@ -52,5 +53,23 @@ export function useShiftHandover(id) {
     queryFn: async () => (await api.get(`/api/billing/shifts/${id}/handover`)).data,
     enabled: Boolean(id),
     retry: retryUnlessRefused,
+  });
+}
+
+export function useStaffDashboardExport() {
+  return useMutation({
+    mutationFn: async (filters) => {
+      const params = withoutBlanks(filters);
+      const response = await api
+        .get(`${STAFF}/export`, { params, responseType: "blob" })
+        .catch(readBlobError);
+      return {
+        blob: response.data,
+        fileName: fileNameOf(
+          response.headers,
+          `staff-and-shifts-${params.from}-to-${params.to}.xlsx`,
+        ),
+      };
+    },
   });
 }

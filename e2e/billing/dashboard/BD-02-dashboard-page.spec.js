@@ -266,4 +266,16 @@ test.describe.serial("BD-02 billing dashboard page", () => {
     expect(pinned.offset).toBeGreaterThanOrEqual(-1);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/dashboard-phone.png`, fullPage: true });
   });
+
+  test("8. bad dates in the link show a clear message instead of an error", async ({ page }) => {
+    await loginAs(page, "reception_admin");
+    await page.goto(`/billing/dashboard?range=custom&from=2026-13-45&to=2026-11-01`);
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Choose a valid start date." }),
+    ).toBeVisible();
+    await page.goto(`/billing/dashboard?range=custom&from=2026-11-01&to=2999-01-01`);
+    await expect(
+      page.getByRole("alert").filter({ hasText: "The end date can't be after today." }),
+    ).toBeVisible();
+  });
 });

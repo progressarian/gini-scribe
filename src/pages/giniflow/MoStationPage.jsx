@@ -28,6 +28,7 @@ import VisitSummarySection from "./consult/VisitSummarySection";
 import RxParameterSection from "./consult/RxParameterSection";
 import VisitNewPatientWorkup from "../../components/visit/VisitNewPatientWorkup";
 import ChiefSuggestions from "../../components/giniflow/ChiefSuggestions";
+import TestsDueDialog from "../../components/giniflow/TestsDueDialog";
 import EditNextVisit from "../../components/giniflow/EditNextVisit";
 import ConsultEditBar, { AmendedNote, EditPrescriptionButton } from "./consult/ConsultEditBar";
 import {
@@ -542,8 +543,7 @@ export default function MoStationPage() {
   // Auto-select the head of the queue so the screen is usable without a click —
   // but stop following it the moment the MO types, or a 15-second refetch would
   // swap the patient out from under the textarea.
-  const autoId = queue?.withMe?.[0]?.visitId ?? queue?.waitingForMe?.[0]?.visitId ?? null;
-  const activeId = selected ?? (pinned ? null : autoId);
+  const activeId = selected;
   const { data: patient } = useMoPatient(activeId);
   const { data: catalogue } = useTestPanels(activeId);
 
@@ -1928,6 +1928,16 @@ export default function MoStationPage() {
         onConfirm={confirm?.onConfirm}
         onClose={() => setConfirm(null)}
       />
+
+      {patient && activeId ? (
+        <TestsDueDialog
+          visitId={activeId}
+          station="mo"
+          enabled={patient.status === "with_sd"}
+          patient={{ name: patient.name, fileNo: patient.fileNo }}
+          onToast={showToast}
+        />
+      ) : null}
 
       {toast && <div className="toast show">{toast}</div>}
     </div>

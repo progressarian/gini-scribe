@@ -15,6 +15,15 @@ const LONG_DAY = new Intl.DateTimeFormat("en-IN", {
 
 export const longDay = (day) => LONG_DAY.format(new Date(`${day}T00:00:00Z`));
 
+const IST_TODAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" });
+
+export function validCounterDate(text) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text ?? "")) return "";
+  const parsed = new Date(`${text}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== text) return "";
+  return text < IST_TODAY.format(new Date()) ? text : "";
+}
+
 export default function CounterDate({ date, today, firstDay, onDate }) {
   const id = useId();
   if (!today) return null;
@@ -43,7 +52,7 @@ export default function CounterDate({ date, today, firstDay, onDate }) {
         max={today}
         onChange={(e) => {
           const day = e.target.value;
-          if (day && day <= today) go(day);
+          if (day && day <= today && (!firstDay || day >= firstDay)) go(day);
         }}
       />
       <button

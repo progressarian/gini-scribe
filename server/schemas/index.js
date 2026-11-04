@@ -10,6 +10,7 @@ import { HOME_NOTE_MAX } from "../../shared/homeCollectors.js";
 import { NEFT_MODE, UPI_APPS } from "../../shared/billingVocab.js";
 import { RX_FOLLOWUP_ACTIONS, RX_FOLLOWUP_RESOLVES } from "../../shared/rxFollowups.js";
 import { HOLD_DECISIONS, HOLD_NOTE_MAX, HOLD_NOTE_MIN } from "../../shared/coordinatorHold.js";
+import { TESTS_DUE_KEYS } from "../../shared/testsDue.js";
 import {
   ACANTHOSIS_GRADES,
   EXAM_FINDING_STATES,
@@ -1265,6 +1266,19 @@ export const giniflowOrderTestsSchema = z
   })
   .refine((v) => (v.tests?.length || 0) + (v.customTests?.length || 0) > 0, {
     message: "No tests selected",
+  });
+
+export const giniflowTestsDueDecisionSchema = z
+  .object({
+    order: z.array(z.enum(TESTS_DUE_KEYS)).max(TESTS_DUE_KEYS.length).default([]),
+    decline: z.array(z.enum(TESTS_DUE_KEYS)).max(TESTS_DUE_KEYS.length).default([]),
+    urgency: z.enum(["today", "tomorrow", "next_visit"]).nullable().optional(),
+  })
+  .refine((v) => v.order.length + v.decline.length > 0, {
+    message: "Choose the tests to order or decline",
+  })
+  .refine((v) => !v.order.length || v.urgency, {
+    message: "Choose when the tests are for",
   });
 
 export const giniflowBackForTestsSchema = z

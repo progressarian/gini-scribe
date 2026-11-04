@@ -1,8 +1,9 @@
+import { Link } from "react-router-dom";
 import { money } from "../dashboard/dashboardText";
 import CashBadge from "./CashBadge";
 import { clock, hoursOpen, nonCash } from "./staffText";
 
-export default function ShiftsTable({ data, onOpen }) {
+export default function ShiftsTable({ data, back }) {
   const shifts = data.shifts;
   return (
     <section className="flow-card bdash-card" aria-labelledby="sd-shifts">
@@ -23,10 +24,12 @@ export default function ShiftsTable({ data, onOpen }) {
         </div>
       ) : (
         <div className="fset__scroll">
-          <table className="flow-table brep-table bdash-small" aria-label="Shifts">
+          <table className="flow-table brep-table bdash-small bdash-mis" aria-label="Shifts">
             <thead>
               <tr>
-                <th scope="col">Staff</th>
+                <th scope="col" className="bdash-sticky">
+                  Staff
+                </th>
                 <th scope="col">Opened</th>
                 <th scope="col">Closed</th>
                 <th scope="col" className="brep-num">
@@ -56,7 +59,7 @@ export default function ShiftsTable({ data, onOpen }) {
             <tbody>
               {shifts.map((shift) => (
                 <tr key={shift.id}>
-                  <th scope="row" className="bdash-wrap">
+                  <th scope="row" className="bdash-sticky">
                     {shift.user.name ?? "—"}
                   </th>
                   <td>
@@ -86,14 +89,14 @@ export default function ShiftsTable({ data, onOpen }) {
                   </td>
                   <td className="brep-num">{money(nonCash(shift))}</td>
                   <td>
-                    <button
-                      type="button"
+                    <Link
                       className="brep-open"
+                      to={`/billing/staff/shifts/${shift.id}`}
+                      state={{ back }}
                       aria-label={`Open the shift of ${shift.user.name ?? "this desk"} opened ${clock(shift.opened_at)}`}
-                      onClick={() => onOpen(shift.id)}
                     >
                       Details
-                    </button>
+                    </Link>
                   </td>
                 </tr>
               ))}

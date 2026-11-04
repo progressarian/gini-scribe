@@ -2903,3 +2903,7 @@ body > [role="dialog"][aria-modal="true"] .bc-cc__warn {
   gap: 8px;
   margin-top: 8px;
 }
+.gf .bc-warn {
+  color: #b45309;
+  font-weight: 600;
+}

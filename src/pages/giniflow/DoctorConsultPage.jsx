@@ -19,6 +19,7 @@ import ProposalsStrip from "./consult/ProposalsStrip";
 import PlanSuggestions from "./consult/PlanSuggestions";
 import RxSection from "./consult/RxSection";
 import TestsSection from "./consult/TestsSection";
+import TestsDueDialog from "../../components/giniflow/TestsDueDialog";
 import ProceduresSection from "./consult/ProceduresSection";
 import MedCardSection from "./consult/MedCardSection";
 import FinalizeBar from "./consult/FinalizeBar";
@@ -577,6 +578,13 @@ export default function DoctorConsultPage() {
             readOnly={readOnly}
             onToast={showToast}
             onUnsaved={markUnsaved}
+          />
+          <TestsDueDialog
+            visitId={visitId}
+            station="doctor"
+            enabled={!readOnly && !consult.finalized}
+            patient={{ name: consult.name, fileNo: consult.fileNo }}
+            onToast={showToast}
           />
           <TestsSection
             restored={restored}

@@ -10,6 +10,7 @@ import { CLEARED_SOURCES, PAYMENTS_TAB_CLEARED } from "./clearedMoney.js";
 
 export { CLEARED_SOURCES };
 import { httpError } from "./transaction.js";
+import { getPrescriptionFooter, normalizeHospital } from "../prescriptionFooter.js";
 import { CAPABILITIES, hasAnyCapability } from "../../../shared/permissions.js";
 
 export const STAFF_MONEY_COLUMNS = [
@@ -316,6 +317,7 @@ function blankStaff(id, person) {
     name: person?.name ?? (id ? `Staff #${id}` : "Not recorded"),
     role: person?.role ?? null,
     money: zeroMoney(),
+    taken: zeroMoney(),
     paid_back: zeroMoney(),
     cleared: Object.fromEntries(CLEARED_SOURCES.map((src) => [src.key, 0])),
     cleared_count: 0,
@@ -392,6 +394,7 @@ export async function staffDashboard(input = {}, db = pool, { today = indiaToday
     }
     if (!(row.col in person.money)) continue;
     person.money[row.col] = paise(row.taken) - paise(row.paid_back);
+    person.taken[row.col] = paise(row.taken);
     person.paid_back[row.col] = paise(row.paid_back);
   }
   for (const row of cleared) {
@@ -413,8 +416,9 @@ export async function staffDashboard(input = {}, db = pool, { today = indiaToday
     const person = staffOf(shift.user.id);
     person.shifts += 1;
     if (shift.is_open) person.open_shifts += 1;
-    if (!shift.is_open && shift.difference < 0) person.short += shift.difference;
-    if (!shift.is_open && shift.difference > 0) person.over += shift.difference;
+    const counts = !shift.is_open && closedWithin(shift, filters);
+    if (counts && shift.difference < 0) person.short += shift.difference;
+    if (counts && shift.difference > 0) person.over += shift.difference;
   }
 
   const staff = [...byId.values()].sort(
@@ -435,6 +439,7 @@ export async function staffDashboard(input = {}, db = pool, { today = indiaToday
     manual_discount_amount: sum("manual_discount_amount"),
     cleared_count: sum("cleared_count"),
     money: Object.fromEntries(STAFF_MONEY_COLUMNS.map((c) => [c.key, sumOf("money", c.key)])),
+    taken: Object.fromEntries(STAFF_MONEY_COLUMNS.map((c) => [c.key, sumOf("taken", c.key)])),
     cleared: Object.fromEntries(CLEARED_SOURCES.map((c) => [c.key, sumOf("cleared", c.key)])),
     patients: await distinctPatients(filters, db),
   };
@@ -445,6 +450,7 @@ export async function staffDashboard(input = {}, db = pool, { today = indiaToday
       .reduce((sum, s) => sum + (s.counted_cash ?? s.expected_cash), 0),
     open_cash: open.reduce((sum, s) => sum + s.expected_cash, 0),
     open_shifts: open.length,
+    includes_today: filters.to === today,
     ...cashChecks(shifts.filter((s) => s.closed_at && closedWithin(s, filters))),
   };
   return {
@@ -463,7 +469,7 @@ export async function staffDashboard(input = {}, db = pool, { today = indiaToday
     hours,
     exceptions: {
       left_open: shifts.filter((s) => s.left_open),
-      differences: shifts.filter((s) => !s.is_open && s.difference),
+      differences: shifts.filter((s) => !s.is_open && s.difference && closedWithin(s, filters)),
       voided,
       manual_discounts: discounts,
       flag: MANUAL_DISCOUNT_FLAG,
@@ -574,9 +580,9 @@ async function shiftActivity(id, db) {
            LEFT JOIN patients p ON p.id = b.patient_id
           WHERE s.id = $1
          UNION ALL
-         SELECT 'manual_discount', d.created_at, b.id, b.bill_no, b.visit_id, b.bill_date::text,
-                p.name, p.file_no, d.amount,
-                COALESCE(l.manual_discount_reason, b.manual_discount_reason)
+         SELECT 'manual_discount', MIN(d.created_at), b.id, b.bill_no, b.visit_id,
+                b.bill_date::text, p.name, p.file_no, SUM(d.amount),
+                string_agg(DISTINCT COALESCE(l.manual_discount_reason, b.manual_discount_reason), '; ')
            FROM cash_shifts s
            JOIN bill_line_discounts d ON d.applied_by = s.user_id AND d.method = 'manual'
                                      AND d.created_at BETWEEN ${WINDOW}
@@ -584,6 +590,7 @@ async function shiftActivity(id, db) {
            JOIN bills b ON b.id = l.bill_id
            LEFT JOIN patients p ON p.id = b.patient_id
           WHERE s.id = $1
+          GROUP BY b.id, b.bill_no, b.visit_id, b.bill_date, p.name, p.file_no
        ) a
       ORDER BY at`,
     [id],
@@ -618,7 +625,9 @@ export async function staffShiftDetail(id, db = pool, { today = indiaToday() } =
     shiftActivity(shiftId, db),
   ]);
   const changes = await changedAfterClose(shiftId, db);
+  const footer = await getPrescriptionFooter();
   return {
+    hospital: normalizeHospital(footer?.hospital).name,
     shift,
     payments: payments.slice(0, SHIFT_PAYMENTS_MAX).map((row) => ({
       ...row,

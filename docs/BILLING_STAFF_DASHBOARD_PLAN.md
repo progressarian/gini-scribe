@@ -322,3 +322,60 @@ Existing e2e tests that pick nothing and rely on Cash need a line adding the mod
 - **Privacy:** the Excel and payments lists show name + UHID only, with no phone numbers. The Excel needs `BILLING_REPORTS`.
 - **Audit:** closing already writes `billing_audit`. The snapshot and note count go into the same audit row, and so does an admin "not counted" close.
 - **Size:** about 1,200 payments since September, so the page reads live without a cache beyond the dashboard's 3-minute one. The queries take a date range and use `payments_received_idx`.
+
+## 13. Built (2026-11-04)
+
+**Server**
+
+- `server/services/billing/staffDashboard.js`:
+  - `staffDashboard` builds the per-person totals by mode (`money` net and `taken` gross), the cleared-in-HealthRay totals (from `clearedMoney.js`), the work counts (finalised, cancelled, check-ins, manual discounts), the shifts, payments by hour and the exceptions.
+  - `staffShiftDetail` returns one shift's payments, clearances, activity and changes after close. Activity groups manual discounts per bill.
+  - `shiftHandover` lets the shift's owner, or anyone with `BILLING_REPORTS`, read a slip.
+- **Routes:**
+  - `GET /api/billing/staff`, `/staff/shifts/:id` and `/staff/export` need `BILLING_REPORTS`.
+  - `GET /api/billing/shifts/:id/handover` needs `BILLING_DESK` plus the ownership check.
+  - `POST /api/billing/master/shifts/:id/close` now takes `not_counted` and `denominations`.
+- **Migration** `2026-12-28_cash_shift_handover.sql` adds `handover`, `denominations` and `not_counted` to `cash_shifts`, with the checks updated. **Applied to production 2026-11-04.**
+- **`cashShifts.closeShift`** stores the frozen handover snapshot and the optional note count, and checks that the note count matches the counted cash. Only an admin can close as not counted.
+- **`refreshClosedDrawer`** keeps the difference empty for a not-counted shift.
+
+**Counter (step 1)**
+
+- **No default payment mode** on the payment rows, check-in & collect (single and split) or the deposit form.
+- **Refund requests keep their mode choice,** because a second person approves the mode.
+- **Shift tab:**
+  - optional note count;
+  - "open since an earlier day" banner, also shown on the Bill tab;
+  - end-of-day reminder after 6 pm;
+  - counted cash checked (digits only, length cap, far-off warning);
+  - a slip link after closing and for each earlier shift.
+
+**Pages**
+
+- **`/billing/staff` (Billing › Staff & shifts):**
+  - date presets as buttons, Custom showing From/To, staff picker, and a "Showing …" line;
+  - 4 headline tiles;
+  - the staff table: at most 10 columns, empty columns hidden, sticky names, Collected highlighted;
+  - the shifts table;
+  - Needs attention: non-empty blocks only, 5 rows each with "Show all";
+  - payments by hour;
+  - Excel download with Staff, Shifts and Payments sheets.
+- **`/billing/staff/shifts/:id` replaces the drawer.**
+  - **Content:** summary cards, admin close (checked), changes after close, and tabs for Payments, Cleared in HealthRay and Bills and discounts, each with search, a filter and 25 per page. Tab, search and page are kept in the URL.
+  - **Old links:** `?shift=` links redirect here.
+  - **Print handover slip:** opens a dialog on the same page. Printing shows only the slip, full width; this was checked by rendering an A4 PDF.
+- **`/billing/shift-slip/:id`:** standalone slip page, sharing the same `HandoverSlip` component; used from the counter.
+
+**Differences from the plan**
+
+- **The slip** is an on-screen print view (browser print), not a Puppeteer PDF.
+- **The shift detail** is a page, not a drawer: the drawer could not hold a month-long shift.
+- **The by-staff table** shows money taken by mode plus refunds as their own column, so Collected = taken − refunds is visible. Card, UPI and NEFT are one column with a per-app breakdown on hover.
+
+**Tests**
+
+- `e2e/billing/staff/SD-01` … `SD-03`: 18 tests.
+- `BC-01` test 8 and `BD-02` test 8: bad links.
+- Counter specs updated for "no default mode": P4-32, P4-33, P4-34, P4C-11, P4C-43, D02.
+- Last run: 44 passed (staff, counter, BD-02, P4-34).
+- **Already failing, not from this work:** P4-32 tests 1 and 9 also fail on the committed code; the test bill has a consultation added on its own.

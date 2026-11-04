@@ -220,4 +220,22 @@ test.describe.serial("BC-01 the billing counter on a past date", () => {
       .evaluate((el) => el.getBoundingClientRect().right);
     expect(right).toBeLessThanOrEqual(390);
   });
+
+  test("8. a future or garbled date in the link falls back to today instead of hanging", async ({
+    page,
+  }) => {
+    test.setTimeout(120000);
+    await loginAs(page, "reception");
+    for (const bad of ["2999-01-01", "not-a-date", "2026-02-31"]) {
+      await gotoReady(
+        page,
+        `/giniflow/station/reception?tab=bill&date=${bad}`,
+        () => page.getByRole("group", { name: "Counter date controls" }),
+        { timeout: 30000 },
+      );
+      await expect(page.getByLabel("Counter date", { exact: true })).toHaveValue(ids.day);
+      await expect(page.getByRole("status").filter({ hasText: "not today" })).toHaveCount(0);
+      await expect(list(page).getByText("Loading…")).toHaveCount(0);
+    }
+  });
 });

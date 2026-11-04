@@ -12,96 +12,99 @@ function Tile({ label, value, hint, children }) {
   );
 }
 
+function Line({ label, value }) {
+  return (
+    <div className="sd-line">
+      <span>{label}</span>
+      <span>{value}</span>
+    </div>
+  );
+}
+
+const sumOf = (amounts = {}, keys) => keys.reduce((sum, key) => sum + (amounts[key] ?? 0), 0);
+const NON_CASH = ["card", "upi_bharatpe", "upi_paytm", "upi_other", "upi_unknown", "neft"];
+
 export default function StaffTiles({ data }) {
   const total = data.total;
   const hand = data.handover;
   const change = changeOf(total.collected, data.previous.collected);
-  const outside = (total.money.healthray ?? 0) + (total.money.prepaid ?? 0);
-  const cleared = Object.values(total.cleared).reduce((sum, value) => sum + value, 0);
+  const healthray = sumOf(total.taken, ["healthray", "prepaid"]);
+  const cleared = Object.values(total.cleared ?? {}).reduce((sum, value) => sum + value, 0);
+  const closedCount = hand.short.count + hand.over.count + hand.matched + hand.not_counted;
   return (
     <section className="bdash-tiles" aria-label="Headline figures">
       <Tile
         label="Collected"
         value={money(total.collected)}
-        hint="Money taken at the counter less refunds paid back, by payment date. Includes bills marked Paid in HealthRay; excludes money moved from a deposit."
+        hint="Money taken less refunds paid back, on the day it was taken. Matches Collected on the billing dashboard."
       >
-        <span className="bdash-tile__change">
-          {count(total.payments)} {total.payments === 1 ? "payment" : "payments"}
-          {change && change.direction
-            ? ` · ${change.direction > 0 ? "▲ Up" : "▼ Down"}${change.text ? ` ${change.text}` : ""} from ${money(data.previous.collected)} in ${rangeLabel(data.previous.from, data.previous.to)}`
-            : ""}
-        </span>
-        {outside ? (
+        <Line label="Cash taken" value={money(total.taken?.cash ?? 0)} />
+        <Line label="Card / UPI / NEFT" value={money(sumOf(total.taken, NON_CASH))} />
+        <Line label="Marked paid in HealthRay" value={money(healthray)} />
+        <Line
+          label="Refunds paid back"
+          value={total.refunded ? `−${money(total.refunded)}` : money(0)}
+        />
+        {change && change.direction ? (
           <span className="bdash-tile__change">
-            of which {money(outside)} marked paid in HealthRay or earlier
+            {change.direction > 0 ? "▲ Up" : "▼ Down"}
+            {change.text ? ` ${change.text}` : ""} from {money(data.previous.collected)} in{" "}
+            {rangeLabel(data.previous.from, data.previous.to)}
           </span>
         ) : null}
       </Tile>
       <Tile
-        label="Cash to hand over"
-        value={money(hand.closed_cash + hand.open_cash)}
-        hint="Closed shifts: the cash counted at close (or expected, if not counted). Open shifts: what should be in the drawer now."
-      >
-        <span className="bdash-tile__change">{money(hand.closed_cash)} from closed shifts</span>
-        <span className="bdash-tile__change">
-          {money(hand.open_cash)} still in {count(hand.open_shifts)} open{" "}
-          {hand.open_shifts === 1 ? "shift" : "shifts"}
-        </span>
-      </Tile>
-      <Tile
-        label="Cash difference"
+        label="Cash handover"
         value={
-          hand.short.count || hand.over.count
-            ? `${hand.short.count + hand.over.count} ${hand.short.count + hand.over.count === 1 ? "shift" : "shifts"}`
-            : "None"
+          hand.open_shifts && !closedCount
+            ? `${count(hand.open_shifts)} open`
+            : `${count(closedCount)} closed`
         }
-        hint="Counted cash against expected cash, for shifts closed in this period. Short and over are shown separately, never netted."
+        hint="Shifts closed in these dates and how their counted cash compared with what was expected."
       >
-        <span className="bdash-tile__change">
-          Short:{" "}
-          {hand.short.count
-            ? `${money(Math.abs(hand.short.amount))} on ${hand.short.count}`
-            : "none"}
-        </span>
-        <span className="bdash-tile__change">
-          Over: {hand.over.count ? `${money(hand.over.amount)} on ${hand.over.count}` : "none"}
-        </span>
-        {hand.not_counted ? (
-          <span className="bdash-tile__change">{hand.not_counted} closed without a count</span>
+        <Line label="Cash counted at close" value={money(hand.closed_cash)} />
+        <Line
+          label="Short"
+          value={
+            hand.short.count
+              ? `${money(Math.abs(hand.short.amount))} (${hand.short.count})`
+              : "None"
+          }
+        />
+        <Line
+          label="Over"
+          value={hand.over.count ? `${money(hand.over.amount)} (${hand.over.count})` : "None"}
+        />
+        {hand.open_shifts ? (
+          <span className="bdash-tile__change sd-warn">
+            {count(hand.open_shifts)} {hand.open_shifts === 1 ? "shift" : "shifts"} still open
+            {hand.includes_today ? ` · ${money(hand.open_cash)} in the drawers now` : ""}
+          </span>
         ) : null}
       </Tile>
       <Tile
-        label="Patients served"
-        value={count(total.patients)}
-        hint="Different patients who paid at the counter in this period."
+        label="Patients and bills"
+        value={`${count(total.patients)} ${total.patients === 1 ? "patient" : "patients"}`}
       >
-        <span className="bdash-tile__change">{count(total.check_ins)} check-ins</span>
-      </Tile>
-      <Tile label="Bills finalised" value={count(total.finalised)}>
-        <span className="bdash-tile__change">
-          {total.cancelled ? `${count(total.cancelled)} cancelled` : "None cancelled"}
-        </span>
+        <Line label="Bills finalised" value={count(total.finalised)} />
+        <Line label="Check-ins" value={count(total.check_ins)} />
+        <Line label="Payments taken" value={count(total.payments)} />
+        {total.cancelled ? <Line label="Bills cancelled" value={count(total.cancelled)} /> : null}
       </Tile>
       <Tile label="Refunds paid back" value={money(total.refunded)}>
-        <span className="bdash-tile__change">
-          {count(total.refunds)} {total.refunds === 1 ? "refund" : "refunds"}
-        </span>
-      </Tile>
-      <Tile
-        label="Manual discounts"
-        value={money(total.manual_discount_amount)}
-        hint="Discounts typed in by hand at the counter, by the person who gave them."
-      >
-        <span className="bdash-tile__change">{count(total.manual_discounts)} given</span>
-      </Tile>
-      <Tile
-        label="Cleared in HealthRay"
-        value={money(cleared)}
-        hint="Test payments cleared on the Payments tab and consultant fee changes settled — the money is taken in HealthRay, not in the Scribe drawer."
-      >
-        <span className="bdash-tile__change">
-          {count(total.cleared_count)} cleared, not in any drawer
-        </span>
+        <Line label="Refunds" value={count(total.refunds)} />
+        <Line
+          label="Manual discounts given"
+          value={`${money(total.manual_discount_amount)} (${count(total.manual_discounts)})`}
+        />
+        {cleared ? (
+          <span
+            className="bdash-tile__change"
+            title="Test payments cleared on the Payments tab and consultant fee changes settled. The money was taken in HealthRay, so it is not in Collected or any drawer."
+          >
+            Also cleared in HealthRay: {money(cleared)} ({count(total.cleared_count)})
+          </span>
+        ) : null}
       </Tile>
     </section>
   );

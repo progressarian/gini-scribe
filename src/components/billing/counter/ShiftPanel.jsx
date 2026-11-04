@@ -7,12 +7,13 @@ import {
   useMyShifts,
   useOpenShift,
 } from "../../../queries/hooks/useBilling";
-import { errorOf, moneyTyped, rupees } from "../format";
+import { errorOf, rupees } from "../format";
 import { PAYMENT_MODE_LABEL, shiftStateText, TAKE_MODE_LABEL } from "./lineText";
 import useAuthStore from "../../../stores/authStore";
 import { NOTES, noteCountTotal, noteCountUsed, SHIFT_FORM, shiftFormKey } from "./counterForm";
 import { useSavedForm } from "./useSavedForm";
 import { shiftReminder } from "./shiftReminder";
+import { cashTyped, countedProblem, countedWarning } from "../staff/staffText";
 
 const clock = (iso) =>
   iso
@@ -47,6 +48,10 @@ export default function ShiftPanel() {
   const expected = Number(shift?.expected_cash ?? 0);
   const countedAmount = byNotes ? noteCountTotal(notes) / 100 : Number(counted || 0);
   const reminder = shiftReminder(shift);
+  const countedError = byNotes ? null : countedProblem(counted);
+  const countWarning = countedError
+    ? null
+    : countedWarning(Math.round(countedAmount * 100), Math.round(expected * 100));
   const difference = Number((countedAmount - expected).toFixed(2));
   const earlier = (mine || []).filter((row) => !row.is_open);
 
@@ -112,7 +117,7 @@ export default function ShiftPanel() {
                 className="bc-field__in"
                 inputMode="decimal"
                 value={opening}
-                onChange={(e) => setOpening(moneyTyped(e.target.value))}
+                onChange={(e) => setOpening(cashTyped(e.target.value))}
               />
             </label>
             <button
@@ -189,8 +194,9 @@ export default function ShiftPanel() {
                 inputMode="decimal"
                 value={byNotes ? countedAmount.toFixed(2) : counted}
                 readOnly={byNotes}
-                aria-describedby={byNotes ? "bc-shift-bynotes" : undefined}
-                onChange={(e) => setCounted(moneyTyped(e.target.value))}
+                aria-describedby={byNotes ? "bc-shift-bynotes" : "bc-shift-countmsg"}
+                aria-invalid={countedError && counted ? true : undefined}
+                onChange={(e) => setCounted(cashTyped(e.target.value))}
               />
             </label>
             <label className="bc-field">
@@ -205,10 +211,19 @@ export default function ShiftPanel() {
             <span className="bc-hint" aria-label="Difference">
               Difference {rupees(difference)}
             </span>
+            {!byNotes && counted && countedError ? (
+              <span className="bc-err" id="bc-shift-countmsg" role="alert">
+                {countedError}
+              </span>
+            ) : countWarning ? (
+              <span className="bc-hint bc-warn" id="bc-shift-countmsg" role="status">
+                {countWarning}
+              </span>
+            ) : null}
             <button
               type="button"
               className="st-btn st-btn-red"
-              disabled={(!byNotes && !counted.trim()) || closeShift.isPending}
+              disabled={(!byNotes && Boolean(countedError)) || closeShift.isPending}
               onClick={() => {
                 setError(null);
                 setDone(null);
@@ -240,7 +255,7 @@ export default function ShiftPanel() {
                   className="bc-field__in"
                   inputMode="decimal"
                   value={notes.coins ?? ""}
-                  onChange={(e) => setNotes({ coins: moneyTyped(e.target.value) })}
+                  onChange={(e) => setNotes({ coins: cashTyped(e.target.value) })}
                 />
               </label>
             </div>
@@ -327,6 +342,7 @@ export default function ShiftPanel() {
               Expected in the drawer {rupees(expected)}, counted {rupees(countedAmount)}, difference{" "}
               {rupees(difference)}.
             </div>
+            {countWarning ? <div className="bc-warn">{countWarning}</div> : null}
             <div>No more cash can be taken on this shift once it is closed.</div>
           </>
         }

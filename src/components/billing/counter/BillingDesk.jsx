@@ -276,7 +276,13 @@ export default function BillingDesk({
     return () => clearTimeout(timer);
   }, [search]);
 
-  const { data, isLoading } = useCounterPatients(debounced.trim(), { date });
+  const {
+    data,
+    isLoading,
+    isError: listFailed,
+    error: listError,
+    refetch: reloadList,
+  } = useCounterPatients(debounced.trim(), { date });
   const pastDay = Boolean(date) && data?.isToday === false;
   const openDraft = useOpenDraft();
   const reread = useRereadBill();
@@ -480,10 +486,18 @@ export default function BillingDesk({
               className={`bc-list__panel${listOpen ? "" : " bc-list__panel--shut"}`}
             >
               {pastDay && <PastDayBanner date={date} onToday={() => onDate("")} />}
+              {listFailed && !data ? (
+                <div className="bc-err" role="alert">
+                  {errorOf(listError, "Could not load the patient list")}{" "}
+                  <button type="button" className="bc-linkbtn" onClick={() => reloadList()}>
+                    Try again
+                  </button>
+                </div>
+              ) : null}
               <PatientList
                 data={data}
                 pastDay={pastDay}
-                isLoading={isLoading}
+                isLoading={isLoading && !listFailed}
                 visitId={visitId}
                 searching={debounced.trim().length >= 2}
                 onPick={pick}

@@ -49,7 +49,7 @@ export default function RevenueBridge({ data }) {
             <tbody>
               <tr className="bdash-bridge__total">
                 <th scope="row">Charges at base price</th>
-                <td />
+                <td className="bdash-bridge__bar" />
                 <td className="brep-num">{money(total.charges_total)}</td>
                 <td className="bdash-muted brep-num">100%</td>
               </tr>
@@ -75,7 +75,7 @@ export default function RevenueBridge({ data }) {
               ))}
               <tr className="bdash-bridge__total">
                 <th scope="row">Net revenue</th>
-                <td />
+                <td className="bdash-bridge__bar" />
                 <td className="brep-num">{money(total.net_revenue)}</td>
                 <td className="bdash-muted brep-num">
                   {shareOf(total.net_revenue, total.charges_total)}

@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { validCounterDate } from "../../components/billing/counter/CounterDate";
 import {
   useReceptionQueue,
   useClearPayment,
@@ -2855,7 +2856,7 @@ function useReceptionTab(canBill, canApprove) {
     [setParams],
   );
 
-  const deskDate = params.get("date") || "";
+  const deskDate = validCounterDate(params.get("date"));
 
   const openBill = useCallback(
     (next, options) =>

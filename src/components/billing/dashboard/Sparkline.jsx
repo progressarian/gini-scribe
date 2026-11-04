@@ -21,7 +21,7 @@ export default function Sparkline({ values }) {
             stroke={MUTED}
             strokeWidth={1.5}
             isAnimationActive={false}
-            dot={(props) => <LastDot key={props.index} {...props} points={rows.length} />}
+            dot={({ key, ...props }) => <LastDot key={key} {...props} points={rows.length} />}
             activeDot={false}
           />
         </LineChart>

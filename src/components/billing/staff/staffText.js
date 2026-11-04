@@ -52,3 +52,37 @@ export const ACTIVITY_LABEL = {
   cancelled: "Cancelled",
   manual_discount: "Manual discount",
 };
+
+const WHOLE_DIGITS_MAX = 10;
+const MONEY_MAX_PAISE = 999999999999;
+const FAR_OFF_PAISE = 1000000;
+const FAR_OFF_SHARE = 0.25;
+
+export function cashTyped(value) {
+  const [whole, ...rest] = String(value)
+    .replace(/[^\d.]/g, "")
+    .split(".");
+  const trimmed = whole.slice(0, WHOLE_DIGITS_MAX);
+  return rest.length ? `${trimmed}.${rest.join("").slice(0, 2)}` : trimmed;
+}
+
+export const cashPaise = (text) => Math.round(Number(text || 0) * 100);
+
+export function countedProblem(text) {
+  const value = String(text ?? "").trim();
+  if (!value) return "Enter the cash you counted in the drawer.";
+  if (!/^\d+(\.\d{1,2})?$/.test(value)) return "Enter an amount like 12500 or 12500.50.";
+  if (cashPaise(value) > MONEY_MAX_PAISE) return "That amount is too large — check the count.";
+  return null;
+}
+
+export function countedWarning(countedPaise, expectedPaise) {
+  const gap = countedPaise - expectedPaise;
+  if (!gap) return null;
+  const far =
+    Math.abs(gap) >= FAR_OFF_PAISE || Math.abs(gap) > FAR_OFF_SHARE * Math.max(expectedPaise, 1);
+  if (!far) return null;
+  return gap > 0
+    ? "This is far more than expected — check the amount for an extra digit before closing."
+    : "This is far less than expected — check the count before closing.";
+}
