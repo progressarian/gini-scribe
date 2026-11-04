@@ -1,15 +1,16 @@
 import {
-  Bar,
-  BarChart,
+  Area,
   CartesianGrid,
+  ComposedChart,
   Legend,
+  Line,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 import { SERIES } from "../../crm/progress/progressText";
-import { bucketLabel, compactMoney, money, PERIOD_LABELS } from "./dashboardText";
+import { bucketLabel, compactMoney, money, niceAxis, PERIOD_LABELS } from "./dashboardText";
 import ReportLink from "./ReportLink";
 
 const AXIS = { fontSize: 12, fill: "#475569" };
@@ -52,7 +53,12 @@ export default function RevenueTrend({ data, onPick }) {
     unit: PERIOD_LABELS[period].toLowerCase(),
   }));
   const empty = rows.every((row) => !row.net_revenue && !row.collected);
-  const pick = (entry) => entry?.payload && period !== "day" && onPick(entry.payload);
+  const axis = niceAxis(rows.flatMap((row) => [row.net_revenue, row.collected]));
+  const dots = rows.length <= 14;
+  const pick = (state) => {
+    const row = state?.activePayload?.[0]?.payload;
+    if (row && period !== "day") onPick(row);
+  };
   return (
     <section className="flow-card bdash-card" aria-labelledby="bdash-trend">
       <div className="fset__cardhead">
@@ -70,41 +76,73 @@ export default function RevenueTrend({ data, onPick }) {
       ) : (
         <div className="bdash-chart">
           <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 8 }} barGap={2}>
+            <ComposedChart
+              data={rows}
+              margin={{ top: 8, right: 12, bottom: 0, left: 8 }}
+              onClick={pick}
+              style={period !== "day" ? { cursor: "pointer" } : undefined}
+            >
+              <defs>
+                <linearGradient id="bdash-revenue-fill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={SERIES[0]} stopOpacity={0.22} />
+                  <stop offset="100%" stopColor={SERIES[0]} stopOpacity={0.02} />
+                </linearGradient>
+              </defs>
               <CartesianGrid stroke="#e2e8f0" vertical={false} />
               <XAxis
                 dataKey="label"
                 tick={AXIS}
                 tickLine={false}
                 axisLine={{ stroke: "#cbd5e1" }}
-                minTickGap={12}
+                minTickGap={16}
               />
               <YAxis
                 tick={AXIS}
                 tickLine={false}
                 axisLine={false}
                 width={56}
-                tickFormatter={compactMoney}
+                domain={axis.domain}
+                ticks={axis.ticks}
+                tickFormatter={axis.format}
               />
-              <Tooltip content={<TrendTip />} cursor={{ fill: "rgba(148, 163, 184, 0.15)" }} />
+              <Tooltip
+                content={<TrendTip />}
+                cursor={{ stroke: "#94a3b8", strokeDasharray: "3 3" }}
+              />
               <Legend
                 wrapperStyle={{ fontSize: 12 }}
                 formatter={(name) => <span className="bdash-legend">{name}</span>}
               />
-              {SERIES_OF.map((series) => (
-                <Bar
-                  key={series.key}
-                  dataKey={series.key}
-                  name={series.label}
-                  fill={series.color}
-                  radius={[4, 4, 0, 0]}
-                  maxBarSize={28}
-                  isAnimationActive={false}
-                  cursor={period !== "day" ? "pointer" : undefined}
-                  onClick={pick}
-                />
-              ))}
-            </BarChart>
+              <Area
+                type="linear"
+                dataKey="net_revenue"
+                name={SERIES_OF[0].label}
+                stroke={SERIES_OF[0].color}
+                strokeWidth={2}
+                fill="url(#bdash-revenue-fill)"
+                dot={
+                  dots
+                    ? { r: 3, fill: SERIES_OF[0].color, stroke: "#fff", strokeWidth: 1.5 }
+                    : false
+                }
+                activeDot={{ r: 5, fill: SERIES_OF[0].color, stroke: "#fff", strokeWidth: 2 }}
+                isAnimationActive={false}
+              />
+              <Line
+                type="linear"
+                dataKey="collected"
+                name={SERIES_OF[1].label}
+                stroke={SERIES_OF[1].color}
+                strokeWidth={2}
+                dot={
+                  dots
+                    ? { r: 3, fill: SERIES_OF[1].color, stroke: "#fff", strokeWidth: 1.5 }
+                    : false
+                }
+                activeDot={{ r: 5, fill: SERIES_OF[1].color, stroke: "#fff", strokeWidth: 2 }}
+                isAnimationActive={false}
+              />
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
       )}

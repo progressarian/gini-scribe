@@ -19,6 +19,7 @@ import { PaymentModes, RevenueMix } from "../../components/billing/dashboard/Mix
 import DiscountPanel from "../../components/billing/dashboard/DiscountPanel";
 import ChargeDetail from "../../components/billing/dashboard/ChargeDetail";
 import NotFinalPanel from "../../components/billing/dashboard/NotFinalPanel";
+import RevenueBridge from "../../components/billing/dashboard/RevenueBridge";
 import { PERIOD_LABELS, reportHref } from "../../components/billing/dashboard/dashboardText";
 import { toast } from "../../stores/uiStore";
 import "../../styles/flow.css";
@@ -387,6 +388,10 @@ export default function BillingDashboardPage() {
           <KpiTiles data={data} />
           <NotFinalPanel data={data} />
           <RevenueTrend data={data} onPick={pick} />
+          <div className="bdash-grid">
+            <RevenueBridge data={data} />
+            <PaymentModes data={data} />
+          </div>
           <MisTable data={data} onPick={pick} onOpenGroup={openCharges} openGroup={openGroup} />
           {openGroup ? (
             <ChargeDetail
@@ -398,10 +403,7 @@ export default function BillingDashboardPage() {
               onClose={closeCharges}
             />
           ) : null}
-          <div className="bdash-grid">
-            <RevenueMix data={data} />
-            <PaymentModes data={data} />
-          </div>
+          <RevenueMix data={data} />
           <DiscountPanel data={data} />
         </>
       )}

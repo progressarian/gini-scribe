@@ -58,6 +58,8 @@ test.describe.serial("D02 counter: deposit panel, pay from deposit, keep a refun
       "One deposit can be at most ₹5,00,000, so the amount is set to that.",
     );
     await panel(page).getByLabel("Amount *").fill("1000");
+    await expect(panel(page).getByRole("button", { name: "Take deposit" })).toBeDisabled();
+    await panel(page).getByLabel("Mode").selectOption("cash");
     await expect(panel(page)).toContainText("Open your shift");
     await expect(panel(page).getByRole("button", { name: "Take deposit" })).toBeDisabled();
 
@@ -66,6 +68,7 @@ test.describe.serial("D02 counter: deposit panel, pay from deposit, keep a refun
     await panel(page)
       .getByRole("button", { name: /^Deposit/ })
       .click();
+    await panel(page).getByLabel("Mode").selectOption("cash");
     await panel(page).getByLabel("Amount *").fill("1000");
     await panel(page).getByRole("button", { name: "Take deposit" }).click();
     await expect(panel(page)).toContainText("Take ₹1,000 by Cash as a deposit");

@@ -1,4 +1,5 @@
 import { changeOf, count, money, rangeLabel } from "./dashboardText";
+import Sparkline from "./Sparkline";
 
 const ARROW = { 1: "▲", 0: "■", [-1]: "▼" };
 const WORD = { 1: "up", 0: "same", [-1]: "down" };
@@ -23,7 +24,7 @@ function Change({ current, previous, points, against, format = money }) {
   );
 }
 
-function Tile({ label, value, hint, children }) {
+function Tile({ label, value, hint, trend, children }) {
   return (
     <div className="bdash-tile" role="group" aria-label={label}>
       <div className="bdash-tile__label" title={hint}>
@@ -31,6 +32,7 @@ function Tile({ label, value, hint, children }) {
       </div>
       <div className="bdash-tile__value">{value}</div>
       {children}
+      <Sparkline values={trend} />
     </div>
   );
 }
@@ -38,6 +40,7 @@ function Tile({ label, value, hint, children }) {
 export default function KpiTiles({ data }) {
   const now = data.kpis.current;
   const was = data.kpis.previous;
+  const trendOf = (key) => data.rows.map((row) => row[key]);
   const against = rangeLabel(data.previous_range.from, data.previous_range.to);
   const compare = (key, extra = {}) => (
     <Change current={now[key]} previous={was[key]} against={against} {...extra} />
@@ -46,6 +49,7 @@ export default function KpiTiles({ data }) {
     <section className="bdash-tiles" aria-label="Headline figures">
       <Tile
         label="Net revenue"
+        trend={trendOf("net_revenue")}
         value={money(now.net_revenue)}
         hint="What patients owe on bills dated in this period (final bills and fully paid drafts), less credit notes. CGHS claims are not included."
       >
@@ -59,6 +63,7 @@ export default function KpiTiles({ data }) {
       </Tile>
       <Tile
         label="Collected"
+        trend={trendOf("collected")}
         value={money(now.collected)}
         hint="Money taken in this period by every mode, less refunds paid back — whichever bill it was for"
       >
@@ -75,6 +80,7 @@ export default function KpiTiles({ data }) {
       </Tile>
       <Tile
         label="Discount"
+        trend={trendOf("discount")}
         value={money(now.discount)}
         hint="Everything patients were not charged: discount rules (automatic, code, manual), lower category rates (CGHS and other price lists, against the base price) and amounts written off. CGHS claims are not a discount — they are still owed."
       >
@@ -89,6 +95,7 @@ export default function KpiTiles({ data }) {
       </Tile>
       <Tile
         label="Bills"
+        trend={trendOf("bills")}
         value={count(now.bills)}
         hint="Final bills and fully paid drafts, not counting credit notes"
       >

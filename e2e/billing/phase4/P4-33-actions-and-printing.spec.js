@@ -74,6 +74,7 @@ test.describe.serial("P4-33 actions and printing", () => {
     await loginAs(page, "reception");
     await open(page, ids.visit);
     const owed = await bills.readBill(ids.bill, db);
+    await pad(page).getByLabel("Mode").selectOption("cash");
     await pad(page)
       .getByLabel("Amount")
       .fill(String(owed.totals.payable / 100));

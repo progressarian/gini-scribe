@@ -62,3 +62,47 @@ export function reportHref(key, filters) {
   for (const name of CARRIED) if (filters[name]) params.set(name, String(filters[name]));
   return `/billing/reports?${params}`;
 }
+
+const STEPS = [1, 2, 2.5, 5, 10];
+
+export function niceAxis(values, count = 4) {
+  const top = Math.max(0, ...values);
+  const bottom = Math.min(0, ...values);
+  const span = top - bottom;
+  if (!span) {
+    return {
+      domain: [0, 100000],
+      ticks: [0, 25000, 50000, 75000, 100000],
+      format: axisMoney(100000),
+    };
+  }
+  const raw = span / count;
+  const power = 10 ** Math.floor(Math.log10(raw));
+  const step = STEPS.map((s) => s * power).find((s) => s >= raw) ?? 10 * power;
+  const low = Math.floor(bottom / step) * step;
+  const high = Math.ceil(top / step) * step;
+  const ticks = [];
+  for (let t = low; t <= high + step / 2; t += step) ticks.push(Math.round(t));
+  return { domain: [low, high], ticks, format: axisMoney(Math.max(high, -low)) };
+}
+
+const UNITS = [
+  [1000000000, "Cr"],
+  [10000000, "L"],
+  [100000, "k"],
+];
+
+export function axisMoney(top) {
+  const [size, unit] = UNITS.find(([size]) => top >= size) ?? [100, ""];
+  return (paise) => {
+    const value = Math.round((100 * paise) / size) / 100;
+    if (!value) return "₹0";
+    return `${value < 0 ? "−" : ""}₹${Math.abs(value).toLocaleString("en-IN")}${unit}`;
+  };
+}
+
+export function shareOf(part, whole) {
+  if (!whole) return "—";
+  const share = Math.round((1000 * part) / whole) / 10;
+  return part && !share ? "<0.1%" : `${share}%`;
+}

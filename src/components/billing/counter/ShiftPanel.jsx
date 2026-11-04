@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import ConfirmModal from "../../ui/ConfirmModal";
 import {
   useCloseShift,
@@ -9,8 +10,9 @@ import {
 import { errorOf, moneyTyped, rupees } from "../format";
 import { PAYMENT_MODE_LABEL, shiftStateText, TAKE_MODE_LABEL } from "./lineText";
 import useAuthStore from "../../../stores/authStore";
-import { SHIFT_FORM, shiftFormKey } from "./counterForm";
+import { NOTES, noteCountTotal, noteCountUsed, SHIFT_FORM, shiftFormKey } from "./counterForm";
 import { useSavedForm } from "./useSavedForm";
+import { shiftReminder } from "./shiftReminder";
 
 const clock = (iso) =>
   iso
@@ -31,15 +33,20 @@ export default function ShiftPanel() {
   const userId = useAuthStore((s) => s.currentDoctor?.id);
   const form = useSavedForm(shiftFormKey(userId), SHIFT_FORM);
   const { opening, counted, note } = form.value;
+  const notes = form.value.notes ?? {};
+  const byNotes = noteCountUsed(notes);
+  const setNotes = (patch) => form.set("notes", { ...notes, ...patch });
   const setOpening = (next) => form.set("opening", next);
   const setCounted = (next) => form.set("counted", next);
   const setNote = (next) => form.set("note", next);
   const [closing, setClosing] = useState(false);
   const [error, setError] = useState(null);
   const [done, setDone] = useState(null);
+  const [closedId, setClosedId] = useState(null);
 
   const expected = Number(shift?.expected_cash ?? 0);
-  const countedAmount = Number(counted || 0);
+  const countedAmount = byNotes ? noteCountTotal(notes) / 100 : Number(counted || 0);
+  const reminder = shiftReminder(shift);
   const difference = Number((countedAmount - expected).toFixed(2));
   const earlier = (mine || []).filter((row) => !row.is_open);
 
@@ -58,15 +65,25 @@ export default function ShiftPanel() {
     setError(null);
     try {
       const closed = await closeShift.mutateAsync({
-        counted_cash: counted.trim(),
+        ...(byNotes
+          ? {
+              counted_cash: countedAmount.toFixed(2),
+              denominations: Object.fromEntries(
+                Object.entries(notes)
+                  .filter(([, value]) => Number(value) > 0)
+                  .map(([key, value]) => [key, key === "coins" ? value : Number(value)]),
+              ),
+            }
+          : { counted_cash: counted.trim() }),
         ...(note.trim() ? { note: note.trim() } : {}),
       });
       setClosing(false);
       form.clear();
+      setClosedId(closed.id);
       setDone(
         `Shift closed. Expected ${rupees(closed.expected_cash)}, counted ${rupees(
           closed.counted_cash,
-        )}, difference ${rupees(closed.difference)}.`,
+        )}, difference ${rupees(closed.difference)}. The handover is recorded.`,
       );
     } catch (e) {
       setError(errorOf(e, "That shift could not be closed"));
@@ -112,6 +129,20 @@ export default function ShiftPanel() {
 
       {shift?.is_open && (
         <>
+          {reminder === "earlier" && (
+            <div className="bc-pastday" role="alert">
+              <span>
+                <strong>This shift has been open since {clock(shift.opened_at)}.</strong> Count the
+                cash and close it, then open a new shift for today, so each day&apos;s cash is
+                handed over on its own.
+              </span>
+            </div>
+          )}
+          {reminder === "day_end" && (
+            <div className="bc-hint" role="status">
+              End of the day — count the cash and close your shift before you leave.
+            </div>
+          )}
           <div className="bc-hint">
             Open since {clock(shift.opened_at)} · {shift.payment_count} payments on{" "}
             {shift.bill_count} bills
@@ -156,7 +187,9 @@ export default function ShiftPanel() {
               <input
                 className="bc-field__in"
                 inputMode="decimal"
-                value={counted}
+                value={byNotes ? countedAmount.toFixed(2) : counted}
+                readOnly={byNotes}
+                aria-describedby={byNotes ? "bc-shift-bynotes" : undefined}
                 onChange={(e) => setCounted(moneyTyped(e.target.value))}
               />
             </label>
@@ -175,7 +208,7 @@ export default function ShiftPanel() {
             <button
               type="button"
               className="st-btn st-btn-red"
-              disabled={!counted.trim() || closeShift.isPending}
+              disabled={(!byNotes && !counted.trim()) || closeShift.isPending}
               onClick={() => {
                 setError(null);
                 setDone(null);
@@ -185,10 +218,54 @@ export default function ShiftPanel() {
               Close shift
             </button>
           </div>
+          <details className="bc-notes" open={byNotes || undefined}>
+            <summary>Count by notes (optional)</summary>
+            <div className="bc-notes__grid" role="group" aria-label="Note count">
+              {NOTES.map((value) => (
+                <label key={value} className="bc-field">
+                  <span className="bc-field__lbl">₹{value} notes</span>
+                  <input
+                    className="bc-field__in"
+                    inputMode="numeric"
+                    value={notes[value] ?? ""}
+                    onChange={(e) =>
+                      setNotes({ [value]: e.target.value.replace(/\D/g, "").slice(0, 6) })
+                    }
+                  />
+                </label>
+              ))}
+              <label className="bc-field">
+                <span className="bc-field__lbl">Coins (₹)</span>
+                <input
+                  className="bc-field__in"
+                  inputMode="decimal"
+                  value={notes.coins ?? ""}
+                  onChange={(e) => setNotes({ coins: moneyTyped(e.target.value) })}
+                />
+              </label>
+            </div>
+            {byNotes && (
+              <div className="bc-hint" id="bc-shift-bynotes">
+                The counted cash is the note count: {rupees(countedAmount)}.{" "}
+                <button type="button" className="bc-linkbtn" onClick={() => form.set("notes", {})}>
+                  Clear the note count
+                </button>
+              </div>
+            )}
+          </details>
         </>
       )}
 
-      {done && <div className="bc-note">{done}</div>}
+      {done && (
+        <div className="bc-note" role="status">
+          {done}{" "}
+          {closedId ? (
+            <Link to={`/billing/shift-slip/${closedId}`} target="_blank" rel="noopener">
+              Print the handover slip
+            </Link>
+          ) : null}
+        </div>
+      )}
       {error && <div className="bc-err">{error}</div>}
 
       {!!earlier.length && (
@@ -202,6 +279,9 @@ export default function ShiftPanel() {
                 <th>Counted</th>
                 <th>Difference</th>
                 <th>Status</th>
+                <th>
+                  <span className="sr-only">Handover slip</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -210,9 +290,23 @@ export default function ShiftPanel() {
                   <td data-label="Opened">{clock(row.opened_at)}</td>
                   <td data-label="Closed">{clock(row.closed_at)}</td>
                   <td data-label="Expected">{rupees(row.expected_cash)}</td>
-                  <td data-label="Counted">{rupees(row.counted_cash)}</td>
-                  <td data-label="Difference">{rupees(row.difference)}</td>
+                  <td data-label="Counted">
+                    {row.not_counted ? "Not counted" : rupees(row.counted_cash)}
+                  </td>
+                  <td data-label="Difference">
+                    {row.difference === null ? "—" : rupees(row.difference)}
+                  </td>
                   <td data-label="Status">{shiftStateText(row.is_open)}</td>
+                  <td data-label="Slip">
+                    <Link
+                      to={`/billing/shift-slip/${row.id}`}
+                      target="_blank"
+                      rel="noopener"
+                      aria-label={`Handover slip for the shift closed ${clock(row.closed_at)}`}
+                    >
+                      Slip
+                    </Link>
+                  </td>
                 </tr>
               ))}
             </tbody>

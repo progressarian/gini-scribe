@@ -18,6 +18,7 @@ import {
   count,
   fullDayLabel,
   money,
+  niceAxis,
   PERIOD_LABELS,
 } from "./dashboardText";
 
@@ -102,6 +103,7 @@ export default function DiscountPanel({ data }) {
   const block = data.discounts;
   const methods = block.methods.map((method, index) => ({ ...method, color: SERIES[index] }));
   const rows = block.rows.map((row) => ({ ...row, label: bucketLabel(row, period) }));
+  const discountAxis = niceAxis(rows.map((row) => row.given));
   const empty = !block.total.given;
   const last = methods.length - 1;
   return (
@@ -153,7 +155,9 @@ export default function DiscountPanel({ data }) {
                   tickLine={false}
                   axisLine={false}
                   width={56}
-                  tickFormatter={compactMoney}
+                  domain={discountAxis.domain}
+                  ticks={discountAxis.ticks}
+                  tickFormatter={discountAxis.format}
                 />
                 <Tooltip
                   content={<DiscountTip methods={methods} />}

@@ -161,6 +161,7 @@ test.describe.serial("P4-34 dues list and shift panel", () => {
     await dues(page)
       .getByRole("button", { name: `Take payment on bill ${second.due.bill_no}` })
       .click();
+    await pad(page).getByLabel("Mode").selectOption("cash");
     await pad(page)
       .getByLabel("Amount")
       .fill(String(second.due.totals.payable / 100));

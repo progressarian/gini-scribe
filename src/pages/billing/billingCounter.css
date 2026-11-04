@@ -2888,3 +2888,18 @@ body > [role="dialog"][aria-modal="true"] .bc-cc__warn {
   border-left: 3px solid var(--amb);
   padding-left: 8px;
 }
+.gf .bc-notes {
+  margin-top: 8px;
+  font-size: 13px;
+}
+.gf .bc-notes > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--fink2);
+}
+.gf .bc-notes__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}

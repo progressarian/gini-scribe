@@ -9,7 +9,7 @@ export const SHIFT_FORM_PREFIX = "billing.counter.shift.";
 
 export const shiftFormKey = (userId) => (userId ? `${SHIFT_FORM_PREFIX}${userId}` : null);
 
-export const emptyPaymentRow = () => ({ mode: "cash", amount: "", reference: "", upiApp: "" });
+export const emptyPaymentRow = () => ({ mode: "", amount: "", reference: "", upiApp: "" });
 
 const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
@@ -24,7 +24,7 @@ const text = (max) => ({ blank: "", valid: (value) => isText(value, max) });
 
 const isPaymentRow = (row) =>
   isObject(row) &&
-  (Object.hasOwn(TAKE_MODE_LABEL, row.mode) || row.mode === DEPOSIT_MODE) &&
+  (row.mode === "" || Object.hasOwn(TAKE_MODE_LABEL, row.mode) || row.mode === DEPOSIT_MODE) &&
   (row.upiApp === undefined || row.upiApp === "" || UPI_APPS.includes(row.upiApp)) &&
   isText(row.amount, 12) &&
   /^\d*(\.\d{0,2})?$/.test(row.amount) &&
@@ -68,8 +68,27 @@ export const BILL_FORM = {
   cancelReason: { blank: null, valid: (value) => value === null || isReason(value) },
 };
 
+export const NOTES = [500, 200, 100, 50, 20, 10];
+
+const isNoteCount = (value) =>
+  isObject(value) &&
+  Object.entries(value).every(
+    ([key, count]) =>
+      (NOTES.map(String).includes(key) && isText(count, 6) && /^\d*$/.test(count)) ||
+      (key === "coins" && isText(count, 12) && /^\d*(\.\d{0,2})?$/.test(count)),
+  );
+
 export const SHIFT_FORM = {
   opening: { blank: "", valid: (value) => isText(value, 12) && /^\d*(\.\d{0,2})?$/.test(value) },
   counted: { blank: "", valid: (value) => isText(value, 12) && /^\d*(\.\d{0,2})?$/.test(value) },
+  notes: { blank: {}, valid: isNoteCount },
   note: text(280),
 };
+
+export function noteCountTotal(notes = {}) {
+  const coins = Math.round(Number(notes.coins || 0) * 100);
+  return NOTES.reduce((sum, note) => sum + Number(notes[note] || 0) * note * 100, coins);
+}
+
+export const noteCountUsed = (notes = {}) =>
+  Object.values(notes).some((value) => Number(value) > 0);

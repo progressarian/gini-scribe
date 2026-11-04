@@ -165,6 +165,11 @@ test.describe.serial("P4-32 totals and payment", () => {
     await expect(pad(page).getByLabel("Opening cash")).toHaveCount(0);
 
     await pad(page).getByLabel("Amount").fill("500");
+    await expect(
+      pad(page).getByRole("alert").filter({ hasText: "Choose how the patient paid" }),
+    ).toBeVisible();
+    await expect(pad(page).getByRole("button", { name: "Take payment" })).toBeDisabled();
+    await pad(page).getByLabel("Mode").selectOption("cash");
     await pad(page).getByRole("button", { name: "Take payment" }).click();
     await expect(pad(page).getByText("Open your shift first", { exact: false })).toBeVisible();
 
@@ -179,6 +184,7 @@ test.describe.serial("P4-32 totals and payment", () => {
     await expect(totalRow(page, "Amount Due").getByRole("cell")).toHaveText(fromPaise(250000));
     await expect(finaliseButton(page)).toBeDisabled();
 
+    await pad(page).getByLabel("Mode").selectOption("cash");
     await pad(page).getByLabel("Amount").fill("300");
     await expect(pad(page).getByLabel("Remaining balance")).toHaveText(fromPaise(220000));
     await pad(page).getByLabel("Amount").fill("2500");

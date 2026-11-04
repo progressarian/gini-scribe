@@ -10,7 +10,8 @@ import {
   YAxis,
 } from "recharts";
 import { SERIES } from "../../crm/progress/progressText";
-import { compactMoney, money } from "./dashboardText";
+import { HEALTHRAY_MODE } from "../../../../shared/billingVocab.js";
+import { compactMoney, money, shareOf } from "./dashboardText";
 import ReportLink from "./ReportLink";
 
 const AXIS = { fontSize: 12, fill: "#475569" };
@@ -46,6 +47,20 @@ function NetTip({ active, payload }) {
   );
 }
 
+function BarTag({ x, y, width, height, value }) {
+  return (
+    <text
+      x={x + Math.max(width, 0) + 6}
+      y={y + height / 2}
+      dominantBaseline="central"
+      fontSize={12}
+      fill="#334155"
+    >
+      {value}
+    </text>
+  );
+}
+
 function HorizontalBars({ rows, title, valueLabel }) {
   if (!rows.length) return <div className="bill-allclear">Nothing in this range.</div>;
   return (
@@ -55,7 +70,7 @@ function HorizontalBars({ rows, title, valueLabel }) {
           <BarChart
             data={rows}
             layout="vertical"
-            margin={{ top: 4, right: 72, bottom: 4, left: 8 }}
+            margin={{ top: 4, right: 120, bottom: 4, left: 8 }}
           >
             <CartesianGrid stroke="#e2e8f0" horizontal={false} />
             <XAxis
@@ -71,9 +86,9 @@ function HorizontalBars({ rows, title, valueLabel }) {
               tick={AXIS}
               tickLine={false}
               axisLine={{ stroke: "#cbd5e1" }}
-              width={150}
+              width={190}
               interval={0}
-              tickFormatter={(name) => (name.length > 22 ? `${name.slice(0, 21)}…` : name)}
+              tickFormatter={(name) => (name.length > 28 ? `${name.slice(0, 27)}…` : name)}
             />
             <Tooltip content={<NetTip />} cursor={{ fill: "rgba(148, 163, 184, 0.15)" }} />
             <Bar
@@ -84,12 +99,7 @@ function HorizontalBars({ rows, title, valueLabel }) {
               maxBarSize={18}
               isAnimationActive={false}
             >
-              <LabelList
-                dataKey="net"
-                position="right"
-                formatter={compactMoney}
-                style={{ fontSize: 12, fill: "#334155" }}
-              />
+              <LabelList dataKey="tag" content={BarTag} />
             </Bar>
           </BarChart>
         </ResponsiveContainer>
@@ -124,7 +134,12 @@ function HorizontalBars({ rows, title, valueLabel }) {
 export function RevenueMix({ data }) {
   const [split, setSplit] = useState("groups");
   const chosen = SPLITS.find((option) => option.key === split);
-  const rows = data.mix[split].filter((row) => row.net !== 0);
+  const shown = data.mix[split].filter((row) => row.net !== 0);
+  const whole = shown.reduce((sum, row) => sum + row.net, 0);
+  const rows = shown.map((row) => ({
+    ...row,
+    tag: `${compactMoney(row.net)} · ${shareOf(row.net, whole)}`,
+  }));
   return (
     <section className="flow-card bdash-card" aria-labelledby="bdash-mix">
       <div className="fset__cardhead">
@@ -158,14 +173,23 @@ export function RevenueMix({ data }) {
   );
 }
 
+const UNKNOWN_SHADES = { upi_unknown: "#cbd5e1", [HEALTHRAY_MODE]: "#94a3b8" };
+
 export function PaymentModes({ data }) {
-  const rows = data.columns.money
+  const known = data.columns.money.filter((column) => !UNKNOWN_SHADES[column.key]);
+  const colorOf = (key) =>
+    UNKNOWN_SHADES[key] ?? SERIES[known.findIndex((column) => column.key === key) % SERIES.length];
+  const parts = data.columns.money
     .map((column) => ({
       key: column.key,
       label: column.label,
       net: data.total.money[column.key] ?? 0,
+      color: colorOf(column.key),
     }))
-    .filter((row) => row.net !== 0);
+    .filter((part) => part.net !== 0);
+  const positive = parts.filter((part) => part.net > 0);
+  const whole = positive.reduce((sum, part) => sum + part.net, 0);
+  const summary = positive.map((part) => `${part.label} ${shareOf(part.net, whole)}`).join(", ");
   return (
     <section className="flow-card bdash-card" aria-labelledby="bdash-modes">
       <div className="fset__cardhead">
@@ -178,7 +202,38 @@ export function PaymentModes({ data }) {
         by, when it was recorded.{" "}
         <ReportLink report="collections" title="Collections" filters={data.filters} />
       </div>
-      <HorizontalBars rows={rows} title="Collected by payment mode" valueLabel="Collected" />
+      {!parts.length ? (
+        <div className="bill-allclear">Nothing collected in this range.</div>
+      ) : (
+        <>
+          <div className="bdash-segbar" role="img" aria-label={`Share of collections: ${summary}`}>
+            {positive.map((part) => (
+              <span
+                key={part.key}
+                className="bdash-segbar__part"
+                style={{ flexGrow: part.net, background: part.color }}
+                title={`${part.label}: ${money(part.net)} (${shareOf(part.net, whole)})`}
+              />
+            ))}
+          </div>
+          <ul className="bdash-segbar__legend">
+            {parts.map((part) => (
+              <li key={part.key}>
+                <span className="bdash-key" style={{ background: part.color }} aria-hidden="true" />
+                <span className="bdash-segbar__name">{part.label}</span>
+                <strong>{money(part.net)}</strong>
+                <span className="bdash-muted">
+                  {part.net > 0 ? shareOf(part.net, whole) : "refunds"}
+                </span>
+              </li>
+            ))}
+            <li className="bdash-segbar__total">
+              <span className="bdash-segbar__name">Total collected</span>
+              <strong>{money(data.total.collected)}</strong>
+            </li>
+          </ul>
+        </>
+      )}
     </section>
   );
 }

@@ -34,7 +34,7 @@ const REFERENCE_HINT = {
   neft: "e.g. UTR or cheque no.",
 };
 
-const blankForm = () => ({ mode: "cash", amount: "", reference: "", upiApp: "", note: "" });
+const blankForm = () => ({ mode: "", amount: "", reference: "", upiApp: "", note: "" });
 
 function detailOf(entry) {
   if (entry.kind === "received") {
@@ -88,11 +88,12 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
   const balance = data?.balance ?? 0;
   const entries = data?.entries ?? [];
   const amount = Math.round(Number(form.amount || 0) * 100);
-  const needsReference = form.mode !== "cash";
+  const needsReference = Boolean(form.mode) && form.mode !== "cash";
   const needsShift = form.mode === "cash" && !shift?.is_open;
   const needsApp = needsUpiApp(form.mode);
   const ready =
     amount > 0 &&
+    Boolean(form.mode) &&
     (!needsReference || form.reference.trim()) &&
     (!needsApp || form.upiApp) &&
     !needsShift &&
@@ -210,6 +211,9 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
                 value={form.mode}
                 onChange={(e) => change({ mode: e.target.value, reference: "", upiApp: "" })}
               >
+                <option value="" disabled>
+                  Choose mode
+                </option>
                 {Object.entries(TAKE_MODE_LABEL).map(([mode, label]) => (
                   <option key={mode} value={mode}>
                     {label}

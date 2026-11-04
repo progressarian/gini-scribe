@@ -23,7 +23,7 @@ const SPLIT_MAX = 4;
 export const emptyArrivalChoices = () => ({
   skip: [],
   paid: {},
-  mode: "cash",
+  mode: "",
   reference: "",
   upiApp: "",
   split: [],
@@ -86,12 +86,17 @@ export function arrivalBlocker(preview, choices, shiftOpen = true) {
   if (!shiftOpen && takesCash(preview, choices)) {
     return "Open your shift (Shift tab) before taking cash, so it is counted in your drawer — or choose Card, UPI or NEFT / Cheque.";
   }
+  if (!choices.mode) {
+    return "Choose how the patient paid — cash, card, UPI, NEFT / cheque, or split.";
+  }
   if (choices.mode !== SPLIT) {
     if (needsUpiApp(choices.mode) && !choices.upiApp) return UPI_APP_MISSING;
     return choices.mode === "cash" || choices.reference.trim()
       ? null
       : `Enter the ${TAKE_MODE_LABEL[choices.mode]} reference number.`;
   }
+  const noMode = choices.split.findIndex((part) => !part.mode);
+  if (noMode >= 0) return `Choose how part ${noMode + 1} was paid.`;
   const empty = choices.split.findIndex((part) => toPaise(part.amount) <= 0);
   if (empty >= 0) return `Enter an amount for part ${empty + 1}, or remove it.`;
   const noRef = choices.split.findIndex((part) => part.mode !== "cash" && !part.reference.trim());
@@ -197,6 +202,9 @@ function SplitRows({ split, collect, onChange, extraToDeposit, onExtraToDeposit 
             value={part.mode}
             onChange={(e) => setPart(index, { mode: e.target.value, upiApp: "" })}
           >
+            <option value="" disabled>
+              Choose mode
+            </option>
             {Object.entries(TAKE_MODE_LABEL).map(([mode, label]) => (
               <option key={mode} value={mode}>
                 {label}
@@ -224,7 +232,7 @@ function SplitRows({ split, collect, onChange, extraToDeposit, onExtraToDeposit 
               onChange={(upiApp) => setPart(index, { upiApp })}
             />
           )}
-          {part.mode !== "cash" && (
+          {part.mode && part.mode !== "cash" && (
             <input
               className="ab-ref"
               aria-label={`Part ${index + 1} reference`}
@@ -257,7 +265,7 @@ function SplitRows({ split, collect, onChange, extraToDeposit, onExtraToDeposit 
               onChange([
                 ...split,
                 {
-                  mode: "upi",
+                  mode: "",
                   amount: left > 0 ? String(rupeesFromPaise(left)) : "",
                   reference: "",
                   upiApp: "",
@@ -630,8 +638,13 @@ export default function ArrivalBill({
                     split: choices.split.length
                       ? choices.split
                       : [
-                          { mode: "cash", amount: String(rupeesFromPaise(collect)), reference: "" },
-                          { mode: "upi", amount: "", reference: "", upiApp: "" },
+                          {
+                            mode: "",
+                            amount: String(rupeesFromPaise(collect)),
+                            reference: "",
+                            upiApp: "",
+                          },
+                          { mode: "", amount: "", reference: "", upiApp: "" },
                         ],
                   })
                 }
@@ -657,7 +670,7 @@ export default function ArrivalBill({
               onChange={(upiApp) => onChange({ ...choices, upiApp })}
             />
           )}
-          {choices.mode !== "cash" && choices.mode !== SPLIT && (
+          {choices.mode && choices.mode !== "cash" && choices.mode !== SPLIT && (
             <input
               className="ab-ref"
               aria-label={`${TAKE_MODE_LABEL[choices.mode]} reference`}

@@ -15,6 +15,7 @@ import { errorOf, fromPaise, moneyTyped } from "../format";
 import { HEALTHRAY_LABEL, needsUpiApp, TAKE_MODE_LABEL } from "./lineText";
 import { balanceOf, payLaterAllowed } from "./finaliseChecks";
 import { emptyPaymentRow } from "./counterForm";
+import { shiftReminder } from "./shiftReminder";
 import PaymentsReceived from "./PaymentsReceived";
 import UpiAppField from "./UpiAppField";
 import { announcePaid } from "./paidSignal";
@@ -70,8 +71,13 @@ export default function TotalsAndPayment({
   const entered = rows.reduce((sum, row) => sum + paiseOf(row.amount), 0);
   const remaining = balance - entered;
   const allowsLater = payLaterAllowed(bill, schemes, settings);
+  const missingMode = rows.some((row) => paiseOf(row.amount) > 0 && !row.mode);
   const missingReference = rows.some(
-    (row) => paiseOf(row.amount) > 0 && !NO_REFERENCE.includes(row.mode) && !row.reference.trim(),
+    (row) =>
+      paiseOf(row.amount) > 0 &&
+      row.mode &&
+      !NO_REFERENCE.includes(row.mode) &&
+      !row.reference.trim(),
   );
   const missingUpiApp = rows.some(
     (row) => paiseOf(row.amount) > 0 && needsUpiApp(row.mode) && !row.upiApp,
@@ -270,6 +276,12 @@ export default function TotalsAndPayment({
       {bill.status !== "cancelled" && balance > 0 && (
         <div className="bc-card bc-pay__take">
           <h3 className="bc-card__heading">Payment</h3>
+          {shiftReminder(shift) === "earlier" && (
+            <div className="bc-hint" role="status">
+              Your shift has been open since an earlier day — close it on the Shift tab and open
+              today&apos;s, so each day&apos;s cash is handed over on its own.
+            </div>
+          )}
           {!shift?.is_open && (
             <div className="bc-pay__warn">
               No shift is open, so cash can&apos;t be taken yet — open one on the Shift tab.
@@ -304,8 +316,12 @@ export default function TotalsAndPayment({
                       <select
                         className="bc-field__in"
                         value={row.mode}
+                        aria-invalid={paiseOf(row.amount) > 0 && !row.mode ? true : undefined}
                         onChange={(e) => setMode(index, e.target.value)}
                       >
+                        <option value="" disabled>
+                          Choose mode
+                        </option>
                         {Object.entries(TAKE_MODE_LABEL).map(([mode, label]) => (
                           <option key={mode} value={mode}>
                             {label}
@@ -357,7 +373,7 @@ export default function TotalsAndPayment({
                         onChange={(upiApp) => change(index, { upiApp })}
                       />
                     )}
-                    {!NO_REFERENCE.includes(row.mode) && (
+                    {row.mode && !NO_REFERENCE.includes(row.mode) && (
                       <label className="bc-field bc-pay__ref">
                         <span className="bc-field__lbl">Reference</span>
                         <input
@@ -413,6 +429,12 @@ export default function TotalsAndPayment({
             )}
           </dl>
 
+          {missingMode && (
+            <div className="bc-hint" role="alert">
+              Choose how the patient paid — cash, card, UPI or NEFT / cheque.
+            </div>
+          )}
+
           {missingReference && (
             <div className="bc-hint">
               Add the reference for each card, UPI or NEFT / cheque payment.
@@ -433,6 +455,7 @@ export default function TotalsAndPayment({
             disabled={
               entered <= 0 ||
               entered > balance ||
+              missingMode ||
               missingReference ||
               missingUpiApp ||
               depositOver ||

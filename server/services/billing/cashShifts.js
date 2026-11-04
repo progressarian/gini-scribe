@@ -13,6 +13,7 @@ import {
 import { CAPABILITIES, hasAnyCapability } from "../../../shared/permissions.js";
 import { paise } from "../../../shared/labPayment.js";
 import { HEALTHRAY_MODE, NEFT_MODE, PREPAID_MODE } from "../../../shared/billingVocab.js";
+import { clearedInWindow } from "./clearedMoney.js";
 
 export const PAYMENT_MODES = ["cash", "card", "upi"];
 export const TAKE_MODES = [...PAYMENT_MODES, NEFT_MODE];
@@ -106,9 +107,10 @@ const DRAWER_SQL = `
    WHERE s.id = $1
    GROUP BY s.opening_cash`;
 
-const SHIFT_SQL = `
+export const SHIFT_SQL = `
   SELECT s.id, s.user_id, s.opened_at, s.closed_at, s.opening_cash, s.expected_cash,
-         s.counted_cash, s.difference, s.note, s.updated_by,
+         s.counted_cash, s.difference, s.note, s.updated_by, s.handover, s.denominations,
+         s.not_counted,
          u.name AS user_name, u.short_name AS user_short_name,
          ${TOTAL_COLUMNS},
          t.payment_count, t.bill_count, t.refund_count, t.credit_note_count,
@@ -155,7 +157,7 @@ function flowOf(row, flow) {
 const drawerOf = (openingCash, collected, refunded) =>
   (paise(openingCash) + paise(collected[DRAWER_MODE]) - paise(refunded[DRAWER_MODE])) / 100;
 
-function shape(row) {
+export function shape(row) {
   if (!row) return null;
   const collected = flowOf(row, "collected");
   const refunded = flowOf(row, "refunded");
@@ -189,6 +191,9 @@ function shape(row) {
     difference: row.difference === null ? null : money(row.difference),
     note: row.note ?? null,
     closed_by: isOpen ? null : (row.updated_by ?? null),
+    not_counted: Boolean(row.not_counted),
+    handover: row.handover ?? null,
+    denominations: row.denominations ?? null,
   };
 }
 
@@ -333,7 +338,12 @@ export async function refreshClosedDrawer(client, shiftId, ctx) {
   await client.query(
     `UPDATE cash_shifts SET expected_cash = $2, difference = $3, updated_at = NOW(), updated_by = $4
       WHERE id = $1`,
-    [shiftId, expected, money(Number(rows[0].counted_cash) - expected), ctx?.actorId ?? null],
+    [
+      shiftId,
+      expected,
+      rows[0].counted_cash === null ? null : money(Number(rows[0].counted_cash) - expected),
+      ctx?.actorId ?? null,
+    ],
   );
   const shift = await readShift(client, shiftId);
   await writeAudit(client, {
@@ -347,14 +357,96 @@ export async function refreshClosedDrawer(client, shiftId, ctx) {
   return shift;
 }
 
+export const NOTES = [500, 200, 100, 50, 20, 10];
+const NOTE_COUNT_MAX = 100000;
+
+function cleanDenominations(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw httpError(400, "The note count must list how many of each note");
+  }
+  const notes = {};
+  let total = 0;
+  for (const note of NOTES) {
+    const raw = value[String(note)];
+    if (raw === undefined || raw === null || raw === "") continue;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 0 || n > NOTE_COUNT_MAX) {
+      throw httpError(400, `Enter a whole number of ₹${note} notes`);
+    }
+    if (n) notes[String(note)] = n;
+    total += n * note * 100;
+  }
+  const coins =
+    value.coins === undefined || value.coins === null || value.coins === ""
+      ? 0
+      : paise(cleanMoney(value.coins, "The coins"));
+  total += coins;
+  if (!total) return null;
+  return { notes, coins, total };
+}
+
+async function handoverOf(client, shiftId, closedAt) {
+  const shift = await readShift(client, shiftId);
+  const { rows } = await client.query(
+    `SELECT COUNT(DISTINCT COALESCE(b.patient_id, m.deposit_patient_id)) AS patients
+       FROM payments m
+       LEFT JOIN bills b ON b.id = m.bill_id
+      WHERE m.shift_id = $1 AND m.voided_at IS NULL AND m.direction = 'in'`,
+    [shiftId],
+  );
+  const finalised = await client.query(
+    `SELECT COUNT(*) AS n FROM bills
+      WHERE finalised_by = $1 AND bill_type = 'invoice' AND finalised_at BETWEEN $2 AND $3`,
+    [shift.user.id, shift.opened_at, closedAt],
+  );
+  const cleared = await clearedInWindow(client, shift.user.id, shift.opened_at, closedAt);
+  const inPaise = (flow) =>
+    Object.fromEntries(Object.entries(flow).map(([key, value]) => [key, paise(value)]));
+  return {
+    unit: "paise",
+    opening_cash: paise(shift.opening_cash),
+    collected: inPaise(shift.collected),
+    refunded: inPaise(shift.refunded),
+    deposits: {
+      count: shift.deposits.count,
+      received: paise(shift.deposits.received),
+      refunded: paise(shift.deposits.refunded),
+    },
+    healthray: inPaise(shift.healthray),
+    prepaid: inPaise(shift.prepaid),
+    cleared,
+    payment_count: shift.payment_count,
+    refund_count: shift.refund_count,
+    bill_count: shift.bill_count,
+    bills_finalised: Number(finalised.rows[0].n),
+    patients: Number(rows[0].patients),
+  };
+}
+
 export async function closeShift(id, input = {}, ctx, db = pool) {
   const shiftId = cleanUuid(id, "shift");
   const actorId = actorOf(ctx, "close a shift");
-  const countedCash = cleanMoney(input.counted_cash, "The counted cash");
+  const notCounted = input.not_counted === true;
+  if (notCounted && !closesAnyDesk(ctx)) {
+    throw httpError(403, "Only an admin can close a shift without counting the cash");
+  }
+  const denominations = notCounted ? null : cleanDenominations(input.denominations);
+  const countedCash = notCounted
+    ? null
+    : denominations && (input.counted_cash === undefined || input.counted_cash === null)
+      ? denominations.total / 100
+      : cleanMoney(input.counted_cash, "The counted cash");
+  if (denominations && paise(countedCash) !== denominations.total) {
+    throw httpError(
+      400,
+      `The note count comes to ₹${(denominations.total / 100).toFixed(2)}, but the counted cash is ₹${Number(countedCash).toFixed(2)} — correct one of them`,
+    );
+  }
   const note = cleanNote(input.note);
   return inTransaction(async (client) => {
     const { rows } = await client.query(
-      `SELECT id, user_id, opened_at, closed_at, opening_cash
+      `SELECT id, user_id, opened_at, closed_at, opening_cash, GREATEST(NOW(), opened_at) AS now
          FROM cash_shifts WHERE id = $1 FOR UPDATE`,
       [shiftId],
     );
@@ -368,17 +460,41 @@ export async function closeShift(id, input = {}, ctx, db = pool) {
     }
     const before = await readShift(client, shiftId);
     const expected = await expectedCashFor(client, shiftId);
+    const handover = await handoverOf(client, shiftId, current.now);
+    const snapshot = {
+      ...handover,
+      expected_cash: paise(expected),
+      counted_cash: countedCash === null ? null : paise(countedCash),
+      difference: countedCash === null ? null : paise(countedCash) - paise(expected),
+      not_counted: notCounted,
+      closed_by: actorId,
+      closed_by_owner: actorId === current.user_id,
+    };
     await client.query(
       `UPDATE cash_shifts
-          SET closed_at = GREATEST(NOW(), opened_at),
+          SET closed_at = $8,
               expected_cash = $2,
               counted_cash = $3,
               difference = $4,
               note = $5,
+              not_counted = $7,
+              handover = $9,
+              denominations = $10,
               updated_at = NOW(),
               updated_by = $6
         WHERE id = $1`,
-      [shiftId, expected, countedCash, money(countedCash - expected), note, actorId],
+      [
+        shiftId,
+        expected,
+        countedCash,
+        countedCash === null ? null : money(countedCash - expected),
+        note,
+        actorId,
+        notCounted,
+        current.now,
+        snapshot,
+        denominations,
+      ],
     );
     const shift = await readShift(client, shiftId);
     await writeAudit(client, {

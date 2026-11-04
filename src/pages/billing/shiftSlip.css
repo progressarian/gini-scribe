@@ -1,0 +1,88 @@
+.slip {
+  max-width: 720px;
+  margin: 24px auto;
+  padding: 24px;
+  background: #fff;
+  color: #1a2332;
+  font-size: 14px;
+  font-family: inherit;
+}
+.slip--status {
+  font-size: 14px;
+}
+.slip-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.slip-print {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid #c4cdd8;
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.slip-print:focus-visible {
+  outline: 2px solid #009e8c;
+  outline-offset: 2px;
+}
+.slip-head h1 {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+.slip-head p {
+  margin: 2px 0;
+  color: #3d4f63;
+}
+.slip h2 {
+  margin: 20px 0 6px;
+  font-size: 15px;
+}
+.slip-table {
+  width: 100%;
+  max-width: 480px;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.slip-table th,
+.slip-table td {
+  padding: 4px 0;
+  border-bottom: 1px solid #eef2f6;
+  text-align: left;
+  font-weight: 400;
+}
+.slip-table td {
+  text-align: right;
+}
+.slip-strong th,
+.slip-strong td {
+  font-weight: 700;
+}
+.slip-warn {
+  margin: 8px 0 0;
+  padding: 8px;
+  border: 1px solid #f2d3a3;
+  background: #fef6e6;
+}
+.slip-sign {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 40px;
+  color: #3d4f63;
+}
+@media print {
+  .slip {
+    margin: 0;
+    padding: 0;
+    max-width: none;
+  }
+  .slip-actions {
+    display: none;
+  }
+  .slip-table tr {
+    break-inside: avoid;
+  }
+}

@@ -216,6 +216,12 @@ const NAV_ITEMS = [
     show: () => true,
   },
   {
+    path: "/billing/staff",
+    label: "👥 Staff & shifts",
+    cap: C["/billing/staff"],
+    show: () => true,
+  },
+  {
     path: "/billing/reports",
     label: "💹 Billing Reports",
     cap: C["/billing/reports"],

@@ -92,7 +92,7 @@ async function expectSplitPayment(page) {
 async function expectEmptyPad(page) {
   await expect(pad(page).getByLabel("Amount")).toHaveCount(1);
   await expect(pad(page).getByLabel("Amount")).toHaveValue("");
-  await expect(pad(page).getByLabel("Mode")).toHaveValue("cash");
+  await expect(pad(page).getByLabel("Mode")).toHaveValue("");
   await expect(pad(page).getByText(RESTORED)).toHaveCount(0);
 }
 

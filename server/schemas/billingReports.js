@@ -78,3 +78,11 @@ export const BILLING_DASHBOARD_CHARGES_LABELS = {
   group: "Service group",
   subgroup: "Subgroup",
 };
+
+export const staffDashboardQuerySchema = z.strictObject({
+  from: optional(day),
+  to: optional(day),
+  staff: optional(id),
+});
+
+export const STAFF_DASHBOARD_LABELS = { from: "From", to: "To", staff: "Staff" };

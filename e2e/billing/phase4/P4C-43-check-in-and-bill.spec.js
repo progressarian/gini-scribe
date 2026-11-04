@@ -605,7 +605,9 @@ test.describe.serial("P4C-43 check in and bill in one step", () => {
     await expect(bill.getByRole("row", { name: /To collect now/ })).toContainText("₹2,000");
     await bill.getByRole("radio", { name: "Split" }).check();
     const split = bill.getByRole("group", { name: "Split payment" });
+    await expect(bill.getByRole("alert")).toHaveText("Choose how part 1 was paid.");
     await split.getByLabel("Part 1 paid by").selectOption("card");
+    await split.getByLabel("Part 2 paid by").selectOption("upi");
     await split.getByLabel("Part 1 reference").fill(`SC-${tag}`);
     await split.getByLabel("Part 2 amount").fill("400");
     await expect(split.getByLabel("Part 1 amount")).toHaveValue("1600");
@@ -727,6 +729,9 @@ test.describe.serial("P4C-43 check in and bill in one step", () => {
     await bill.getByLabel(/^HbA1c .* payment reference$/).fill(`UTR-${tag}`);
     await expect(bill.getByRole("row", { name: /To collect now/ })).toContainText("₹2,000");
     const press = panel.getByRole("button", { name: "✓ Check in & collect ₹2,000" });
+    await expect(bill.getByRole("alert")).toContainText("Choose how the patient paid");
+    await expect(press).toBeDisabled();
+    await bill.getByRole("radio", { name: "Cash", exact: true }).check();
     await expect(bill.getByRole("alert")).toContainText("Open your shift");
     await expect(press).toBeDisabled();
 
@@ -742,6 +747,8 @@ test.describe.serial("P4C-43 check in and bill in one step", () => {
       await bill.getByLabel(/^HbA1c .* payment reference$/).fill(`UTR-${tag}`);
       await bill.getByRole("radio", { name: "Split" }).check();
       const split = bill.getByRole("group", { name: "Split payment" });
+      await split.getByLabel("Part 1 paid by").selectOption("cash");
+      await split.getByLabel("Part 2 paid by").selectOption("upi");
       await split.getByLabel("Part 1 amount").fill("1200");
       await split.getByLabel("Part 2 amount").fill("800");
       await split.getByLabel("Part 2 reference").fill(`CU-${tag}`);

@@ -47,7 +47,7 @@ const BUCKET_END = {
   month: (start) => `((${start} + INTERVAL '1 month')::date - 1)`,
 };
 
-const MONEY_COLUMN = `CASE
+export const MONEY_COLUMN = `CASE
     WHEN m.mode = '${PREPAID_MODE}' THEN '${PREPAID_MODE}'
     WHEN (CASE WHEN m.mode = '${HEALTHRAY_MODE}' THEN m.paid_via ELSE m.mode END) = 'upi'
       THEN 'upi_' || COALESCE(m.upi_app, 'unknown')

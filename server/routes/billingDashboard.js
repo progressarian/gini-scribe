@@ -7,11 +7,15 @@ import {
   BILLING_DASHBOARD_LABELS,
   billingDashboardChargesQuerySchema,
   billingDashboardQuerySchema,
+  STAFF_DASHBOARD_LABELS,
+  staffDashboardQuerySchema,
 } from "../schemas/billingReports.js";
 import { billingRoute as run, sendFailure, sendXlsx } from "./billingHttp.js";
 import { billingDashboard } from "../services/billing/dashboard.js";
 import { chargeDetail } from "../services/billing/dashboardCharges.js";
 import { dashboardWorkbook } from "../services/billing/dashboardExport.js";
+import { staffDashboard, staffShiftDetail } from "../services/billing/staffDashboard.js";
+import { staffWorkbook } from "../services/billing/staffExport.js";
 
 const router = Router();
 const BASE = "/billing/dashboard";
@@ -39,6 +43,33 @@ router.get(
   reports,
   dashboardQuery,
   run("Billing dashboard", 200, (req) => billingDashboard(req.query)),
+);
+
+router.get(
+  "/billing/staff/shifts/:id",
+  reports,
+  run("Staff shift", 200, (req) => staffShiftDetail(req.params.id)),
+);
+
+router.get(
+  "/billing/staff/export",
+  reports,
+  validateQuery(staffDashboardQuerySchema, STAFF_DASHBOARD_LABELS),
+  async (req, res) => {
+    try {
+      const { buffer, fileName } = await staffWorkbook(req.query);
+      sendXlsx(res, buffer, fileName);
+    } catch (e) {
+      sendFailure("Staff dashboard export", res, e);
+    }
+  },
+);
+
+router.get(
+  "/billing/staff",
+  reports,
+  validateQuery(staffDashboardQuerySchema, STAFF_DASHBOARD_LABELS),
+  run("Staff dashboard", 200, (req) => staffDashboard(req.query)),
 );
 
 export default router;

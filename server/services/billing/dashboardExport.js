@@ -12,7 +12,7 @@ import { billingDashboard } from "./dashboard.js";
 import { chargeTree } from "./dashboardCharges.js";
 import { filterNames, stamp } from "./reportsExport.js";
 
-const MONEY_FORMAT = "#,##0.00;-#,##0.00";
+export const MONEY_FORMAT = "#,##0.00;-#,##0.00";
 const PCT_FORMAT = '0.00"%"';
 const HEADER_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8EEF4" } };
 const GROUP_FILL = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD5DFEA" } };
@@ -119,7 +119,7 @@ function addMisSheet(workbook, data) {
   ]);
 }
 
-function addTable(ws, title, headers, rows, formats = []) {
+export function addTable(ws, title, headers, rows, formats = []) {
   if (title) {
     const heading = ws.addRow([title]);
     heading.font = { bold: true, size: 12 };

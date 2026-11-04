@@ -59,6 +59,7 @@ import {
   billingRequestSearchQuerySchema,
   billingRequestRejectSchema,
   billingRuleTestSchema,
+  billingShiftAdminCloseSchema,
   billingShiftCloseSchema,
   billingShiftListQuerySchema,
   billingShiftOpenSchema,
@@ -91,6 +92,7 @@ import {
 import { duesToday } from "../services/billing/dues.js";
 import { refundBoard } from "../services/billing/refundBoard.js";
 import * as shifts from "../services/billing/cashShifts.js";
+import { shiftHandover } from "../services/billing/staffDashboard.js";
 import * as requests from "../services/billing/billingRequests.js";
 import { consultationSuggestion, notPricedForVisit } from "../services/billing/visitLines.js";
 import { addLabCaseTests, labCaseSuggestion } from "../services/billing/labCaseLines.js";
@@ -770,6 +772,12 @@ router.post(
   run("Open shift", 201, (req) => shifts.openShift(req.body, ctx(req))),
 );
 
+router.get(
+  `${BASE}/shifts/:id/handover`,
+  desk,
+  run("Shift handover", 200, (req) => shiftHandover(req.params.id, ctx(req))),
+);
+
 router.post(
   `${BASE}/shifts/close`,
   desk,
@@ -864,7 +872,7 @@ router.get(
 router.post(
   `${BASE}/master/shifts/:id/close`,
   master,
-  validate(billingShiftCloseSchema, BILLING_DESK_LABELS),
+  validate(billingShiftAdminCloseSchema, BILLING_DESK_LABELS),
   run("Close another desk's shift", 200, (req) =>
     shifts.closeShift(req.params.id, req.body, ctx(req)),
   ),

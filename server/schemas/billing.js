@@ -511,9 +511,11 @@ export const billingPreviewSchema = z
     message: "Choose the patient or the appointment to bill",
   });
 
-const noRealPatient = z.undefined({
-  error: "can't be sent: a rule test uses an age, gender and category, not a real patient",
-});
+const noRealPatient = z
+  .undefined({
+    error: "can't be sent: a rule test uses an age, gender and category, not a real patient",
+  })
+  .optional();
 
 const draftRule = z.strictObject(
   {
@@ -898,7 +900,9 @@ const DESK_SETS_NO_PRICE =
   "can't be sent from the billing desk — the admin sets prices and bill names";
 
 const noPrice = (fields) =>
-  Object.fromEntries(fields.map((key) => [key, z.undefined({ error: DESK_SETS_NO_PRICE })]));
+  Object.fromEntries(
+    fields.map((key) => [key, z.undefined({ error: DESK_SETS_NO_PRICE }).optional()]),
+  );
 
 const DESK_PRICE_FIELDS = [
   "price",
@@ -1223,10 +1227,48 @@ export const billingShiftOpenSchema = deskObject({
   opening_cash: z.union([money, z.null(), blank]).optional(),
 });
 
+const noteCount = z.union([
+  z.number().int("must be a whole number").min(0).max(100000),
+  z
+    .string()
+    .trim()
+    .regex(/^\d{0,6}$/, "must be a whole number"),
+]);
+
+const denominations = z
+  .strictObject({
+    500: noteCount.optional(),
+    200: noteCount.optional(),
+    100: noteCount.optional(),
+    50: noteCount.optional(),
+    20: noteCount.optional(),
+    10: noteCount.optional(),
+    coins: z.union([money, blank]).optional(),
+  })
+  .nullable()
+  .optional();
+
 export const billingShiftCloseSchema = deskObject({
-  counted_cash: money,
+  counted_cash: z.union([money, z.null()]).optional(),
+  denominations,
   note: z.union([shiftNote, z.null()]).optional(),
-});
+}).refine(
+  (body) => (body.counted_cash !== undefined && body.counted_cash !== null) || body.denominations,
+  { message: "Enter the counted cash", path: ["counted_cash"] },
+);
+
+export const billingShiftAdminCloseSchema = deskObject({
+  counted_cash: z.union([money, z.null()]).optional(),
+  denominations,
+  not_counted: z.boolean().optional(),
+  note: z.union([shiftNote, z.null()]).optional(),
+}).refine(
+  (body) =>
+    body.not_counted === true ||
+    (body.counted_cash !== undefined && body.counted_cash !== null) ||
+    body.denominations,
+  { message: "Enter the counted cash, or close it as not counted", path: ["counted_cash"] },
+);
 
 const shiftFilters = {
   from: realDateText.optional(),
@@ -1438,6 +1480,8 @@ export const BILLING_DESK_LABELS = {
   amount: "The amount taken",
   reference: "Reference",
   counted_cash: "Counted cash",
+  denominations: "Note count",
+  not_counted: "Not counted",
   opening_cash: "Opening cash",
   note: "Note",
   status: "Status",
