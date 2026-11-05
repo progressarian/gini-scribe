@@ -12,9 +12,12 @@ import { httpError, inTransaction } from "./transaction.js";
 import { arrivalConsultationIn, testsForDesk } from "./visitLines.js";
 import { arrivalQuote, journeyAddsTests, journeyConsultation } from "./arrivalQuote.js";
 import { healthrayLinesAtArrivalIn } from "./healthrayBillLines.js";
+import { billsAtCheckIn } from "./billingSettings.js";
 
 export const ALREADY_PAID_SOURCES = [HEALTHRAY_MODE, PREPAID_MODE];
 const NOT_ARRIVED = ["booked", "no_show", "cancelled"];
+
+const CHECK_IN_BILL_OFF = "Billing at check-in is switched off — bill the patient at the counter";
 
 const asList = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
 
@@ -131,6 +134,7 @@ export async function arrivalBillPreview(
   ctx = {},
   db = pool,
 ) {
+  if (!(await billsAtCheckIn(db))) throw httpError(409, CHECK_IN_BILL_OFF);
   if (!asList(skip).length) {
     const quote = await arrivalQuote(visitId, { add, remove, plan }, ctx, db).catch((error) => {
       console.warn(`[billing] arrival quote fell back for visit ${visitId}: ${error.message}`);
@@ -297,6 +301,7 @@ async function finaliseIfPaid(client, billId, ctx) {
 
 export async function commitArrivalBill(visitId, input = {}, ctx = {}, db = pool) {
   return inTransaction(async (client) => {
+    if (!(await billsAtCheckIn(client))) throw httpError(409, CHECK_IN_BILL_OFF);
     const { rows } = await client.query(
       `SELECT current_status FROM giniflow_visits WHERE id = $1 FOR UPDATE`,
       [visitId],

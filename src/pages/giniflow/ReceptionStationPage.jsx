@@ -1340,6 +1340,8 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   const checkInWalkIn = useCheckInWalkIn();
   const saving = checkIn.isPending || checkInWalkIn.isPending || arriveForAppointment.isPending;
   const canBill = useCanBill();
+  const { data: deskSettings } = useDeskSettings({ enabled: canBill });
+  const billHere = canBill && deskSettings?.bill_at_check_in === true;
   const [billFor, setBillFor] = useState(null);
   const [arrivalChoices, setArrivalChoices] = useState(emptyArrivalChoices);
   const [arrivalError, setArrivalError] = useState(null);
@@ -1372,7 +1374,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
       remove: arrivalChoices.remove.map((item) => item.id),
       plan: journeyPlan,
     },
-    canBill &&
+    billHere &&
       (Boolean(billFor) ||
         (steps !== null &&
           journeyPlan?.steps === steps &&
@@ -1380,7 +1382,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
           stepsBill.current === (bill || null))),
   );
   const commitArrivalBill = useCommitArrivalBill();
-  const { data: shift } = useCurrentShift({ enabled: canBill });
+  const { data: shift } = useCurrentShift({ enabled: billHere });
   const shiftOpen = Boolean(shift?.is_open);
   const billRef = useRef(null);
   billRef.current = bill || null;
@@ -1497,11 +1499,11 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
     !arrival.assignedDoctorId &&
     list.some((s) => s.chainStatus === "with_doctor") &&
     !list.some((s) => s.chainStatus === "with_doctor" && s.staffId);
-  const arrivalPreview = canBill ? arrivalBill.data : null;
+  const arrivalPreview = billHere ? arrivalBill.data : null;
   const billsAtArrival = Boolean(arrivalPreview?.outstanding);
   const arrivalBusy =
     commitArrivalBill.isPending || (arrivalBill.isFetching && arrivalBill.isPlaceholderData);
-  const billPending = canBill && Boolean(billVisitId) && !arrivalBill.data && !arrivalBill.isError;
+  const billPending = billHere && Boolean(billVisitId) && !arrivalBill.data && !arrivalBill.isError;
   const blocked =
     saving ||
     saveHome.isPending ||
@@ -1563,7 +1565,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
       });
       const billed =
         withBill && billsAtArrival && arrival.visitId ? await collectAtArrival(visitId) : false;
-      const stayOpen = canBill && Boolean(visitId) && !billed;
+      const stayOpen = billHere && Boolean(visitId) && !billed;
       if (stayOpen) setBillFor(visitId);
       onDone({ ...arrival, visitId }, r, sendWhatsapp, stayOpen);
     } catch (e) {
@@ -1760,7 +1762,7 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
                 checking in.
               </div>
             )}
-            {canBill && billVisitId && (
+            {billHere && billVisitId && (
               <ArrivalBill
                 preview={arrivalPreview}
                 isLoading={arrivalBill.isLoading}

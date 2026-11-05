@@ -96,6 +96,7 @@ const CLEANERS = {
   bill_footer: (v) => cleanText(v, "Bill footer", 1000),
   auto_add_consultation: (v) => cleanFlag(v, "Add the consultation automatically"),
   auto_add_lab_case_tests: (v) => cleanFlag(v, "Add today's lab report tests automatically"),
+  bill_at_check_in: (v) => cleanFlag(v, "Bill at check-in"),
   cancel_charge_type: cleanChargeType,
   cancel_charge_pct: (v) => cleanChargeNumber(v, "The default percentage", 100),
   cancel_charge_amount: (v) => cleanChargeNumber(v, "The default fixed amount", 100000),
@@ -103,7 +104,7 @@ const CLEANERS = {
 
 const COLUMNS = `discount_stacking, allow_pay_later, max_codes_per_bill, gst_enabled, gstin,
                  state_code, legal_name, bill_footer, auto_add_consultation,
-                 auto_add_lab_case_tests, cancel_charge_type, cancel_charge_pct::float8,
+                 auto_add_lab_case_tests, bill_at_check_in, cancel_charge_type, cancel_charge_pct::float8,
                  cancel_charge_amount::float8, updated_at, updated_by`;
 
 export async function getSettings(db = pool) {
@@ -122,10 +123,17 @@ export async function addsLabCaseTests(db = pool) {
   return rows[0]?.auto_add_lab_case_tests === true;
 }
 
+export async function billsAtCheckIn(db = pool) {
+  const { rows } = await db.query("SELECT bill_at_check_in FROM billing_settings");
+  return rows[0]?.bill_at_check_in === true;
+}
+
 export async function deskSettings(db = pool) {
-  const { allow_pay_later, gst_enabled, max_codes_per_bill } = await getSettings(db);
+  const { allow_pay_later, gst_enabled, max_codes_per_bill, bill_at_check_in } =
+    await getSettings(db);
   return {
     allow_pay_later,
+    bill_at_check_in,
     gst_enabled,
     max_codes_per_bill: max_codes_per_bill === null ? null : Number(max_codes_per_bill),
   };

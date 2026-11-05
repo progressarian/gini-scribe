@@ -128,6 +128,7 @@ const pickGeneral = (s) => ({
   allow_pay_later: s.allow_pay_later,
   auto_add_consultation: s.auto_add_consultation,
   auto_add_lab_case_tests: s.auto_add_lab_case_tests,
+  bill_at_check_in: s.bill_at_check_in,
   max_codes_per_bill: text(s.max_codes_per_bill),
   bill_footer: text(s.bill_footer),
 });
@@ -205,6 +206,18 @@ function GeneralCard({ settings }) {
       <p id="bill-settings-lab-case-hint" className="fset__hint">
         Priced tests the lab registered today are added when the bill opens. When off, the desk adds
         them from the "From today's lab report" card.
+      </p>
+      <label className="fset__check bill-settings__check">
+        <input
+          type="checkbox"
+          checked={form.bill_at_check_in}
+          onChange={set("bill_at_check_in")}
+          aria-describedby="bill-settings-check-in-hint"
+        />
+        Show "Bill at arrival" when checking a patient in
+      </label>
+      <p id="bill-settings-check-in-hint" className="fset__hint">
+        When off, check-in only checks the patient in; the desk bills them from the Bill tab.
       </p>
       <Field label="Bill footer">
         {(id) => (

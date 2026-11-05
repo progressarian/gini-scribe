@@ -101,3 +101,13 @@ If a quote ever differs from what check-in builds, nothing is collected: the exi
 9. Query count: the quote stays under 35 queries.
 
 Rerun P4C-13, P4C-43, P4C-50, P4-38 and G100.
+
+## On/off setting (Nov 2026)
+
+Settings → Billing → Bills has **Show "Bill at arrival" when checking a patient in** (`billing_settings.bill_at_check_in`, default on, migration `2026-12-29_bill_at_check_in_setting.sql`). When off:
+
+- the Check-in panel shows no bill, fetches no quote, and has only "✓ Check in" / "Check in + send WhatsApp"; it closes once the patient is in;
+- the arrival-bill endpoints answer 409, so nothing can be billed at check-in from an old screen;
+- the desk bills the patient from the row's Bill button or the Bill tab.
+
+Tests: `e2e/billing/phase4/P4C-58-bill-at-check-in-setting.spec.js`.

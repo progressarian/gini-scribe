@@ -1,0 +1,2 @@
+ALTER TABLE billing_settings
+  ADD COLUMN IF NOT EXISTS bill_at_check_in BOOLEAN NOT NULL DEFAULT TRUE;
