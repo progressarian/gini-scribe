@@ -169,4 +169,30 @@ test.describe.serial("P4C-58 bill at check-in can be switched off", () => {
     await expect(panel.getByRole("region", { name: "Bill at arrival" })).toBeVisible();
     await expect(panel.getByRole("button", { name: "Check in only — bill later" })).toBeVisible();
   });
+
+  test("5. switched off while the desk page is open, check-in frees up without a reload", async ({
+    page,
+  }) => {
+    await setBillAtCheckIn(true);
+    const made = await extraVisit(ids, "TurnedOff", { healthray: false });
+    const name = `P4 TurnedOff ${tag}`;
+    await mockArrival(page, made, name);
+    await loginAs(page, "reception");
+    await gotoReady(page, "/giniflow/station/reception", () =>
+      page.getByRole("tab", { name: /^Arrivals/ }),
+    );
+    await page.getByRole("tab", { name: /^Bill/ }).click();
+    await page.getByRole("tab", { name: /^Arrivals/ }).click();
+    await setBillAtCheckIn(false);
+    await page
+      .locator(".ar-row")
+      .filter({ hasText: name })
+      .getByRole("button", { name: "✓ Arrived" })
+      .click();
+    const panel = page.getByRole("dialog", { name: "Check in" });
+    await expect(panel.getByRole("button", { name: "✓ Check in", exact: true })).toBeEnabled({
+      timeout: 5000,
+    });
+    await expect(panel.getByRole("region", { name: "Bill at arrival" })).toHaveCount(0);
+  });
 });

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import api from "../../services/api";
 import { pollInterval } from "./giniflowPolling";
@@ -197,13 +198,15 @@ export function useHealthrayBill(patientId) {
 }
 
 const idList = (ids) => [...ids].sort().join(",");
+const checkInBillOff = (error) => error?.response?.data?.code === "check_in_bill_off";
 
 export function useArrivalBill(
   visitId,
   { skip = [], add = [], remove = [], plan = null } = {},
   enabled = true,
 ) {
-  return useQuery({
+  const queryClient = useQueryClient();
+  const query = useQuery({
     queryKey: [
       "giniflow",
       "reception",
@@ -237,7 +240,13 @@ export function useArrivalBill(
     staleTime: 30 * 1000,
     refetchOnWindowFocus: false,
     placeholderData: (prev) => prev,
+    retry: (count, error) => !checkInBillOff(error) && count < 3,
   });
+  const switchedOff = checkInBillOff(query.error);
+  useEffect(() => {
+    if (switchedOff) queryClient.invalidateQueries({ queryKey: ["billing", "desk-settings"] });
+  }, [switchedOff, queryClient]);
+  return query;
 }
 
 export function useCommitArrivalBill() {
