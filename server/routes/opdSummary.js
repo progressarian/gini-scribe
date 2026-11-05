@@ -4,6 +4,7 @@ import { validateQuery } from "../middleware/validate.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
 import {
   OPD_SUMMARY_LABELS,
+  opdDashboardQuerySchema,
   opdExportQuerySchema,
   opdFiltersQuerySchema,
   opdSummaryQuerySchema,
@@ -12,6 +13,7 @@ import {
 import { billingRoute as run, sendFailure, sendXlsx } from "./billingHttp.js";
 import { getOpdFilters, getOpdSummary, listOpdVisits } from "../services/reports/opdSummary.js";
 import { opdSummaryWorkbook } from "../services/reports/opdSummaryExport.js";
+import { getOpdDashboard, getOpdTimes } from "../services/reports/opdDashboard.js";
 
 const router = Router();
 const BASE = "/reports/opd";
@@ -23,6 +25,20 @@ router.get(
   allowed,
   query(opdSummaryQuerySchema),
   run("OPD summary", 200, (req) => getOpdSummary(req.query)),
+);
+
+router.get(
+  `${BASE}/dashboard`,
+  allowed,
+  query(opdDashboardQuerySchema),
+  run("OPD dashboard", 200, (req) => getOpdDashboard(req.query)),
+);
+
+router.get(
+  `${BASE}/dashboard/times`,
+  allowed,
+  query(opdDashboardQuerySchema),
+  run("OPD dashboard times", 200, (req) => getOpdTimes(req.query)),
 );
 
 router.get(

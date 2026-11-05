@@ -3,7 +3,7 @@ import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { one, query } from "../../helpers/db.mjs";
 import { apiAs, loginAs } from "../../helpers/auth.mjs";
 import { gotoReady } from "../../helpers/browser.mjs";
-import { closePdfViewer, expectPdfInViewer } from "../../helpers/pdfViewer.mjs";
+import { closePdfViewer, expectPdfInViewer, pdfViewer } from "../../helpers/pdfViewer.mjs";
 import { assertTestDatabase } from "../../setup/guard.mjs";
 import { USERS } from "../../fixtures/data.mjs";
 import { rupees } from "../../../src/components/billing/format.js";
@@ -134,6 +134,7 @@ async function pay(page, rows) {
 }
 
 async function takePayment(page) {
+  await ensureSeries(day);
   await pad(page)
     .getByRole("button", { name: /^Take payment/ })
     .click();
@@ -146,8 +147,9 @@ async function takePayment(page) {
 async function finalise(page) {
   await ensureSeries(day);
   const pages = page.context().pages().length;
-  await actions(page).getByRole("button", { name: "Finalise & print" }).click();
-  await expect(actions(page).getByRole("button", { name: "Finalise & print" })).toHaveCount(0);
+  const button = page.getByRole("button", { name: "Finalise & print" });
+  if (!(await pdfViewer(page).count())) await button.click();
+  await expect(button).toHaveCount(0);
   const url = await expectPdfInViewer(page, "/bill.pdf");
   await closePdfViewer(page);
   expect(page.context().pages()).toHaveLength(pages);
@@ -292,9 +294,15 @@ test.describe.serial("P4-38 floor trial rehearsal", () => {
       await pad(desk).getByLabel("Amount").fill("1000");
       await expect(pad(desk).getByRole("button", { name: /^Take payment/ })).toBeDisabled();
       await expect(
-        pad(desk).getByText("Add the reference for each card, UPI or NEFT / cheque payment."),
+        pad(desk)
+          .locator(".bc-hint")
+          .filter({ hasText: "Add the reference for each card, UPI or NEFT / cheque payment." }),
       ).toBeVisible();
-      await expect(pad(desk).getByText("Choose the UPI app for each UPI payment.")).toBeVisible();
+      await expect(
+        pad(desk)
+          .locator(".bc-hint")
+          .filter({ hasText: "Choose the UPI app for each UPI payment." }),
+      ).toBeVisible();
       await pad(desk).getByLabel("UPI app").selectOption("paytm");
       await pad(desk).getByLabel("Reference").fill(`UPI${day.T}01`);
       await pad(desk).getByRole("button", { name: "Split payment" }).click();

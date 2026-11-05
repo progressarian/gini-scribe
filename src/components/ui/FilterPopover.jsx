@@ -17,6 +17,7 @@ export default function FilterPopover({
   hint,
   onApply,
   onReset,
+  onClose,
   applyLabel = "Apply filters",
   children,
 }) {
@@ -25,7 +26,10 @@ export default function FilterPopover({
 
   // The wrapper holds the button too: without it, clicking the button while the
   // panel is open would dismiss and re-open in the same gesture.
-  const close = useCallback(() => setOpen(false), []);
+  const close = useCallback(() => {
+    setOpen(false);
+    onClose?.();
+  }, [onClose]);
   useDismissOnOutside(wrapRef, close, open);
 
   useEffect(() => {
@@ -40,7 +44,7 @@ export default function FilterPopover({
       <button
         type="button"
         className={`fpop__btn ${activeCount ? "fpop__btn--on" : ""}`}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => (open ? close() : setOpen(true))}
         aria-haspopup="dialog"
         aria-expanded={open}
       >

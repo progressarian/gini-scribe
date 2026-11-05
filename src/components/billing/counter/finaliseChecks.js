@@ -1,5 +1,3 @@
-import { fromPaise } from "../format";
-
 export const balanceOf = (bill) =>
   bill.credits ? bill.credits.balance : Math.max(0, bill.totals.payable - bill.totals.paid);
 
@@ -16,10 +14,7 @@ export function payLaterAllowed(bill, schemes = [], settings = null) {
   return Boolean(settings?.allow_pay_later);
 }
 
-export function finaliseBlockers(
-  bill,
-  { schemes = [], settings = null, payLater = false, needsCategory = false } = {},
-) {
+export function finaliseBlockers(bill, { schemes = [], needsCategory = false } = {}) {
   if (bill.status !== "draft") return [];
   const blockers = [];
   if (!bill.lines.length) blockers.push("Add an item to this bill first.");
@@ -41,10 +36,6 @@ export function finaliseBlockers(
   }
   if (scheme && needs("requires_referral_doc") && !bill.referral_doc_id) {
     blockers.push("Attach the referral letter first.");
-  }
-  const balance = balanceOf(bill);
-  if (balance > 0 && !(payLater && payLaterAllowed(bill, schemes, settings))) {
-    blockers.push(`${fromPaise(balance)} is still to be collected on this bill.`);
   }
   return blockers;
 }

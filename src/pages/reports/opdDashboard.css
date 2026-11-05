@@ -1,0 +1,245 @@
+.opd-dash .bdash-tiles {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+.fset.bill-ui.opd-dash .brep-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+}
+.fset.bill-ui.opd-dash .brep-filters > * {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.fset.bill-ui.opd-dash .brep-filters > .bdash-field-seg:first-child {
+  flex-basis: 100%;
+}
+.opd-dash .brep-filters select {
+  width: 310px;
+  max-width: 100%;
+}
+.opd-dash .opd-visits th .bdash-muted {
+  font-weight: 400;
+}
+.opd-dash .opd-tile {
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 150ms ease;
+}
+.opd-dash .opd-tile:hover {
+  border-color: var(--fink3);
+}
+.opd-dash .opd-tile:focus-visible,
+.opd-dash .opd-funnel a:focus-visible,
+.opd-dash .opd-sides a:focus-visible {
+  outline: 2px solid var(--fink);
+  outline-offset: 2px;
+}
+.opd-dash .opd-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.opd-dash .opd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--fbd);
+  border-radius: 999px;
+  background: var(--fwhite);
+  color: var(--fink);
+  font-size: 12px;
+  cursor: pointer;
+}
+.opd-dash .opd-funnel {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 0;
+  list-style: none;
+}
+.opd-dash .opd-funnel a {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) 56px 48px;
+  align-items: center;
+  gap: 8px;
+  color: inherit;
+  font-size: 13px;
+  text-decoration: none;
+  font-variant-numeric: tabular-nums;
+}
+.opd-dash .opd-funnel strong,
+.opd-dash .opd-funnel .bdash-muted {
+  text-align: right;
+}
+.opd-dash .opd-funnel__track {
+  display: block;
+  height: 16px;
+  border-radius: 4px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+.opd-dash .opd-funnel__bar {
+  display: block;
+  height: 100%;
+}
+.opd-dash .opd-sides {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.opd-dash .opd-sides a {
+  color: inherit;
+}
+.opd-dash .opd-mini {
+  margin-top: 12px;
+}
+.opd-dash .opd-mini__title {
+  font-size: 12px;
+  color: var(--fink3);
+}
+.opd-dash .opd-picker ul {
+  display: grid;
+  gap: 4px;
+  max-height: 240px;
+  margin: 8px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.opd-dash .opd-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+.opd-dash .opd-search {
+  max-width: 420px;
+}
+.opd-dash .opd-stations {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.opd-dash .opd-station__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+.opd-dash .opd-station__bar {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--fink3);
+}
+.opd-dash .opd-heat {
+  border-collapse: separate;
+  border-spacing: 2px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.opd-dash .opd-heat th {
+  padding: 2px 6px;
+  font-weight: 500;
+  color: var(--fink3);
+  text-align: center;
+  white-space: nowrap;
+}
+.opd-dash .opd-heat tbody th {
+  position: sticky;
+  left: 0;
+  background: var(--fwhite);
+}
+.opd-dash .opd-heat td {
+  min-width: 40px;
+  padding: 0;
+  text-align: center;
+}
+.opd-dash .opd-heat a,
+.opd-dash .opd-heat span {
+  display: block;
+  padding: 6px 4px;
+  border-radius: 4px;
+  color: inherit;
+  text-decoration: none;
+}
+.opd-dash .opd-heat a:hover {
+  outline: 1px solid var(--fink3);
+}
+.opd-dash .opd-heat a:focus-visible {
+  outline: 2px solid var(--fink);
+}
+@media (min-width: 701px) and (max-width: 1200px) {
+  .opd-dash .brep-filters {
+    position: relative;
+  }
+  .opd-dash .brep-filters .fpop-wrap {
+    position: static;
+  }
+  .opd-dash .brep-filters .fpop {
+    top: auto;
+    left: auto;
+    right: 0;
+    margin-top: 8px;
+  }
+}
+@media (max-width: 900px) {
+  .fset.bill-ui .bill-stack .opd-visits .flow-table tbody td.brep-num {
+    text-align: left;
+  }
+}
+@media (max-width: 700px) {
+  .opd-dash .bdash-segbar__legend a,
+  .opd-dash .opd-sides a,
+  .opd-dash .opd-back,
+  .opd-dash table a,
+  .opd-dash .bdash-table-toggle summary {
+    display: inline-block;
+    padding: 4px 0;
+  }
+  .opd-dash .opd-funnel a {
+    padding: 4px 0;
+  }
+}
+@media (max-width: 520px) {
+  .fset.bill-ui.opd-dash .brep-filters > .fset__field {
+    flex-basis: 100%;
+  }
+  .opd-dash .brep-filters select,
+  .opd-dash .brep-filters input[type="date"] {
+    width: 100%;
+  }
+  .opd-dash .bdash-tiles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .opd-dash .opd-funnel a {
+    grid-template-columns: 72px minmax(0, 1fr) 44px 44px;
+  }
+}
+.opd-dash .opd-subhead {
+  margin-top: 16px;
+}
+.opd-dash .brep-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}

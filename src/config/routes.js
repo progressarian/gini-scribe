@@ -162,6 +162,7 @@ export const PAGE_CAPABILITIES = {
   "/billing/staff": CAP.BILLING_REPORTS,
   "/billing/shift-slip": CAP.BILLING_DESK,
   "/reports/monthly": CAP.OPD_SUMMARY,
+  "/reports/opd-dashboard": CAP.OPD_SUMMARY,
   "/billing/cghs-register": CAP.BILLING_CLAIMS,
   "/billing/dues": CAP.BILLING_DUES,
   "/crm/home": CAP.CRM_ACCESS,

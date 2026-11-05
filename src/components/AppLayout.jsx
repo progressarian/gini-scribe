@@ -234,6 +234,12 @@ const NAV_ITEMS = [
     show: () => true,
   },
   {
+    path: "/reports/opd-dashboard",
+    label: "📈 OPD dashboard",
+    cap: C["/reports/opd-dashboard"],
+    show: () => true,
+  },
+  {
     path: "/billing/cghs-register",
     label: "🧾 CGHS register",
     cap: C["/billing/cghs-register"],

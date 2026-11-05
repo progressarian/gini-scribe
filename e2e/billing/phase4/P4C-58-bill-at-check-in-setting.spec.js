@@ -195,4 +195,75 @@ test.describe.serial("P4C-58 bill at check-in can be switched off", () => {
     });
     await expect(panel.getByRole("region", { name: "Bill at arrival" })).toHaveCount(0);
   });
+
+  test("6. an unreadable HealthRay bill shows a time only when there is one", async ({ page }) => {
+    await setBillAtCheckIn(false);
+    const made = await extraVisit(ids, "BillHint", { healthray: false });
+    const name = `P4 BillHint ${tag}`;
+    await mockArrival(page, made, name);
+    let blockedUntil = null;
+    await page.route("**/reception/healthray/bill**", (route) =>
+      route.fulfill({
+        json: { status: "blocked", blockedUntil, labTests: [], machines: [], steps: [] },
+      }),
+    );
+    const open = async () => {
+      await loginAs(page, "reception");
+      await gotoReady(page, "/giniflow/station/reception", () =>
+        page.getByRole("tab", { name: /^Arrivals/ }),
+      );
+      await page
+        .locator(".ar-row")
+        .filter({ hasText: name })
+        .getByRole("button", { name: "✓ Arrived" })
+        .click();
+      return page.getByRole("dialog", { name: "Check in" });
+    };
+    const panel = await open();
+    await expect(panel).toContainText("Couldn't read the HealthRay bill just now");
+    await expect(panel).not.toContainText("until —");
+    blockedUntil = "2026-11-05T07:07:40.000Z";
+    await page.reload();
+    const again = await open();
+    await expect(again).toContainText("HealthRay is not reachable until 12:37");
+  });
+
+  test("7. clicking outside the check-in panel closes it; clicking inside does not", async ({
+    page,
+  }) => {
+    await setBillAtCheckIn(false);
+    const made = await extraVisit(ids, "OutsideClick", { healthray: false });
+    const name = `P4 OutsideClick ${tag}`;
+    await mockArrival(page, made, name);
+    let release;
+    const held = new Promise((resolve) => {
+      release = resolve;
+    });
+    await page.route(`**/api/giniflow/stations/reception/${made.visit}/checkin`, async (route) => {
+      await held;
+      return route.fulfill({ json: { totalCount: 1, plannedTotalMin: 5, raised: null } });
+    });
+    await loginAs(page, "reception");
+    await gotoReady(page, "/giniflow/station/reception", () =>
+      page.getByRole("tab", { name: /^Arrivals/ }),
+    );
+    const arrived = page
+      .locator(".ar-row")
+      .filter({ hasText: name })
+      .getByRole("button", { name: "✓ Arrived" });
+    const panel = page.getByRole("dialog", { name: "Check in" });
+    await arrived.click();
+    await panel.getByText("What is this visit?").click();
+    await expect(panel).toBeVisible();
+    await page.mouse.click(10, 300);
+    await expect(panel).toBeHidden();
+    await arrived.click();
+    const press = panel.getByRole("button", { name: "✓ Check in", exact: true });
+    await expect(press).toBeEnabled();
+    await press.click();
+    await page.mouse.click(10, 300);
+    await expect(panel).toBeVisible();
+    release();
+    await expect(panel).toBeHidden();
+  });
 });

@@ -128,3 +128,13 @@ Rerun P4C-13, P4C-43, P4C-52 and P4-13 (finalise).
   - P4C-09: its Arrivals field list gained plan 78's `homeCollection`, `homeRecord` and `homeRecordsOn`.
   - P4C-52, P4C-09, P4C-13, P4C-43, P4-13, P4C-21, P4C-22 and G106 pass.
   - P4C-27 test 1 failed once and passed on retry: the dialog read "Patient —" while the list was still loading.
+
+## Update — 5 Nov 2026: one button for payment and finalising
+
+Reception asked to drop the extra step, so **Take payment** and **Finalise & print** on an unpaid draft are now one button. This replaces "No automatic finalising" (§3.4) for payments taken on the counter's main button, because the press is still a person's.
+
+- **Full amount entered, nothing else blocking:** **Take payment & print** takes the payment, makes the bill final and opens it.
+- **Part payment, or something else blocks finalising:** the button stays **Take payment** and the bill stays a draft.
+- **Pay later ticked, nothing entered:** the button reads **Finalise & print**. With an amount entered it reads **Take payment & print**.
+- **Finalising fails after the payment:** the payment stands, and the "Paid in full — not final yet" banner offers **Finalise this bill**.
+- **Paid in HealthRay** is unchanged: it still leaves a draft and uses the banner.

@@ -1,19 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ConfirmModal from "../../ui/ConfirmModal";
 import {
-  billPdfHref,
   receiptPdfHref,
   useCancelBill,
   useDeleteDraft,
-  useDeskSettings,
-  useFinaliseBill,
-  useRereadBill,
   useSaveDraft,
 } from "../../../queries/hooks/useBilling";
 import { errorOf } from "../format";
 import { claimBadgeText } from "./lineText";
 import { balanceOf, finaliseBlockers } from "./finaliseChecks";
 import { useOnPaid } from "./paidSignal";
+import { useMakeFinal } from "./useMakeFinal";
 import RefundDialog from "./RefundDialog";
 import PdfViewer, { PdfButton } from "./PdfViewer";
 
@@ -24,29 +21,26 @@ export default function BillActions({
   onRefunded,
   onPricesChanged,
   schemes,
-  payLater,
   needsCategory,
+  opening = false,
   form,
   stillOnFloor = false,
 }) {
-  const { data: settings } = useDeskSettings();
-  const finalise = useFinaliseBill();
+  const final = useMakeFinal({ onBill, onPricesChanged, form });
   const cancel = useCancelBill();
-  const reread = useRereadBill();
   const deleteDraft = useDeleteDraft();
   const saveDraft = useSaveDraft();
   const [error, setError] = useState(null);
   const [deleting, setDeleting] = useState(null);
   const [note, setNote] = useState(null);
   const [refunding, setRefunding] = useState(false);
-  const [printing, setPrinting] = useState(null);
   const credited = (bill.credits?.notes?.length ?? 0) > 0;
   const refundWaiting = bill.credits?.request?.status === "pending";
   const cancelling = form.value.cancelReason !== null && bill.status === "final";
   const reason = form.value.cancelReason ?? "";
   const setReason = (next) => form.set("cancelReason", next);
 
-  const blockers = finaliseBlockers(bill, { schemes, settings, payLater, needsCategory });
+  const blockers = finaliseBlockers(bill, { schemes, needsCategory });
   const paidInFull =
     bill.status === "draft" &&
     bill.bill_type === "invoice" &&
@@ -76,41 +70,10 @@ export default function BillActions({
     }
   };
 
-  const makeFinal = async () => {
+  const makeFinal = () => {
     setError(null);
     setNote(null);
-    try {
-      const made = await finalise.mutateAsync({
-        billId: bill.id,
-        visitId: bill.visit_id,
-        version: bill.version,
-        ...(payLater ? { pay_later: true } : {}),
-      });
-      onBill(made);
-      form.clear();
-      setPrinting({
-        href: billPdfHref(made.id),
-        title: `Bill ${made.bill_no}`,
-        fileName: `Bill_${made.bill_no}.pdf`,
-      });
-    } catch (e) {
-      if (e?.response?.data?.code === "prices_changed") {
-        onPricesChanged();
-        return;
-      }
-      const version = e?.response?.data?.version;
-      setError(
-        errorOf(e, "This bill could not be made final") +
-          (version ? ` (it is now version ${version})` : ""),
-      );
-      if (version) {
-        try {
-          onBill(await reread.mutateAsync({ billId: bill.id }));
-        } catch {
-          setError("This bill changed and could not be read again — open it again");
-        }
-      }
-    }
+    final.makeFinal(bill);
   };
 
   const drop = async () => {
@@ -157,10 +120,10 @@ export default function BillActions({
               ref={finaliseNow}
               type="button"
               className="st-btn st-btn-grn"
-              disabled={!!blockers.length || finalise.isPending}
+              disabled={!!blockers.length || final.isPending || opening}
               onClick={makeFinal}
             >
-              {finalise.isPending ? "Finalising…" : "Finalise this bill"}
+              {final.isPending ? "Finalising…" : "Finalise this bill"}
             </button>
           </div>
           {stillOnFloor && (
@@ -211,11 +174,11 @@ export default function BillActions({
           </button>
         )}
 
-        {bill.status === "draft" && (
+        {bill.status === "draft" && balanceOf(bill) === 0 && (
           <button
             type="button"
             className="st-btn st-btn-grn"
-            disabled={!!blockers.length || finalise.isPending}
+            disabled={!!blockers.length || final.isPending || opening}
             onClick={makeFinal}
           >
             Finalise &amp; print
@@ -271,8 +234,9 @@ export default function BillActions({
 
       {note && <div className="bc-note">{note}</div>}
       {error && <div className="bc-err">{error}</div>}
+      {final.error && <div className="bc-err">{final.error}</div>}
 
-      <PdfViewer pdf={printing} onClose={() => setPrinting(null)} />
+      <PdfViewer pdf={final.printing} onClose={final.closePrinting} />
 
       {refunding && (
         <RefundDialog

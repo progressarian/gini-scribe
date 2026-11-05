@@ -283,7 +283,7 @@ test.describe.serial("P4C-08 the billing counter under a removed doctor", () => 
     ).toContainText(
       `${COUNTER_DOCTOR} was removed; remove P4 Consult Counter ${fixtureTag} from this bill first.`,
     );
-    await expect(actions.getByRole("button", { name: "Finalise & print" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Finalise & print" })).toHaveCount(0);
   });
 
   test("7. a visit checked in after the delete has no fee and the counter says why", async ({

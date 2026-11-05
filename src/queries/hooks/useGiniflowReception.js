@@ -156,8 +156,9 @@ export function useCheckInWalkIn() {
   });
 }
 
-export function useReceptionHealthray() {
+export function useReceptionHealthray({ enabled = true } = {}) {
   return useQuery({
+    enabled,
     queryKey: ["giniflow", "reception", "healthray"],
     queryFn: async () => (await api.get("/api/giniflow/stations/reception/healthray")).data,
     refetchInterval: (query) =>

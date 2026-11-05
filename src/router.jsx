@@ -96,6 +96,8 @@ const StaffDashboardPage = lazyWithRetry(() => import("./pages/billing/StaffDash
 const StaffShiftPage = lazyWithRetry(() => import("./pages/billing/StaffShiftPage"));
 const ShiftSlipPage = lazyWithRetry(() => import("./pages/billing/ShiftSlipPage"));
 const MonthlySummaryPage = lazyWithRetry(() => import("./pages/reports/MonthlySummaryPage"));
+const OpdDashboardPage = lazyWithRetry(() => import("./pages/reports/OpdDashboardPage"));
+const OpdVisitsPage = lazyWithRetry(() => import("./pages/reports/OpdVisitsPage"));
 const CghsRegisterPage = lazyWithRetry(() => import("./pages/billing/CghsRegisterPage"));
 const DuesRegisterPage = lazyWithRetry(() => import("./pages/billing/DuesRegisterPage"));
 const TestCatalogPage = lazyWithRetry(() => import("./pages/TestCatalogPage"));
@@ -319,6 +321,8 @@ const router = createBrowserRouter([
               { path: "/billing/staff", element: lazyEl(StaffDashboardPage) },
               { path: "/billing/staff/shifts/:id", element: lazyEl(StaffShiftPage) },
               { path: "/reports/monthly", element: lazyEl(MonthlySummaryPage) },
+              { path: "/reports/opd-dashboard", element: lazyEl(OpdDashboardPage) },
+              { path: "/reports/opd-dashboard/visits", element: lazyEl(OpdVisitsPage) },
               { path: "/billing/cghs-register", element: lazyEl(CghsRegisterPage) },
               { path: "/billing/dues", element: lazyEl(DuesRegisterPage) },
               { path: "/crm/home", element: lazyEl(RepHomePage) },

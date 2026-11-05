@@ -196,6 +196,8 @@ function useLeaveGuard(bill) {
     />
   );
 
+  const adopt = (opened) => setBaseline(opened.version);
+
   const followReread = (before, after) =>
     setBaseline((current) => (current === before.version ? after.version : current));
 
@@ -203,7 +205,7 @@ function useLeaveGuard(bill) {
     held.current = false;
   };
 
-  return { dialog, followReread, release };
+  return { dialog, adopt, followReread, release };
 }
 
 function DepositOnly({ patientId }) {
@@ -378,6 +380,7 @@ export default function BillingDesk({
         setNeedsSub(Boolean(found?.needs_category));
         setRemovedDoctor(found?.removed_doctor ?? null);
         setPriceChanges(found?.price_changes ?? null);
+        leave.adopt(found);
         setBill(found);
       },
       onError: (e) => {
@@ -617,6 +620,14 @@ export default function BillingDesk({
                         schemes={schemes || []}
                         payLater={payLater}
                         onPayLater={setPayLater}
+                        needsCategory={needsCategory}
+                        opening={openDraft.isPending}
+                        onPricesChanged={() => reopenVisit(bill.visit_id)}
+                        stillOnFloor={
+                          !pastDay &&
+                          !!selected &&
+                          !["dispensed", "exited"].includes(selected.status)
+                        }
                         form={form}
                         afterSummary={
                           <DiscountCodeBox
@@ -638,8 +649,8 @@ export default function BillingDesk({
                         onRefunded={refreshBill}
                         onPricesChanged={() => reopenVisit(bill.visit_id)}
                         schemes={schemes || []}
-                        payLater={payLater}
                         needsCategory={needsCategory}
+                        opening={openDraft.isPending}
                         form={form}
                         stillOnFloor={
                           !pastDay &&

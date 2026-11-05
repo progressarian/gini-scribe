@@ -1,18 +1,14 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import ConfirmModal from "../../ui/ConfirmModal";
-import {
-  useCloseShift,
-  useCurrentShift,
-  useMyShifts,
-  useOpenShift,
-} from "../../../queries/hooks/useBilling";
+import { useCloseShift, useCurrentShift, useMyShifts } from "../../../queries/hooks/useBilling";
 import { errorOf, rupees } from "../format";
 import { PAYMENT_MODE_LABEL, shiftStateText, TAKE_MODE_LABEL } from "./lineText";
 import useAuthStore from "../../../stores/authStore";
 import { NOTES, noteCountTotal, noteCountUsed, SHIFT_FORM, shiftFormKey } from "./counterForm";
 import { useSavedForm } from "./useSavedForm";
 import { shiftReminder } from "./shiftReminder";
+import OpenShiftForm from "./OpenShiftForm";
 import { cashTyped, countedProblem, countedWarning } from "../staff/staffText";
 
 const clock = (iso) =>
@@ -29,15 +25,13 @@ const clock = (iso) =>
 export default function ShiftPanel() {
   const { data: shift, isLoading } = useCurrentShift();
   const { data: mine } = useMyShifts();
-  const openShift = useOpenShift();
   const closeShift = useCloseShift();
   const userId = useAuthStore((s) => s.currentDoctor?.id);
   const form = useSavedForm(shiftFormKey(userId), SHIFT_FORM);
-  const { opening, counted, note } = form.value;
+  const { counted, note } = form.value;
   const notes = form.value.notes ?? {};
   const byNotes = noteCountUsed(notes);
   const setNotes = (patch) => form.set("notes", { ...notes, ...patch });
-  const setOpening = (next) => form.set("opening", next);
   const setCounted = (next) => form.set("counted", next);
   const setNote = (next) => form.set("note", next);
   const [closing, setClosing] = useState(false);
@@ -54,17 +48,6 @@ export default function ShiftPanel() {
     : countedWarning(Math.round(countedAmount * 100), Math.round(expected * 100));
   const difference = Number((countedAmount - expected).toFixed(2));
   const earlier = (mine || []).filter((row) => !row.is_open);
-
-  const open = async () => {
-    setError(null);
-    setDone(null);
-    try {
-      await openShift.mutateAsync(opening.trim() ? { opening_cash: opening.trim() } : {});
-      form.clear();
-    } catch (e) {
-      setError(errorOf(e, "That shift could not be opened"));
-    }
-  };
 
   const close = async () => {
     setError(null);
@@ -110,25 +93,13 @@ export default function ShiftPanel() {
       {!isLoading && !shift?.is_open && (
         <>
           <div className="bc-hint">No shift is open, so cash can&apos;t be taken yet.</div>
-          <div className="bc-head__row">
-            <label className="bc-field">
-              <span className="bc-field__lbl">Opening cash</span>
-              <input
-                className="bc-field__in"
-                inputMode="decimal"
-                value={opening}
-                onChange={(e) => setOpening(cashTyped(e.target.value))}
-              />
-            </label>
-            <button
-              type="button"
-              className="st-btn st-btn-grn"
-              disabled={openShift.isPending}
-              onClick={open}
-            >
-              Open shift
-            </button>
-          </div>
+          <OpenShiftForm
+            form={form}
+            onOpening={() => {
+              setError(null);
+              setDone(null);
+            }}
+          />
         </>
       )}
 

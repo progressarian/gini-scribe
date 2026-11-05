@@ -68,7 +68,7 @@ test.describe.serial("P4-33 actions and printing", () => {
     await expect(table.getByText(`Ankle brace ${tag}`)).toBeVisible();
   });
 
-  test("2. Finalise & print opens the bill, the receipt prints, and a paid bill can't be cancelled", async ({
+  test("2. Take payment & print opens the bill, the receipt prints, and a paid bill can't be cancelled", async ({
     page,
   }) => {
     await loginAs(page, "reception");
@@ -78,10 +78,7 @@ test.describe.serial("P4-33 actions and printing", () => {
     await pad(page)
       .getByLabel("Amount")
       .fill(String(owed.totals.payable / 100));
-    await pad(page).getByRole("button", { name: "Take payment" }).click();
-    await expect(pad(page).getByText("Payment taken")).toBeVisible();
-
-    await actions(page).getByRole("button", { name: "Finalise & print" }).click();
+    await pad(page).getByRole("button", { name: "Take payment & print" }).click();
     await expectPdfInViewer(page, `/api/billing/bills/${ids.bill}/bill.pdf`);
     await closePdfViewer(page);
 

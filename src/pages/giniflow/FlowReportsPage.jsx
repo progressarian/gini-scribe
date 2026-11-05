@@ -387,7 +387,7 @@ export default function FlowReportsPage() {
               <div className="frp-tile">
                 <span className="frp-tile__val">{summary.total_visits}</span>
                 <span className="frp-tile__lbl">Patients checked in</span>
-                <span className="frp-tile__sub">{summary.completed} finished their visit</span>
+                <span className="frp-tile__sub">{summary.completed} with an exit recorded</span>
               </div>
               <div className={`frp-tile frp-tile--${toneOf(onTimePct)}`}>
                 <span className="frp-tile__val">{summary.completed ? `${onTimePct}%` : "—"}</span>

@@ -10,7 +10,7 @@ import { budgetMap } from "./board.js";
 export const MAX_REPORT_DAYS = 92;
 const NO_BOOKING = "Walk-in (no booking)";
 
-const median = (values) => {
+export const median = (values) => {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -18,7 +18,7 @@ const median = (values) => {
 };
 
 const round1 = (value) => (value === null ? null : Math.round(value * 10) / 10);
-const average = (values) =>
+export const average = (values) =>
   values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 
 const VISITS_IN_RANGE = `
@@ -29,24 +29,65 @@ const VISITS_IN_RANGE = `
        AND NOT ${labOnlyPredicate("v", "$3")}
   )`;
 
-async function journeysIn(db, start, end) {
-  const { rows } = await db.query(
-    `${VISITS_IN_RANGE},
-     marks AS (
+const NOT_SWEPT = "NOT COALESCE(e.meta ? 'backfill', FALSE)";
+
+export const JOURNEY_MARKS = `marks AS (
        SELECT e.visit_id,
               MAX(e.occurred_at) FILTER (WHERE ${JOURNEY_START_SQL("e.status")}) AS started_at,
+              MIN(e.occurred_at) FILTER (WHERE e.status IN ('with_sd', 'with_doctor')) AS consult_at,
               MAX(e.occurred_at) FILTER (
                 WHERE e.status IN ('exited', 'dispensed')
+                  AND ${NOT_SWEPT}
                   AND NOT EXISTS (SELECT 1 FROM giniflow_visit_events b
                                    WHERE b.visit_id = e.visit_id AND b.status = 'back_for_tests'
                                      AND b.occurred_at < e.occurred_at)) AS finished_at
          FROM giniflow_visit_events e JOIN vs ON vs.id = e.visit_id
         GROUP BY e.visit_id
-     )
+     )`;
+
+export const VISIT_MINUTES = `CASE WHEN m.finished_at >= m.started_at
+                 THEN EXTRACT(EPOCH FROM (m.finished_at - m.started_at)) / 60 END`;
+
+export const WAITING_MINUTES = `CASE WHEN m.consult_at >= m.started_at
+                 THEN EXTRACT(EPOCH FROM (m.consult_at - m.started_at)) / 60 END`;
+
+export const STEP_HOPS = `steps AS (
+       SELECT e.status, e.occurred_at,
+              LEAD(e.occurred_at) OVER (PARTITION BY e.visit_id ORDER BY e.occurred_at) AS next_at
+         FROM giniflow_visit_events e JOIN vs ON vs.id = e.visit_id
+        WHERE ${NOT_A_MARKER_SQL("e.status")} AND ${NOT_SWEPT}
+     )`;
+
+export const hopRows = (rows) =>
+  rows.map((row) => ({ key: slaKeyForStatus(row.status), minutes: Number(row.minutes) }));
+
+export async function journeyTimesFor(appointmentIds, db = pool) {
+  if (!appointmentIds.length) return new Map();
+  const { rows } = await db.query(
+    `WITH vs AS MATERIALIZED (
+       SELECT id, appointment_id FROM giniflow_visits WHERE appointment_id = ANY($1::bigint[])
+     ),
+     ${JOURNEY_MARKS}
+     SELECT vs.appointment_id, ${VISIT_MINUTES} AS minutes, ${WAITING_MINUTES} AS waiting
+       FROM vs JOIN marks m ON m.visit_id = vs.id AND m.started_at IS NOT NULL`,
+    [appointmentIds],
+  );
+  const whole = (value) => (value === null ? null : Math.max(0, Math.round(Number(value))));
+  return new Map(
+    rows.map((r) => [
+      Number(r.appointment_id),
+      { visitMin: whole(r.minutes), waitingMin: whole(r.waiting) },
+    ]),
+  );
+}
+
+async function journeysIn(db, start, end) {
+  const { rows } = await db.query(
+    `${VISITS_IN_RANGE},
+     ${JOURNEY_MARKS}
      SELECT vs.visit_date::text AS day, p.name AS patient_name,
             COALESCE(NULLIF(btrim(a.visit_type), ''), $4) AS visit_type,
-            CASE WHEN m.finished_at >= m.started_at
-                 THEN EXTRACT(EPOCH FROM (m.finished_at - m.started_at)) / 60 END AS minutes
+            ${VISIT_MINUTES} AS minutes
        FROM vs
        JOIN marks m ON m.visit_id = vs.id AND m.started_at IS NOT NULL
        JOIN patients p ON p.id = vs.patient_id
@@ -62,17 +103,12 @@ async function journeysIn(db, start, end) {
 async function hopsIn(db, start, end) {
   const { rows } = await db.query(
     `${VISITS_IN_RANGE},
-     steps AS (
-       SELECT e.status, e.occurred_at,
-              LEAD(e.occurred_at) OVER (PARTITION BY e.visit_id ORDER BY e.occurred_at) AS next_at
-         FROM giniflow_visit_events e JOIN vs ON vs.id = e.visit_id
-        WHERE ${NOT_A_MARKER_SQL("e.status")}
-     )
+     ${STEP_HOPS}
      SELECT status, EXTRACT(EPOCH FROM (next_at - occurred_at)) / 60 AS minutes
        FROM steps WHERE next_at > occurred_at`,
     [start, end, LAB_ONLY_DOCTOR],
   );
-  return rows.map((row) => ({ key: slaKeyForStatus(row.status), minutes: Number(row.minutes) }));
+  return hopRows(rows);
 }
 
 async function labTurnaroundsIn(db, start, end) {
@@ -87,7 +123,7 @@ async function labTurnaroundsIn(db, start, end) {
   return rows.map((row) => ({ key: "lab_total", minutes: Number(row.minutes) }));
 }
 
-function bottlenecksOf(hops, slaConfig) {
+export function bottlenecksOf(hops, slaConfig) {
   const byKey = new Map();
   for (const hop of hops) {
     if (!hop.key || hop.minutes < 0) continue;

@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import CustomCalendar from "../ui/CustomCalendar";
+import useAuthStore from "../../stores/authStore";
+import { CAPABILITIES, hasAnyCapability } from "../../../shared/permissions";
 import { useIsMobile } from "../../hooks/useIsMobile.js";
 import {
   BIO_TIER,
@@ -956,6 +959,8 @@ export default function LiveDashboard({
     const da = String(d.getDate()).padStart(2, "0");
     return `${y}-${mo}-${da}`;
   };
+  const currentDoctor = useAuthStore((state) => state.currentDoctor);
+  const canSeeTrends = hasAnyCapability(currentDoctor, CAPABILITIES.OPD_SUMMARY);
   const todayIso = toLocalIso(new Date());
   const isToday = !date || date === todayIso;
   const isMobile = useIsMobile();
@@ -1525,6 +1530,23 @@ export default function LiveDashboard({
                 />
               )}
             </div>
+          )}
+          {canSeeTrends && (
+            <Link
+              to="/reports/opd-dashboard"
+              style={{
+                border: `1px solid ${BD}`,
+                color: INK2,
+                borderRadius: 6,
+                padding: "5px 11px",
+                fontSize: 11,
+                fontWeight: 700,
+                textDecoration: "none",
+                fontFamily: FB,
+              }}
+            >
+              📈 Trends and consultants
+            </Link>
           )}
           {onGenerateReport && (
             <button

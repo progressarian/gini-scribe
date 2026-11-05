@@ -108,7 +108,9 @@ test.describe.serial("P4-38c counter fixes found by the floor-trial rehearsal", 
     await openCounter(page, patient.visit);
     await ensureSeries(day);
     await region(page, "Totals and payment").getByLabel("Pay later").check();
-    await region(page, "Bill actions").getByRole("button", { name: "Finalise & print" }).click();
+    await region(page, "Totals and payment")
+      .getByRole("button", { name: "Finalise & print" })
+      .click();
     await expectPdfInViewer(page, `/bills/${draft.id}/bill.pdf`);
     await closePdfViewer(page);
     await expect(region(page, "Bill lines").getByRole("heading")).not.toHaveText("Bill ItemsDraft");
@@ -132,7 +134,9 @@ test.describe.serial("P4-38c counter fixes found by the floor-trial rehearsal", 
     await openCounter(page, patient.visit);
     await ensureSeries(day);
     await region(page, "Totals and payment").getByLabel("Pay later").check();
-    await region(page, "Bill actions").getByRole("button", { name: "Finalise & print" }).click();
+    await region(page, "Totals and payment")
+      .getByRole("button", { name: "Finalise & print" })
+      .click();
     await expectPdfInViewer(page, "/bill.pdf");
     await closePdfViewer(page);
     await expect(
@@ -205,7 +209,9 @@ test.describe.serial("P4-38c counter fixes found by the floor-trial rehearsal", 
     );
     await ensureSeries(day);
     await region(page, "Totals and payment").getByLabel("Pay later").check();
-    const finalise = region(page, "Bill actions").getByRole("button", { name: "Finalise & print" });
+    const finalise = region(page, "Totals and payment").getByRole("button", {
+      name: "Finalise & print",
+    });
     await expect(finalise).toBeEnabled();
     await finalise.click();
     await expectPdfInViewer(page, "/bill.pdf");
@@ -229,9 +235,7 @@ test.describe.serial("P4-38c counter fixes found by the floor-trial rehearsal", 
     await expect(
       page.getByRole("list", { name: "Before this bill can be made final" }),
     ).toContainText("Choose a sub-category before this bill can be made final.");
-    await expect(
-      region(page, "Bill actions").getByRole("button", { name: "Finalise & print" }),
-    ).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Finalise & print" })).toHaveCount(0);
   });
 
   test("10. results still showing an older search cannot be added while the search catches up", async ({

@@ -1282,7 +1282,9 @@ const billNote = (bill, loading) => {
   if (bill.status === "no_tests")
     return "Today's HealthRay bill has no lab or machine tests — test steps were left out of the journey";
   if (bill.status === "blocked")
-    return `HealthRay is not reachable until ${clock(bill.blockedUntil)} — add tests by hand if the patient has any`;
+    return bill.blockedUntil
+      ? `HealthRay is not reachable until ${clock(bill.blockedUntil)} — add tests by hand if the patient has any`
+      : "Couldn't read the HealthRay bill just now — add tests by hand if the patient has any, or try again shortly";
   if (bill.status === "loading")
     return "Checking the HealthRay bill — another bill is being read; test steps are kept until it's in";
   if (bill.status === "no_bill")
@@ -1601,7 +1603,13 @@ function CheckInPanel({ arrival, onClose, onDone, onFailed, onNote }) {
   };
 
   return (
-    <div className="detail-overlay">
+    <div
+      className="detail-overlay"
+      onMouseDown={(e) => {
+        const busy = saving || saveHome.isPending || commitArrivalBill.isPending;
+        if (e.target === e.currentTarget && !busy) onClose();
+      }}
+    >
       <div className="detail-pane ci-pane" role="dialog" aria-label="Check in">
         <div className="dp-head">
           <div className="dp-name">{arrival.name}</div>

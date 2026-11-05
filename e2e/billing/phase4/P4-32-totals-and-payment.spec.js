@@ -118,6 +118,7 @@ test.describe.serial("P4-32 totals and payment", () => {
   test("1. every total on screen is the total the server holds", async ({ page }) => {
     await loginAs(page, "reception");
     await open(page, ids.visit);
+    await expect(totalRow(page, "Amount Due").getByRole("cell")).toHaveText(fromPaise(250000));
     const bill = await bills.readBill(ids.bill, db);
     const shown = [
       ["Subtotal", bill.totals.actual],
@@ -155,47 +156,79 @@ test.describe.serial("P4-32 totals and payment", () => {
     }
   });
 
-  test("3. cash without an open shift is refused, and the pad says where to open one", async ({
+  test("3. cash without an open shift is blocked, says why, and the shift opens from the pad", async ({
     page,
   }) => {
     await closeShifts();
     await loginAs(page, "reception");
     await open(page, ids.visit);
     await expect(pad(page).getByText("No shift is open", { exact: false })).toBeVisible();
-    await expect(pad(page).getByLabel("Opening cash")).toHaveCount(0);
 
     await pad(page).getByLabel("Amount").fill("500");
     await expect(
       pad(page).getByRole("alert").filter({ hasText: "Choose how the patient paid" }),
     ).toBeVisible();
     await expect(pad(page).getByRole("button", { name: "Take payment" })).toBeDisabled();
-    await pad(page).getByLabel("Mode").selectOption("cash");
-    await pad(page).getByRole("button", { name: "Take payment" }).click();
-    await expect(pad(page).getByText("Open your shift first", { exact: false })).toBeVisible();
+    const go = pad(page).getByRole("button", { name: "Take payment" });
+    await pad(page).locator(".bc-pay__gowrap").hover();
+    const why = pad(page).getByRole("tooltip");
+    await expect(why).toBeVisible();
+    await expect(why).toContainText("Choose how the patient paid");
+    await expect(why).toContainText("Cash needs an open shift");
 
-    await shifts.openShift({ opening_cash: 1000 }, desk, db);
-    await open(page, ids.visit);
+    await pad(page).getByLabel("Mode").selectOption("cash");
+    await expect(go).toBeDisabled();
+    await expect(why).toContainText("Cash needs an open shift");
+    await expect(why).not.toContainText("Choose how the patient paid");
+
+    await pad(page).getByLabel("Mode").selectOption("card");
+    await expect(why).not.toContainText("Cash needs an open shift");
+    await expect(why).toContainText("Add the reference");
+    await pad(page).getByLabel("Reference").fill("P4-32-3");
+    await expect(go).toBeEnabled();
+    await expect(why).toHaveCount(0);
+
+    await pad(page).getByLabel("Opening cash").fill("1000");
+    await pad(page).getByRole("button", { name: "Open shift" }).click();
     await expect(pad(page).getByText("No shift is open", { exact: false })).toHaveCount(0);
+    await expect(pad(page).getByLabel("Amount")).toHaveValue("500");
+    await pad(page).getByLabel("Mode").selectOption("cash");
+    await expect(go).toBeEnabled();
+    const opened = await query(
+      `SELECT opening_cash FROM cash_shifts WHERE user_id = $1 AND closed_at IS NULL`,
+      [USERS.reception.id],
+    );
+    expect(Number(opened.rows[0].opening_cash)).toBe(1000);
   });
 
-  test("4. Finalise is enabled only once the finalise checks would pass", async ({ page }) => {
+  test("4. the full amount takes the payment, finalises and prints in one press", async ({
+    page,
+  }) => {
     await loginAs(page, "reception");
     await open(page, ids.visit);
     await expect(totalRow(page, "Amount Due").getByRole("cell")).toHaveText(fromPaise(250000));
-    await expect(finaliseButton(page)).toBeDisabled();
+    await expect(finaliseButton(page)).toHaveCount(0);
 
     await pad(page).getByLabel("Mode").selectOption("cash");
     await pad(page).getByLabel("Amount").fill("300");
     await expect(pad(page).getByLabel("Remaining balance")).toHaveText(fromPaise(220000));
+    await expect(pad(page).getByRole("button", { name: "Take payment & print" })).toHaveCount(0);
     await pad(page).getByLabel("Amount").fill("2500");
     await expect(pad(page).getByLabel("Remaining balance")).toHaveText(fromPaise(0));
-    await pad(page).getByRole("button", { name: "Take payment" }).click();
+    await pad(page).getByRole("button", { name: "Take payment & print" }).click();
 
+    await expectPdfInViewer(page, `/api/billing/bills/${ids.bill}/bill.pdf`);
+    await closePdfViewer(page);
     await expect(totalRow(page, "Paid").getByRole("cell")).toHaveText(fromPaise(250000));
     await expect(totalRow(page, "Amount Due").getByRole("cell")).toHaveText(fromPaise(0));
-    await expect(finaliseButton(page)).toBeEnabled();
+    await expect(finaliseButton(page)).toHaveCount(0);
     const saved = await bills.readBill(ids.bill, db);
     expect(saved.totals.paid).toBe(250000);
+    expect(saved.status).toBe("final");
+    expect(saved.bill_no).toBeTruthy();
+    await expect(
+      pad(page).getByText(`Payment taken. Bill ${saved.bill_no} made final.`),
+    ).toBeVisible();
   });
 
   test("5. pay later is offered only where it is allowed", async ({ page }) => {
@@ -203,7 +236,7 @@ test.describe.serial("P4-32 totals and payment", () => {
     await loginAs(page, "reception");
     await open(page, later.visit);
     await expect(pad(page).getByLabel("Pay later")).toHaveCount(0);
-    await expect(finaliseButton(page)).toBeDisabled();
+    await expect(finaliseButton(page)).toHaveCount(0);
 
     await query(`UPDATE patient_schemes SET allow_pay_later = TRUE WHERE code = $1`, [ids.paid]);
     try {
@@ -249,7 +282,7 @@ test.describe.serial("P4-32 totals and payment", () => {
       await loginAs(page, "reception");
       await open(page, bill.visit);
       await expect(pad(page).getByLabel("Pay later")).toHaveCount(0);
-      await expect(finaliseButton(page)).toBeDisabled();
+      await expect(finaliseButton(page)).toHaveCount(0);
     } finally {
       await query(`UPDATE patient_schemes SET allow_pay_later = NULL WHERE code = $1`, [
         ids.parent,
@@ -308,7 +341,7 @@ test.describe.serial("P4-32 totals and payment", () => {
       await untouched.click();
       await expect(page.getByRole("heading", { name: `P4 Untouched ${tag}` })).toBeVisible();
       await expect(pad(page).getByLabel("Pay later")).not.toBeChecked();
-      await expect(finaliseButton(page)).toBeDisabled();
+      await expect(finaliseButton(page)).toHaveCount(0);
       expect(page.url()).toContain(`visit=${two.visit}`);
     } finally {
       await setPayLater(payLaterBefore);
@@ -335,5 +368,80 @@ test.describe.serial("P4-32 totals and payment", () => {
     await expect(pad(page).getByText("The payment was taken", { exact: false })).toBeVisible();
     await page.unroute((url) => /\/api\/billing\/bills\/[0-9a-f-]+$/.test(url.pathname));
     expect((await bills.readBill(bill.bill, db)).totals.paid).toBe(50000);
+  });
+
+  test("11. a part payment keeps the draft, and paying the rest finalises and prints", async ({
+    page,
+  }) => {
+    const bill = await freshBill("Part", ids.dressing, ids.paid);
+    await loginAs(page, "reception");
+    await open(page, bill.visit);
+
+    await pad(page).getByLabel("Mode").selectOption("cash");
+    await pad(page).getByLabel("Amount").fill("300");
+    await pad(page).getByRole("button", { name: "Take payment" }).click();
+    await expect(pad(page).getByText("Payment taken.")).toBeVisible();
+    await expect(page.locator(".pdf-modal")).toHaveCount(0);
+    expect((await bills.readBill(bill.bill, db)).status).toBe("draft");
+
+    await pad(page).getByLabel("Mode").selectOption("cash");
+    await pad(page).getByLabel("Amount").fill("2200");
+    await pad(page).getByRole("button", { name: "Take payment & print" }).click();
+    await expectPdfInViewer(page, `/api/billing/bills/${bill.bill}/bill.pdf`);
+    const saved = await bills.readBill(bill.bill, db);
+    expect(saved.status).toBe("final");
+    expect(saved.totals.paid).toBe(250000);
+  });
+
+  test("12. a part payment with pay later ticked finalises with the rest due", async ({ page }) => {
+    const bill = await freshBill("PartLater", ids.brace, ids.paid);
+    await setPayLater(true);
+    try {
+      await loginAs(page, "reception");
+      await open(page, bill.visit);
+      await pad(page).getByLabel("Pay later").check();
+      await pad(page).getByLabel("Mode").selectOption("cash");
+      await pad(page).getByLabel("Amount").fill("100");
+      await pad(page).getByRole("button", { name: "Take payment & print" }).click();
+      await expectPdfInViewer(page, `/api/billing/bills/${bill.bill}/bill.pdf`);
+      const saved = await bills.readBill(bill.bill, db);
+      expect(saved.status).toBe("final");
+      expect(saved.pay_later).toBe(true);
+      expect(saved.totals.paid).toBe(10000);
+    } finally {
+      await setPayLater(payLaterBefore);
+    }
+  });
+
+  test("13. if finalising fails after the payment, the money stands and the banner finishes it", async ({
+    page,
+  }) => {
+    const bill = await freshBill("Refused", ids.dressing, ids.paid);
+    await loginAs(page, "reception");
+    await open(page, bill.visit);
+    const refused = (url) => url.pathname.endsWith(`/bills/${bill.bill}/finalise`);
+    await page.route(refused, (route) =>
+      route.fulfill({ status: 409, json: { error: "This bill could not be numbered" } }),
+    );
+
+    await pad(page).getByLabel("Mode").selectOption("cash");
+    await pad(page).getByLabel("Amount").fill("2500");
+    await pad(page).getByRole("button", { name: "Take payment & print" }).click();
+
+    await expect(
+      pad(page).getByText("Payment taken, but the bill is not final yet."),
+    ).toBeVisible();
+    await expect(pad(page).getByText("This bill could not be numbered")).toBeVisible();
+    await expect(page.locator(".pdf-modal")).toHaveCount(0);
+    const paid = await bills.readBill(bill.bill, db);
+    expect(paid.status).toBe("draft");
+    expect(paid.totals.paid).toBe(250000);
+
+    const finish = page.getByRole("button", { name: "Finalise this bill" });
+    await expect(finish).toBeFocused();
+    await page.unroute(refused);
+    await finish.click();
+    await expectPdfInViewer(page, `/api/billing/bills/${bill.bill}/bill.pdf`);
+    expect((await bills.readBill(bill.bill, db)).status).toBe("final");
   });
 });

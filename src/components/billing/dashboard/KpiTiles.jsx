@@ -4,7 +4,7 @@ import Sparkline from "./Sparkline";
 const ARROW = { 1: "▲", 0: "■", [-1]: "▼" };
 const WORD = { 1: "up", 0: "same", [-1]: "down" };
 
-function Change({ current, previous, points, against, format = money }) {
+export function Change({ current, previous, points, against, format = money }) {
   const change = changeOf(current, previous, { points });
   if (!change) return <span className="bdash-tile__change">Nothing in {against} to compare</span>;
   if (change.text === null) {

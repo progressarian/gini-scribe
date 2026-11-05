@@ -1,6 +1,8 @@
 import pool from "../../config/db.js";
 import { LAB_ONLY_DOCTOR } from "../../../shared/labOnly.js";
 import { OPD_BUCKETS, OPD_TYPE_SETS } from "../../../shared/opdSummary.js";
+import { TEST_FILE_PREFIX } from "../../../shared/opdMetrics.js";
+import { journeyTimesFor } from "../giniflow/reports.js";
 
 export const VISIT_ROW_CAP = 20000;
 const PHONE_SEARCH_MIN_DIGITS = 4;
@@ -24,7 +26,28 @@ const STATES = {
   booked: ["booked"],
 };
 
-const BASE = `
+const SLOT_H = "split_part(btrim(a.time_slot), ':', 1)::int";
+
+const SLOT_HOUR = `CASE WHEN a.time_slot ~ '^\\s*[0-9]{1,2}:[0-9]{2}' THEN
+    CASE
+      WHEN a.time_slot ~* '^\\s*[0-9]{1,2}:[0-9]{2}\\s*p\\.?m' THEN mod(${SLOT_H}, 12) + 12
+      WHEN a.time_slot ~* '^\\s*[0-9]{1,2}:[0-9]{2}\\s*a\\.?m' THEN mod(${SLOT_H}, 12)
+      WHEN ${SLOT_H} < 24 THEN ${SLOT_H}
+    END
+  END`;
+
+const REBOOKED_CANCEL = `
+  lower(COALESCE(a.status, '')) = 'cancelled'
+  AND NULLIF(btrim(a.file_no), '') IS NOT NULL
+  AND EXISTS (
+    SELECT 1 FROM appointments live
+     WHERE live.file_no = a.file_no
+       AND live.appointment_date = a.appointment_date
+       AND live.id <> a.id
+       AND lower(COALESCE(live.status, '')) NOT IN ('cancelled', 'lead')
+  )`;
+
+export const BASE = `
   WITH today AS (SELECT (NOW() AT TIME ZONE 'Asia/Kolkata')::date AS d),
   raw AS (
     SELECT a.id, a.appointment_date AS day, a.time_slot, a.patient_id, a.patient_name,
@@ -47,15 +70,19 @@ const BASE = `
              WHEN lower(a.status) = 'cancelled' THEN 'cancelled'
              WHEN a.appointment_date >= (SELECT d FROM today) THEN 'booked'
              ELSE 'not_updated'
-           END AS state
+           END AS state,
+           ${SLOT_HOUR} AS slot_hour
       FROM appointments a
       LEFT JOIN patients p ON p.id = a.patient_id
      WHERE a.appointment_date BETWEEN $1 AND $2
        AND lower(COALESCE(a.status, '')) <> 'lead'
+       AND NOT COALESCE(p.is_blocked, false)
+       AND COALESCE(a.file_no, '') NOT LIKE '${TEST_FILE_PREFIX}%'
+       AND NOT (${REBOOKED_CANCEL})
   ),
   base AS (
     SELECT *, state IN ('attended', 'not_closed') AS came FROM raw
-     WHERE ($4::text IS NULL OR doctor = $4)
+     WHERE ($4::text[] IS NULL OR doctor = ANY($4))
   )`;
 
 export function monthRange(month) {
@@ -70,7 +97,12 @@ export function previousMonth(month) {
   return `${prev.getUTCFullYear()}-${String(prev.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-const typesFor = (type) => OPD_TYPE_SETS[type] || OPD_TYPE_SETS.opd;
+export const typesFor = (type) => OPD_TYPE_SETS[type] || OPD_TYPE_SETS.opd;
+
+export const doctorList = (doctor) => {
+  const list = (Array.isArray(doctor) ? doctor : [doctor]).filter(Boolean);
+  return list.length ? list : null;
+};
 
 const n = (value) => Number(value) || 0;
 
@@ -126,7 +158,7 @@ const hasActivity = (c) => Object.values(c).some((v) => v > 0);
 export async function getOpdSummary({ month, doctor = null, type = "opd" }, db = pool) {
   const { from, to } = monthRange(month);
   const types = typesFor(type);
-  const params = (range) => [range.from, range.to, LAB_ONLY_DOCTOR, doctor, types];
+  const params = (range) => [range.from, range.to, LAB_ONLY_DOCTOR, doctorList(doctor), types];
   const [current, repeat, previous, today] = await Promise.all([
     db.query(SUMMARY_SQL, params({ from, to })),
     db.query(REPEAT_SQL, params({ from, to })),
@@ -164,15 +196,50 @@ export async function getOpdSummary({ month, doctor = null, type = "opd" }, db =
   };
 }
 
+export const DASHBOARD_STATE_SQL = {
+  booked: "TRUE",
+  came: "came",
+  completed: "state = 'attended'",
+  in_progress: "state = 'not_closed' AND day = (SELECT d FROM today)",
+  not_closed: "state = 'not_closed' AND day < (SELECT d FROM today)",
+  pending: "state = 'booked'",
+  not_updated: "state = 'not_updated'",
+  did_not_come: "state IN ('no_show', 'cancelled')",
+  no_show: "state = 'no_show'",
+  cancelled: "state = 'cancelled'",
+};
+
+export const GROUP_START_SQL = {
+  day: "day",
+  week: "date_trunc('week', day)::date",
+  month: "date_trunc('month', day)::date",
+};
+
 function visitFilters(filters) {
-  const { month, doctor = null, type = "opd", status = "came", day = null, q = "" } = filters;
-  const { from, to } = monthRange(month);
-  const params = [from, to, LAB_ONLY_DOCTOR, doctor, typesFor(type), STATES[status] || null];
+  const { doctor = null, type = "opd", status = "came", day = null, q = "", state } = filters;
+  const { from, to } = filters.from ? filters : monthRange(filters.month);
+  const params = [
+    from,
+    to,
+    LAB_ONLY_DOCTOR,
+    doctorList(doctor),
+    typesFor(type),
+    state ? null : STATES[status] || null,
+  ];
   const where = ["bucket = ANY($5)", "($6::text[] IS NULL OR state = ANY($6))"];
-  if (status === "repeat") where.push(`person IN (${REPEAT_PEOPLE})`);
-  if (day) {
-    params.push(day);
-    where.push(`day = $${params.length}::date`);
+  if (state) where.push(`(${DASHBOARD_STATE_SQL[state]})`);
+  else if (status === "repeat") where.push(`person IN (${REPEAT_PEOPLE})`);
+  const add = (value, sql) => {
+    params.push(value);
+    where.push(sql(`$${params.length}`));
+  };
+  if (day) add(day, (p) => `day = ${p}::date`);
+  if (filters.weekday) add(filters.weekday, (p) => `extract(isodow FROM day) = ${p}::int`);
+  if (filters.hour !== undefined && filters.hour !== null) {
+    add(filters.hour, (p) => `slot_hour = ${p}::int`);
+  }
+  if (filters.group && filters.bucket_start) {
+    add(filters.bucket_start, (p) => `${GROUP_START_SQL[filters.group]} = ${p}::date`);
   }
   const term = String(q || "").trim();
   if (term) {
@@ -221,8 +288,14 @@ export async function listOpdVisits(filters, db = pool) {
     params,
   );
   const total = rows.length ? n(rows[0].total) : page > 1 ? await countOpdVisits(filters, db) : 0;
+  const times = filters.from
+    ? await journeyTimesFor(
+        rows.map((r) => r.id),
+        db,
+      )
+    : new Map();
   return {
-    data: rows.map(visitRow),
+    data: rows.map((r) => ({ ...visitRow(r), ...times.get(Number(r.id)) })),
     total,
     page,
     limit,
@@ -255,15 +328,13 @@ export async function allOpdVisits(filters, db = pool) {
   return rows.map(visitRow);
 }
 
-export async function getOpdFilters({ month }, db = pool) {
-  const { from, to } = monthRange(month);
+export async function getOpdFilters(filters, db = pool) {
+  const { from, to } = filters.from ? filters : monthRange(filters.month);
   const { rows } = await db.query(
-    `SELECT COALESCE(NULLIF(btrim(doctor_name), ''), 'Unassigned') AS doctor, count(*) AS visits
-       FROM appointments
-      WHERE appointment_date BETWEEN $1 AND $2 AND lower(COALESCE(status, '')) <> 'lead'
-      GROUP BY 1
-      ORDER BY 1`,
-    [from, to],
+    `${BASE}
+     SELECT doctor, count(*) AS visits FROM base WHERE bucket = ANY($5)
+      GROUP BY doctor ORDER BY doctor`,
+    [from, to, LAB_ONLY_DOCTOR, null, OPD_TYPE_SETS.all],
   );
   return { doctors: rows.map((r) => ({ name: r.doctor, visits: n(r.visits) })) };
 }

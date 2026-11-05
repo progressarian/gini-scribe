@@ -13,12 +13,15 @@ import {
 import { DEPOSIT_MODE, HEALTHRAY_MODE } from "../../../../shared/billingVocab.js";
 import { errorOf, fromPaise, moneyTyped } from "../format";
 import { HEALTHRAY_LABEL, needsUpiApp, TAKE_MODE_LABEL } from "./lineText";
-import { balanceOf, payLaterAllowed } from "./finaliseChecks";
+import { balanceOf, finaliseBlockers, payLaterAllowed } from "./finaliseChecks";
 import { emptyPaymentRow } from "./counterForm";
 import { shiftReminder } from "./shiftReminder";
 import PaymentsReceived from "./PaymentsReceived";
 import UpiAppField from "./UpiAppField";
 import { announcePaid } from "./paidSignal";
+import { useMakeFinal } from "./useMakeFinal";
+import { SavedOpenShiftForm } from "./OpenShiftForm";
+import PdfViewer from "./PdfViewer";
 import { longDay } from "./CounterDate";
 
 const IST_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" });
@@ -48,6 +51,10 @@ export default function TotalsAndPayment({
   schemes,
   payLater,
   onPayLater,
+  needsCategory,
+  opening = false,
+  onPricesChanged,
+  stillOnFloor = false,
   form,
   afterSummary = null,
 }) {
@@ -59,6 +66,7 @@ export default function TotalsAndPayment({
   const take = useTakePayments();
   const clear = useClearInHealthray();
   const reread = useRereadBill();
+  const final = useMakeFinal({ onBill, onPricesChanged, form });
   const [confirming, setConfirming] = useState(false);
   const [clearError, setClearError] = useState(null);
   const rows = form.value.rows;
@@ -71,6 +79,12 @@ export default function TotalsAndPayment({
   const entered = rows.reduce((sum, row) => sum + paiseOf(row.amount), 0);
   const remaining = balance - entered;
   const allowsLater = payLaterAllowed(bill, schemes, settings);
+  const laterChosen = payLater && allowsLater;
+  const finishes =
+    bill.status === "draft" &&
+    !finaliseBlockers(bill, { schemes, needsCategory }).length &&
+    (laterChosen || (entered > 0 && entered === balance));
+  const busy = take.isPending || final.isPending;
   const missingMode = rows.some((row) => paiseOf(row.amount) > 0 && !row.mode);
   const missingReference = rows.some(
     (row) =>
@@ -92,6 +106,22 @@ export default function TotalsAndPayment({
   const depositOver = rows.some(
     (row, index) => row.mode === DEPOSIT_MODE && paiseOf(row.amount) > depositLeftFor(index),
   );
+
+  const shiftClosed = shift !== undefined && !shift?.is_open;
+  const typedRows = rows.filter((row) => paiseOf(row.amount) > 0);
+  const cashWithoutShift = shiftClosed && typedRows.some((row) => row.mode === "cash");
+  const blockedBy = [
+    opening && "The bill is still loading.",
+    entered <= 0 && !finishes && "Enter the amount received.",
+    entered > balance && `That is ${fromPaise(entered - balance)} more than is due.`,
+    missingMode && "Choose how the patient paid — cash, card, UPI or NEFT / cheque.",
+    shiftClosed &&
+      typedRows.some((row) => row.mode === "cash" || !row.mode) &&
+      "Cash needs an open shift — open one above.",
+    missingReference && "Add the reference for each card, UPI or NEFT / cheque payment.",
+    missingUpiApp && "Choose the UPI app for each UPI payment.",
+    depositOver && `The deposit holds ${fromPaise(depositAvailable)} — lower the deposit payment.`,
+  ].filter(Boolean);
 
   const change = (index, patch) =>
     setRows(rows.map((row, at) => (at === index ? { ...row, ...patch } : row)));
@@ -128,27 +158,54 @@ export default function TotalsAndPayment({
     change(index, needsUpiApp(mode) ? { mode } : { mode, upiApp: "" });
   };
 
+  const finishFrom = async (paidBill) => {
+    const made = await final.makeFinal(paidBill, {
+      payLater: laterChosen,
+      showIfRefused: paidBill === bill ? null : paidBill,
+    });
+    if (made) {
+      setNote(
+        paidBill === bill
+          ? `Bill ${made.bill_no} made final.`
+          : `Payment taken. Bill ${made.bill_no} made final.`,
+      );
+      return;
+    }
+    if (paidBill !== bill) {
+      setNote("Payment taken, but the bill is not final yet.");
+      announcePaid(bill.id);
+    }
+  };
+
   const pay = async () => {
     setError(null);
     setNote(null);
     try {
-      onBill(
-        await take.mutateAsync({
-          billId: bill.id,
-          visitId: bill.visit_id,
-          version: bill.version,
-          payments: rows
-            .filter((row) => paiseOf(row.amount) > 0)
-            .map((row) => ({
-              mode: row.mode,
-              amount: row.amount.trim(),
-              ...(row.reference.trim() ? { reference: row.reference.trim() } : {}),
-              ...(needsUpiApp(row.mode) ? { upi_app: row.upiApp } : {}),
-            })),
-        }),
-      );
-      form.drop("rows", "payLater");
+      if (entered <= 0) {
+        await finishFrom(bill);
+        return;
+      }
+      const paidBill = await take.mutateAsync({
+        billId: bill.id,
+        visitId: bill.visit_id,
+        version: bill.version,
+        payments: rows
+          .filter((row) => paiseOf(row.amount) > 0)
+          .map((row) => ({
+            mode: row.mode,
+            amount: row.amount.trim(),
+            ...(row.reference.trim() ? { reference: row.reference.trim() } : {}),
+            ...(needsUpiApp(row.mode) ? { upi_app: row.upiApp } : {}),
+          })),
+      });
       setCapped(null);
+      if (finishes) {
+        form.drop("rows");
+        await finishFrom(paidBill);
+        return;
+      }
+      onBill(paidBill);
+      form.drop("rows", "payLater");
       setNote("Payment taken.");
       announcePaid(bill.id);
     } catch (e) {
@@ -282,9 +339,10 @@ export default function TotalsAndPayment({
               today&apos;s, so each day&apos;s cash is handed over on its own.
             </div>
           )}
-          {!shift?.is_open && (
-            <div className="bc-pay__warn">
-              No shift is open, so cash can&apos;t be taken yet — open one on the Shift tab.
+          {shiftClosed && (
+            <div className="bc-pay__warn" role="group" aria-label="Open a shift">
+              <p>No shift is open, so cash can&apos;t be taken yet. Open one here to carry on.</p>
+              <SavedOpenShiftForm />
             </div>
           )}
           <div className="bc-pay__lines">
@@ -449,32 +507,61 @@ export default function TotalsAndPayment({
             </div>
           )}
 
-          <button
-            type="button"
-            className="bc-pay__go"
-            disabled={
-              entered <= 0 ||
-              entered > balance ||
-              missingMode ||
-              missingReference ||
-              missingUpiApp ||
-              depositOver ||
-              take.isPending
-            }
-            onClick={pay}
-          >
-            <CreditCard size={18} aria-hidden="true" />
-            {take.isPending ? "Taking payment…" : "Take payment"}
-            {entered > 0 && !take.isPending ? (
-              <span className="bc-pay__goamt">{fromPaise(entered)}</span>
-            ) : null}
-          </button>
+          {finishes && stillOnFloor && (
+            <div className="bc-hint" role="note">
+              Still on the floor — anything added after this goes on a new bill.
+            </div>
+          )}
+
+          <div className="bc-pay__gowrap">
+            <button
+              type="button"
+              className="bc-pay__go"
+              aria-describedby={blockedBy.length ? "bc-pay-why" : undefined}
+              disabled={
+                (entered <= 0 && !finishes) ||
+                entered > balance ||
+                missingMode ||
+                missingReference ||
+                missingUpiApp ||
+                depositOver ||
+                cashWithoutShift ||
+                opening ||
+                busy
+              }
+              onClick={pay}
+            >
+              <CreditCard size={18} aria-hidden="true" />
+              {take.isPending
+                ? "Taking payment…"
+                : final.isPending
+                  ? "Finalising…"
+                  : entered <= 0 && finishes
+                    ? "Finalise & print"
+                    : finishes
+                      ? "Take payment & print"
+                      : "Take payment"}
+              {entered > 0 && !busy ? (
+                <span className="bc-pay__goamt">{fromPaise(entered)}</span>
+              ) : null}
+            </button>
+            {blockedBy.length > 0 && !busy && (
+              <div id="bc-pay-why" className="bc-pay__why" role="tooltip">
+                <strong>Can&apos;t take this payment yet</strong>
+                <ul>
+                  {blockedBy.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
 
           {clearable && (
             <button
               type="button"
               className="bc-pay__hr"
-              disabled={take.isPending || clear.isPending}
+              disabled={busy || clear.isPending || opening}
               onClick={() => {
                 setClearError(null);
                 setConfirming(true);
@@ -504,6 +591,9 @@ export default function TotalsAndPayment({
       )}
       {note && <div className="bc-note">{note}</div>}
       {error && <div className="bc-err">{error}</div>}
+      {final.error && <div className="bc-err">{final.error}</div>}
+
+      <PdfViewer pdf={final.printing} onClose={final.closePrinting} />
 
       <ConfirmModal
         open={confirming}
