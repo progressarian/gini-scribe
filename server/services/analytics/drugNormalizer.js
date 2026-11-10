@@ -104,8 +104,33 @@ const MOLECULES = [
     className: "GLP-1",
     incretin: true,
     defaultRoute: "injectable",
-    aliases: ["semaglutide", "ozempic", "wegovy", "semanex", "semanext", "semaglow", "jampi"],
-    wordAliases: ["vigovy"],
+    aliases: [
+      "semaglutide",
+      "ozempic",
+      "wegovy",
+      "semanex",
+      "semanext",
+      "semaglow",
+      "jampi",
+      "semasize",
+      "semaseize",
+      "semasiz",
+      "semalix",
+      "semaalix",
+      "sembolic",
+      "semabolic",
+      "semafull",
+      "sematrinity",
+      "sematinity",
+      "semawin",
+      "semamac",
+      "wyntide",
+      "wyntde",
+      "blupen",
+      "blu pen",
+      "blue pen",
+    ],
+    wordAliases: ["vigovy", "semaglu", "ssemaglu"],
     fuzzy: ["semaglutide", "ozempic", "wegovy", "semanext"],
   },
   {
@@ -164,8 +189,10 @@ const LOCAL_BRANDS = {
   antiplatelet: /\b(ecospirin|ecosprin|deplatt)\b/i,
   diuretic: /\b(dytor|lasilactone|aldactone)\b/i,
   supplement: /\b(aktiv|maxmala|racal|nefcm|amla candy|onecan)\b/i,
-  insulin: /\b(huminsulin|insugen|mixtard|actrapid|basalog|wosulin)\b/i,
+  insulin: /\b(huminsulin|insugen|mixtard|actrapid|basalog|wosulin|awiq\w*|icodec)\b/i,
 };
+
+const INSULIN_ICODEC = /\b(awiq\w*|icodec)\b/i;
 
 const METFORMIN_FDC =
   /\b(glizid|diamicron|daplo|dapanorm|reclimet|sitacip|linaxa|oxra|gluconorm|zoryl|amaryl|glycomet|janumet|jalra|galvus|zita|istamet|synjardy|xigduo|invokamet|gemer|triglimisave)\b[^a-z]*\b(m|met|mex|dm|trio|sm|forte|gp)\b/i;
@@ -356,6 +383,11 @@ export function detectSupportMed(med) {
     if (pattern.test(lower)) return key;
   }
   return null;
+}
+
+export function isInsulinIcodec(med) {
+  const haystack = haystackOf(med);
+  return INSULIN_ICODEC.test(haystack) && !NOT_PRESCRIBED.test(haystack);
 }
 
 export function normalizeDrug(med) {

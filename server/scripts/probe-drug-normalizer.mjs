@@ -54,6 +54,26 @@ const FIXTURES = [
   ["TAB RYBELSUS DISCUSSED WITH PATIENT BUT DEFERRED DUE TO PAST H/O PANCREATITIS", null],
   ["TAB RYBELSUS WAS NOT STARTED AS PATIENT GET THE APPOINTMENT FROM THERE", null],
   ["TAB RYBELSUS WAS STOPPED", "semaglutide_oral"],
+  ["Semasize", "semaglutide_inj"],
+  ["SEMASEIZE", "semaglutide_inj"],
+  ["Inj Semalix XL", "semaglutide_inj"],
+  ["SEMAALIX XL", "semaglutide_inj"],
+  ["Inj Sembolic", "semaglutide_inj"],
+  ["SEMABOLIC", "semaglutide_inj"],
+  ["Semafull", "semaglutide_inj"],
+  ["Sematrinity", "semaglutide_inj"],
+  ["SEMATINITY", "semaglutide_inj"],
+  ["Semaglu", "semaglutide_inj"],
+  ["SSEMAGLU", "semaglutide_inj"],
+  ["Semawin", "semaglutide_inj"],
+  ["Semamac", "semaglutide_inj"],
+  ["Wyntide", "semaglutide_inj"],
+  ["WYNTDE", "semaglutide_inj"],
+  ["Inj Blupen", "semaglutide_inj"],
+  ["Blue Pen 0.5 mg", "semaglutide_inj"],
+  ["Erly (semaglutide)", "liraglutide"],
+  ["Tab Voglirapid", null],
+  ["Awiqli", null],
 ];
 
 const CLASS_FIXTURES = [
@@ -63,6 +83,9 @@ const CLASS_FIXTURES = [
   [{ name: "INJ DEGLUDEC", drug_class: "GLP-1 RA" }, ["insulin"]],
   [{ name: "EGLUCENT", drug_class: "Insulin-Basal+GLP-1 RA" }, ["insulin"]],
   [{ name: "CELEXIN", drug_class: "GLP-1 RA" }, []],
+  [{ name: "Awiqli" }, ["insulin"]],
+  [{ name: "AWIQULI 140 units" }, ["insulin"]],
+  [{ name: "Inj Insulin Icodec" }, ["insulin"]],
 ];
 
 function runFixtures() {

@@ -15,6 +15,7 @@
     "seed:machine-room": "node scripts/seed-machine-room-demo.mjs",
     "seed:xray": "node scripts/seed-xray-demo.mjs",
     "smoke:analytics": "node scripts/smoke-analytics.mjs",
+    "smoke:opd-yoy": "node scripts/smoke-opd-yoy.mjs",
     "smoke:auth-refresh": "node scripts/smoke-auth-refresh.mjs",
     "smoke:billing-bill": "node scripts/smoke-billing-bill.mjs",
     "smoke:billing-import": "node scripts/smoke-billing-import.mjs",
