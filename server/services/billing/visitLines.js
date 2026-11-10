@@ -1,7 +1,6 @@
 import pool from "../../config/db.js";
 import { billingVisitType } from "../../../shared/billingVisitType.js";
-import { RECENT_FOLLOW_UP } from "../../../shared/billingVocab.js";
-import { seenRecentlyBy } from "./serviceItems.js";
+import { followUpWindowItem } from "./serviceItems.js";
 import { collectiblePaise, paise } from "../../../shared/labPayment.js";
 import { writeAudit } from "./audit.js";
 import {
@@ -106,28 +105,15 @@ export async function consultationItem(client, visit) {
   if (!doctorId) return null;
   const removed = await removedDoctor(doctorId, client);
   if (removed) return { removed };
-  if (
-    await seenRecentlyBy(
-      { patientId: visit.patient_id, visitDate: visit.visit_date },
-      doctorId,
-      client,
-    )
-  ) {
-    const { rows: recent } = await client.query(
-      `SELECT id, name, doctor_id FROM service_items
-        WHERE kind = 'consultation' AND is_active AND visit_type = $1
-          AND (doctor_id = $2 OR doctor_id IS NULL)
-        ORDER BY doctor_id IS NULL, id
-        LIMIT 1`,
-      [RECENT_FOLLOW_UP, doctorId],
-    );
-    if (recent[0]) {
-      return { ...recent[0], visit_type: RECENT_FOLLOW_UP, chosen_doctor_id: doctorId };
-    }
-  }
+  const window = await followUpWindowItem(
+    { patientId: visit.patient_id, visitDate: visit.visit_date, doctorId },
+    client,
+  );
+  if (window) return { ...window, chosen_doctor_id: doctorId };
   const { rows } = await client.query(
     `SELECT id, name, doctor_id FROM service_items
       WHERE kind = 'consultation' AND is_active AND visit_type = $1 AND doctor_id = $2
+        AND follow_up_within_days IS NULL
       ORDER BY id
       LIMIT 1`,
     [visitType, doctorId],
@@ -161,7 +147,7 @@ export async function draftAtCheckIn(visitId, ctx, db = pool) {
       const candidate = adds ? await consultationItem(client, visit) : null;
       const automatic =
         adds &&
-        (candidate?.visit_type === RECENT_FOLLOW_UP ||
+        (candidate?.follow_up_within_days != null ||
           (await healthrayBilledConsultation(client, visit)));
       const settled = automatic && (await consultationSettled(client, visit.id));
       const bill = await openDraftIn(client, visitId, ctx);
@@ -259,7 +245,7 @@ export async function consultationForDesk(visitId, ctx, db = pool) {
       }
       if (
         visit.appointment_id &&
-        item?.visit_type !== RECENT_FOLLOW_UP &&
+        item?.follow_up_within_days == null &&
         !(await healthrayBilledConsultation(client, visit))
       ) {
         return { ok: true, added: [], waiting_for_healthray: true };
@@ -321,7 +307,7 @@ async function doctorConsultations(db, visitType) {
     `SELECT i.id, i.name, i.doctor_id, d.name AS doctor_name
        FROM service_items i JOIN doctors d ON d.id = i.doctor_id
       WHERE i.kind = 'consultation' AND i.is_active AND i.visit_type = $1
-        AND d.is_active IS NOT FALSE
+        AND i.follow_up_within_days IS NULL AND d.is_active IS NOT FALSE
       ORDER BY d.name, i.id`,
     [visitType],
   );

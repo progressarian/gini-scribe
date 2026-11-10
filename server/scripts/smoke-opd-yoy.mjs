@@ -8,6 +8,8 @@ import {
   onsetFor,
   parseRawDiagnosis,
   summarise,
+  drugFlags,
+  isGlp1Advice,
 } from "../services/analytics/opdYoy.js";
 
 let failures = 0;
@@ -390,6 +392,52 @@ check(
 const s = summarise([rec]);
 check("HbA1c < 7 share", [s.hba1c.n, s.hba1c.of], [1, 1]);
 check("All three needs LDL in period", [s.allThree.n, s.allThree.of], [0, 0]);
+
+const mix = summarise([
+  { visits: 1, glp1: true, diabetic: true, cad: true, molecules: [] },
+  { visits: 1, glp1: false, diabetic: true, cad: false, molecules: [] },
+  { visits: 1, glp1: true, diabetic: false, cad: null, molecules: [] },
+  { visits: 1, glp1: false, diabetic: false, cad: true, molecules: [] },
+]);
+check("GLP-1 among diabetic patients", [mix.glp1Diabetic.n, mix.glp1Diabetic.of], [1, 2]);
+check("GLP-1 among CAD patients", [mix.glp1Cad.n, mix.glp1Cad.of], [1, 2]);
+
+for (const [name, expected] of [
+  ["Aweekly", true],
+  ["nj aweekly", true],
+  ["Awikly", true],
+  ["A weekly", true],
+  ["Awiqli 70 units", true],
+  ["Tresiba", false],
+  ["take a weekly walk", false],
+]) {
+  check(`Awiqli spelling: ${name}`, drugFlags([{ name }]).icodec, expected);
+}
+for (const [name, expected] of [
+  ["Sundae Pro Pen", true],
+  ["Obeda", true],
+  ["Gliptino", true],
+  ["Extensior", true],
+  ["Ryzodeg", false],
+]) {
+  check(`GLP-1 brand: ${name}`, drugFlags([{ name }]).glp1, expected);
+}
+
+for (const [text, expected] of [
+  ["future plan: bone health liver health advice: plan for wegovy testo, lh", true],
+  ["plan for inj mounjaro /inj wegovy", true],
+  ["want to wait for glp1 follow up today:30/4/26", true],
+  ["patient refused for inj wegovy hba1c-7.4", true],
+  ["patient did not start inj wegovy and wants to opt for lifestyle changes", true],
+  ["fbg-142 rybelsus stopped follow up today", false],
+  ["no gmi no hypoglycaemia no adverse effects from trulicity follow up", false],
+  ["c/o nausea vomiting with rybelsus took only 10-12 tablet", false],
+  ["exendin scan- diffuse glp1 expression in entire bulky pancreas", false],
+  ["advice : usg breast seman analysis follow up", false],
+  ["tab glizid m od inj mounjaro 5mg weekly", false],
+]) {
+  check(`GLP-1 advice: ${text.slice(0, 50)}`, isGlp1Advice(text), expected);
+}
 
 const rec2025 = buildPatientRecord(periods[2], visits, ctx);
 check(

@@ -109,11 +109,11 @@ test.describe.serial("P3-18c consultant fees search and server-side paging", () 
     expect(status).toBe(200);
     expect(json).toMatchObject({ total: 13, page: 1, page_size: 2 });
     expect(doctorsOf(json.rows)).toHaveLength(2);
-    expect(json.rows.map((r) => [r.doctor_name, r.visit_type])).toEqual([
-      [HALF, "New"],
-      [PRICED[0], "New"],
-      [PRICED[0], "Follow Up"],
-      [PRICED[0], "Follow Up (3 days)"],
+    expect(json.rows.map((r) => [r.doctor_name, r.visit_type, r.follow_up_within_days])).toEqual([
+      [HALF, "New", null],
+      [PRICED[0], "New", null],
+      [PRICED[0], "Follow Up", null],
+      [PRICED[0], "Follow Up", 3],
     ]);
     expect(json.not_priced).toBeUndefined();
   });
@@ -169,7 +169,7 @@ test.describe.serial("P3-18c consultant fees search and server-side paging", () 
     const whole = await get(page, `${URL}/not-priced`, {});
     const first = await get(page, `${URL}/not-priced`, { q: `P318C ${tag}`, page_size: "2" });
     expect(first.json).toMatchObject({
-      total: 8,
+      total: 5,
       total_doctors: 3,
       count: whole.json.count,
       missing_defaults: [],
@@ -178,10 +178,8 @@ test.describe.serial("P3-18c consultant fees search and server-side paging", () 
     });
     expect(first.json.rows.map((r) => [r.doctor_name, r.visit_type])).toEqual([
       [HALF, "Follow Up"],
-      [HALF, "Follow Up (3 days)"],
       [BARE[0], "New"],
       [BARE[0], "Follow Up"],
-      [BARE[0], "Follow Up (3 days)"],
     ]);
     const second = await get(page, `${URL}/not-priced`, {
       q: `P318C ${tag}`,
@@ -191,7 +189,6 @@ test.describe.serial("P3-18c consultant fees search and server-side paging", () 
     expect(second.json.rows.map((r) => [r.doctor_name, r.visit_type])).toEqual([
       [BARE[1], "New"],
       [BARE[1], "Follow Up"],
-      [BARE[1], "Follow Up (3 days)"],
     ]);
   });
 
@@ -240,7 +237,7 @@ test.describe.serial("P3-18c consultant fees search and server-side paging", () 
     await card
       .getByRole("searchbox", { name: "Search doctors without a fee" })
       .fill(`P318C ${tag}`);
-    await expect(notPriced(page).getByRole("button", { name: /^Create item for / })).toHaveCount(8);
+    await expect(notPriced(page).getByRole("button", { name: /^Create item for / })).toHaveCount(5);
     await expect(card.locator(".pgn__range")).toHaveText("Showing 1–3 of 3 doctors");
     await expect(count).toHaveText(before);
     await expect(

@@ -47,6 +47,22 @@ export function deltaText(now, before) {
 
 export const pct = (n) => (n == null ? "—" : `${n}%`);
 
+export const daysText = (n) => (n == null ? "—" : Number.isInteger(n) ? String(n) : n.toFixed(1));
+
+export function deltaDecimal(now, before) {
+  if (now == null || before == null) return null;
+  const diff = Math.round((now - before) * 10) / 10;
+  if (diff === 0) return "Same as before";
+  return `${diff > 0 ? "+" : "−"}${Math.abs(diff).toFixed(1)} vs before`;
+}
+
+export function offLabel(off) {
+  if (!off) return null;
+  if (off.kind === "sunday") return "Sunday";
+  if (off.kind === "holiday") return `Holiday · ${off.title}`;
+  return off.half ? "Half-day leave" : "Leave";
+}
+
 export function shortDateTime(ts) {
   if (!ts) return "—";
   return new Date(ts).toLocaleDateString("en-IN", {

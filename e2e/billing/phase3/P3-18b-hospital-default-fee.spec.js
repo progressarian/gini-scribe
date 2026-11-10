@@ -123,15 +123,14 @@ test.describe.serial("P3-18b hospital default fee on the Consultant fees page", 
     await expect(row).toContainText("₹600");
   });
 
-  test("3. creating the Follow Up default leaves only the 3-day hospital default row", async ({
+  test("3. creating the Follow Up default leaves no hospital default row to price", async ({
     page,
   }) => {
     await openFees(page);
     await createDefault(page, "Follow Up");
     await expect(
       notPriced(page).getByRole("button", { name: /^Create item for Hospital default/ }),
-    ).toHaveCount(1);
-    await expect(createButton(page, "Hospital default", "Follow Up (3 days)")).toBeVisible();
+    ).toHaveCount(0);
     for (const visit of ["New", "Follow Up"]) {
       await expect(rowOf(page, NOFEE, visit)).toContainText("Hospital default fee");
     }
@@ -168,7 +167,6 @@ test.describe.serial("P3-18b hospital default fee on the Consultant fees page", 
     expect(grid.not_priced.map((d) => [d.visit_type, d.default_covers])).toEqual([
       ["New", true],
       ["Follow Up", true],
-      ["Follow Up (3 days)", false],
     ]);
   });
 });

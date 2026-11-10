@@ -223,6 +223,23 @@ expect_count "$HOG" "select count(*) from crm.v_doctors_needing_details;" 2 "the
 expect_count "$HOG" "select needs_verification from crm.doctors where full_name='Dr No Number';" "t" "a transcription-uncertain doctor carries the flag"
 expect_count "$EXA" "select count(*) from crm.v_doctors_needing_details;" 0 "…and the task list still respects RLS"
 
+echo "(l) Holidays and leave"
+EXB=55555555-5555-5555-5555-555555555555
+as_owner "insert into crm.days_off (hospital_id, kind, day, request_id, title, status, requested_by) select id, 'holiday', '2026-12-01', gen_random_uuid(), 'Test Holiday', 'approved', '$HOG' from crm.hospitals;" >/dev/null
+as_owner "insert into crm.days_off (hospital_id, kind, day, user_id, request_id, status, requested_by) select id, 'leave', '2026-12-02', '$EXB', gen_random_uuid(), 'approved', '$EXB' from crm.hospitals;" >/dev/null
+expect_count "$EXA" "select count(*) from crm.days_off where kind='holiday';" 1 "every rep sees the team's holidays"
+expect_count "$EXA" "select count(*) from crm.days_off where kind='leave';" 0 "…but not another rep's leave"
+expect_count "$HOG" "select count(*) from crm.days_off where kind='leave';" 1 "Head of Growth sees everyone's leave"
+expect_count "$EXA" "insert into crm.days_off (hospital_id, kind, day, user_id, request_id, status, requested_by) select id, 'leave', '2026-12-03', '$EXA', gen_random_uuid(), 'pending', '$EXA' from crm.hospitals returning 1;" 1 "a rep can request their own leave"
+expect_error "$EXA" "insert into crm.days_off (hospital_id, kind, day, user_id, request_id, status, requested_by) select id, 'leave', '2026-12-04', '$EXA', gen_random_uuid(), 'approved', '$EXA' from crm.hospitals;" "row-level security" "…but cannot approve it on the way in"
+expect_error "$EXA" "insert into crm.days_off (hospital_id, kind, day, user_id, request_id, status, requested_by) select id, 'leave', '2026-12-04', '$EXB', gen_random_uuid(), 'pending', '$EXA' from crm.hospitals;" "row-level security" "…nor request leave for someone else"
+expect_error "$EXA" "insert into crm.days_off (hospital_id, kind, day, request_id, title, status, requested_by) select id, 'holiday', '2026-12-05', gen_random_uuid(), 'Mine', 'approved', '$EXA' from crm.hospitals;" "row-level security" "…nor add a holiday"
+expect_error "$EXA" "update crm.days_off set status='approved' where user_id='$EXA';" "row-level security" "a rep cannot approve their own leave"
+expect_count "$HOG" "select status from crm.days_off where user_id='$EXA';" "pending" "…and it is still pending"
+expect_count "$EXA" "update crm.days_off set status='cancelled' where user_id='$EXA' returning 1;" 1 "a rep can cancel their own pending request"
+expect_owner_error "insert into crm.days_off (hospital_id, kind, day, request_id, title, status, requested_by) select id, 'holiday', '2026-12-06', gen_random_uuid(), 'Sunday', 'approved', '$HOG' from crm.hospitals;" \
+  "days_off_day_check" "a Sunday can never be stored as a day off"
+
 echo
 printf '  %s passed, %s failed\n\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

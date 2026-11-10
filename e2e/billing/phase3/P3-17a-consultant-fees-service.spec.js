@@ -47,7 +47,7 @@ async function cell(doctor, visitType, scheme, date) {
     schemeCode: c("cghs"),
     ...(date ? { date } : {}),
   });
-  const row = body.rows.find((r) => r.visit_type === visitType);
+  const row = body.rows.find((r) => r.visit_type === visitType && !r.follow_up_within_days);
   return row.cells[c(scheme)];
 }
 
@@ -98,21 +98,23 @@ test.describe.serial("P3-17a consultant fees service", () => {
         [`${name} P317A ${tag}`, name],
       );
       if (price === null) continue;
-      for (const [visit, suffix] of [
-        ["New", "NEW"],
-        ["Follow Up", "FU"],
-        ["Follow Up (3 days)", "FU3"],
+      for (const [visit, suffix, days] of [
+        ["New", "NEW", null],
+        ["Follow Up", "FU", null],
+        ["Follow Up", "FU3", 3],
       ]) {
         ids[`${key}${suffix}`] = await one(
-          `INSERT INTO service_items (code, name, subgroup_id, base_price, kind, doctor_id, visit_type)
-           VALUES ($1, $2, $3, $4, 'consultation', $5, $6) RETURNING id`,
+          `INSERT INTO service_items (code, name, subgroup_id, base_price, kind, doctor_id, visit_type,
+                                      follow_up_within_days)
+           VALUES ($1, $2, $3, $4, 'consultation', $5, $6, $7) RETURNING id`,
           [
             `P317A-${key.toUpperCase()}-${suffix}-${T}`,
-            `Consultant meet ${name} ${visit} ${tag}`,
+            `Consultant meet ${name} ${visit}${days ? ` within ${days} days` : ""} ${tag}`,
             ids.consults,
             price,
             ids[key],
             visit,
+            days,
           ],
         );
       }
@@ -166,7 +168,7 @@ test.describe.serial("P3-17a consultant fees service", () => {
   test("1. the grid: rows per doctor and visit type, General + every category column, inherited values marked", async () => {
     const body = await grid({ doctorId: String(ids.rahul) });
     expect(body.date).toBe(today);
-    expect(body.visit_types).toEqual(["New", "Follow Up", "Follow Up (3 days)"]);
+    expect(body.visit_types).toEqual(["New", "Follow Up"]);
     const codes = body.columns.map((col) => col.code);
     expect(codes[0]).toBe("general");
     const at = (code) => codes.indexOf(c(code));
@@ -177,10 +179,12 @@ test.describe.serial("P3-17a consultant fees service", () => {
       `P317A CGHS ${tag} › Pensioner`,
     );
     expect(body.columns.find((col) => col.code === c("cghs")).has_sub_categories).toBe(true);
-    expect(body.rows.map((r) => [r.doctor_id, r.visit_type, r.item.id])).toEqual([
-      [ids.rahul, "New", ids.rahulNEW],
-      [ids.rahul, "Follow Up", ids.rahulFU],
-      [ids.rahul, "Follow Up (3 days)", ids.rahulFU3],
+    expect(
+      body.rows.map((r) => [r.doctor_id, r.visit_type, r.follow_up_within_days, r.item.id]),
+    ).toEqual([
+      [ids.rahul, "New", null, ids.rahulNEW],
+      [ids.rahul, "Follow Up", null, ids.rahulFU],
+      [ids.rahul, "Follow Up", 3, ids.rahulFU3],
     ]);
     expect(body.not_priced).toEqual([]);
 
@@ -574,16 +578,10 @@ test.describe.serial("P3-17a consultant fees service", () => {
         status: "no_item",
         item_id: null,
       }),
-      expect.objectContaining({
-        doctor_id: ids.nofee,
-        visit_type: "Follow Up (3 days)",
-        status: "no_item",
-        item_id: null,
-      }),
     ]);
     const everyone = await grid({ schemeCode: c("pensioner") });
     expect(everyone.columns.map((col) => col.code)).toEqual(["general", c("pensioner")]);
-    expect(everyone.not_priced.filter((r) => r.doctor_id === ids.nofee)).toHaveLength(3);
+    expect(everyone.not_priced.filter((r) => r.doctor_id === ids.nofee)).toHaveLength(2);
     expect(
       everyone.rows.filter((r) => [ids.rahul, ids.beant, ids.banshali].includes(r.doctor_id)),
     ).toHaveLength(9);
@@ -644,7 +642,9 @@ test.describe.serial("P3-17a consultant fees service", () => {
       { doctorId: ids.beant, schemeCode: c("paid"), date: "2027-03-02" },
       getPool(),
     );
-    const cellThen = march.rows.find((r) => r.visit_type === "Follow Up").cells[c("paid")];
+    const cellThen = march.rows.find(
+      (r) => r.visit_type === "Follow Up" && !r.follow_up_within_days,
+    ).cells[c("paid")];
     expect(cellThen.own_rule).toMatchObject({ name, patient_pays: "nothing" });
   });
 });

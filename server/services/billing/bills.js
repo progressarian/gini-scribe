@@ -15,11 +15,7 @@ import {
 import { normalizeGender, resolveCategoryFor } from "./categoryResolver.js";
 import { testsAfterConsult } from "./afterConsult.js";
 import { cghsSubForReferral, startingCghsSub } from "../../../shared/cghsSubCategory.js";
-import {
-  FOLLOW_UP_WITHIN_DAYS,
-  HOME_COLLECTION_CODE,
-  RECENT_FOLLOW_UP,
-} from "../../../shared/billingVocab.js";
+import { HOME_COLLECTION_CODE } from "../../../shared/billingVocab.js";
 import { columnReady } from "../slots/readiness.js";
 import { checkCode } from "./discountRules.js";
 import { issuedGstReady } from "./issuedGst.js";
@@ -34,7 +30,7 @@ import {
 } from "./payments.js";
 import { allocate, priceBill } from "./priceBill.js";
 import { priceChangeText, priceChanges, takenAboveText } from "./priceDrift.js";
-import { seenRecentlyBy, visitConsultationType } from "./serviceItems.js";
+import { followUpWindowItem, visitConsultationType, windowCovers } from "./serviceItems.js";
 import { refuseRemoved, removedDoctor } from "./removedDoctors.js";
 import { httpError, inTransaction } from "./transaction.js";
 import {
@@ -904,8 +900,8 @@ export async function listVisitBills(visitId, db = pool) {
 
 async function itemRow(client, itemId) {
   const { rows } = await client.query(
-    `SELECT id, name, kind, visit_type, is_active, allow_quantity, max_quantity, price_per_patient,
-            test_catalog_id, base_price
+    `SELECT id, name, kind, visit_type, follow_up_within_days, is_active, allow_quantity,
+            max_quantity, price_per_patient, test_catalog_id, base_price
        FROM service_items WHERE id = $1`,
     [itemId],
   );
@@ -961,7 +957,7 @@ const VISIT_LABELS = { New: "New Patient", "Follow Up": "Follow Up" };
 
 async function refuseOtherConsultation(client, bill, item, doctorId) {
   if (item.kind !== "consultation" || !item.visit_type) return;
-  if (item.visit_type === RECENT_FOLLOW_UP) {
+  if (item.follow_up_within_days != null) {
     const { rows } = await client.query(
       `SELECT patient_id, visit_date::text AS visit_date, assigned_doctor_id
          FROM giniflow_visits WHERE id = $1`,
@@ -972,9 +968,9 @@ async function refuseOtherConsultation(client, bill, item, doctorId) {
       item.doctor_id ?? doctorId ?? bill.consultant_id ?? visit?.assigned_doctor_id ?? null;
     if (
       visit &&
-      (await seenRecentlyBy(
-        { patientId: visit.patient_id, visitDate: visit.visit_date },
-        consultant,
+      (await windowCovers(
+        item,
+        { patientId: visit.patient_id, visitDate: visit.visit_date, doctorId: consultant },
         client,
       ))
     ) {
@@ -982,7 +978,7 @@ async function refuseOtherConsultation(client, bill, item, doctorId) {
     }
     throw httpError(
       409,
-      `${item.name} is only for a patient this consultant saw in the last ${FOLLOW_UP_WITHIN_DAYS} days`,
+      `${item.name} is only for a patient whose last full-fee visit with this consultant was within ${item.follow_up_within_days} days`,
     );
   }
   const wanted = await visitConsultationType(bill.visit_id, client);
@@ -2029,10 +2025,16 @@ async function consultationVisitTypeFor(client, bill) {
   return rows[0].returning ? "Follow Up" : "New";
 }
 
-async function consultationItemFor(client, doctorId, visitType) {
+async function consultationItemFor(client, doctorId, visitType, bill) {
+  const window = await followUpWindowItem(
+    { patientId: bill.patient_id, visitDate: bill.bill_date, doctorId },
+    client,
+  );
+  if (window) return window;
   const { rows } = await client.query(
     `SELECT id, name FROM service_items
       WHERE kind = 'consultation' AND is_active AND visit_type = $1
+        AND follow_up_within_days IS NULL
         AND (doctor_id = $2 OR doctor_id IS NULL)
       ORDER BY doctor_id IS NULL, id LIMIT 1`,
     [visitType, doctorId],
@@ -2057,7 +2059,7 @@ export async function setConsultant(billId, input, ctx, db = pool) {
     for (const line of going) await removeLine(before.id, line.id, { reason }, ctx, client);
     if (!to.tests_only && going.length === lines.length) {
       const visitType = await consultationVisitTypeFor(client, before);
-      const item = await consultationItemFor(client, to.id, visitType);
+      const item = await consultationItemFor(client, to.id, visitType, before);
       if (!item) {
         throw httpError(
           409,

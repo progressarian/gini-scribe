@@ -32,6 +32,7 @@ function addStaff(workbook, data) {
     "Patients",
     "Check-ins",
     "Bills finalised",
+    "Closed by test cancel",
     ...money.map((col) => col.label),
     "Refunds paid back",
     "Net collected",
@@ -43,6 +44,7 @@ function addStaff(workbook, data) {
   ];
   ws.columns = headers.map((_, index) => ({ width: index ? 16 : 26 }));
   const formats = [
+    null,
     null,
     null,
     null,
@@ -61,6 +63,7 @@ function addStaff(workbook, data) {
     person.patients,
     person.check_ins,
     person.finalised,
+    person.closed_by_cancel ?? 0,
     ...money.map((col) => rupees(person.money[col.key])),
     rupees(-person.refunded),
     rupees(person.collected),

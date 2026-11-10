@@ -5,6 +5,7 @@ import {
   auditFields,
   cleanDate,
   cleanMoney,
+  CLOSED_BY_TEST_CANCEL,
   hasField,
   INT_MAX,
   MONEY_MAX,
@@ -396,8 +397,9 @@ async function handoverOf(client, shiftId, closedAt) {
     [shiftId],
   );
   const finalised = await client.query(
-    `SELECT COUNT(*) AS n FROM bills
-      WHERE finalised_by = $1 AND bill_type = 'invoice' AND finalised_at BETWEEN $2 AND $3`,
+    `SELECT COUNT(*) AS n FROM bills b
+      WHERE b.finalised_by = $1 AND b.bill_type = 'invoice' AND b.finalised_at BETWEEN $2 AND $3
+        AND NOT ${CLOSED_BY_TEST_CANCEL("b")}`,
     [shift.user.id, shift.opened_at, closedAt],
   );
   const cleared = await clearedInWindow(client, shift.user.id, shift.opened_at, closedAt);

@@ -16,8 +16,10 @@ const { consultationItem, consultationForDesk, draftAtCheckIn } =
   await import("../../../server/services/billing/visitLines.js");
 const bills = await import("../../../server/services/billing/bills.js");
 const { consultantFeeGrid } = await import("../../../server/services/billing/consultantFees.js");
-const { itemChoices } = await import("../../../server/services/billing/serviceItems.js");
+const { createItem, itemChoices, setItemActive } =
+  await import("../../../server/services/billing/serviceItems.js");
 const { RECENT_FOLLOW_UP } = await import("../../../shared/billingVocab.js");
+const { windowDeadline } = await import("../../../shared/followUp.js");
 
 const db = getPool();
 const tag = newTag();
@@ -49,15 +51,34 @@ async function visitOf(made) {
 
 const chosen = async (made) => consultationItem(db, await visitOf(made));
 
+const daysBefore = (day, n) => {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - n);
+  return d.toISOString().slice(0, 10);
+};
+
+async function holidays() {
+  const { rows } = await query(`SELECT holiday_date::text AS day FROM clinic_holidays`);
+  return new Set(rows.map((r) => r.day));
+}
+
+async function firstGapOutside(day, window) {
+  const closed = await holidays();
+  for (let n = window + 1; ; n += 1) {
+    if (windowDeadline(daysBefore(day, n), window, closed) < day) return n;
+  }
+}
+
 test.describe.serial("P4C-53 follow-up within 3 days is a ₹0 consultation", () => {
   test.beforeAll(async () => {
     ids = await setUp(tag);
     autoBefore = await autoConsultation(true);
     freeItem = (
       await one(
-        `INSERT INTO service_items (code, name, subgroup_id, base_price, kind, visit_type, doctor_id)
-         VALUES ($1, $2, $3, 0, 'consultation', $4, NULL) RETURNING id`,
-        [`P4-FU3-${tag}`, `Follow-up within 3 days ${tag}`, ids.subgroup, RECENT_FOLLOW_UP],
+        `INSERT INTO service_items (code, name, subgroup_id, base_price, kind, visit_type,
+                                    follow_up_within_days, doctor_id)
+         VALUES ($1, $2, $3, 0, 'consultation', 'Follow Up', 3, NULL) RETURNING id`,
+        [`P4-FU3-${tag}`, `Follow-up within 3 days ${tag}`, ids.subgroup],
       )
     ).id;
   });
@@ -73,17 +94,17 @@ test.describe.serial("P4C-53 follow-up within 3 days is a ₹0 consultation", ()
   test("1. seen by the same consultant 2 days ago: the ₹0 follow-up", async () => {
     const made = await extraVisit(ids, "Fu2", { visitType: "Follow Up", healthray: false });
     await seenBefore(made.patient, 2);
-    expect(await chosen(made)).toMatchObject({ id: freeItem, visit_type: RECENT_FOLLOW_UP });
+    expect(await chosen(made)).toMatchObject({ id: freeItem, follow_up_within_days: 3 });
   });
 
-  test("2. exactly 3 days ago is free; 4 days ago pays the normal follow-up", async () => {
+  test("2. exactly 3 days ago is free; past the window pays the normal follow-up", async () => {
     const three = await extraVisit(ids, "Fu3", { visitType: "Follow Up", healthray: false });
     await seenBefore(three.patient, 3);
     expect((await chosen(three)).id).toBe(freeItem);
 
-    const four = await extraVisit(ids, "Fu4", { visitType: "Follow Up", healthray: false });
-    await seenBefore(four.patient, 4);
-    expect(await chosen(four)).toMatchObject({ id: ids.consultFu, visit_type: "Follow Up" });
+    const past = await extraVisit(ids, "Fu4", { visitType: "Follow Up", healthray: false });
+    await seenBefore(past.patient, await firstGapOutside(ids.day, 3));
+    expect(await chosen(past)).toMatchObject({ id: ids.consultFu, visit_type: "Follow Up" });
   });
 
   test("3. a different consultant yesterday does not count", async () => {
@@ -113,15 +134,10 @@ test.describe.serial("P4C-53 follow-up within 3 days is a ₹0 consultation", ()
   test("6. a consultant's own 3-day item wins over the ₹0 default", async () => {
     ownItem = (
       await one(
-        `INSERT INTO service_items (code, name, subgroup_id, base_price, kind, visit_type, doctor_id)
-         VALUES ($1, $2, $3, 200, 'consultation', $4, $5) RETURNING id`,
-        [
-          `P4-FU3D-${tag}`,
-          `Dr follow-up 3 days ${tag}`,
-          ids.subgroup,
-          RECENT_FOLLOW_UP,
-          CONSULTANTS.banshali.id,
-        ],
+        `INSERT INTO service_items (code, name, subgroup_id, base_price, kind, visit_type,
+                                    follow_up_within_days, doctor_id)
+         VALUES ($1, $2, $3, 200, 'consultation', 'Follow Up', 3, $4) RETURNING id`,
+        [`P4-FU3D-${tag}`, `Dr follow-up 3 days ${tag}`, ids.subgroup, CONSULTANTS.banshali.id],
       )
     ).id;
     const made = await extraVisit(ids, "FuOwn", { visitType: "Follow Up", healthray: false });
@@ -154,16 +170,34 @@ test.describe.serial("P4C-53 follow-up within 3 days is a ₹0 consultation", ()
 
   test("7b. the ₹0 follow-up can't be added by hand for a patient not seen in the last 3 days", async () => {
     const made = await extraVisit(ids, "FuHand", { visitType: "Follow Up", healthray: false });
-    await seenBefore(made.patient, 5);
+    await seenBefore(made.patient, await firstGapOutside(ids.day, 3));
     const draft = await bills.openDraft(made.visit, desk, db);
     await expect(
       bills.addLine(draft.id, { item_id: freeItem, doctor_id: CONSULTANTS.banshali.id }, desk, db),
     ).rejects.toMatchObject({ status: 409 });
   });
 
-  test("8. Settings → Services and Consultant fees both offer the 3-day type", async () => {
-    expect((await itemChoices(db)).visitTypes).toContain(RECENT_FOLLOW_UP);
+  test("8. the old 3-day visit type is saved as a 3-day Follow Up window", async () => {
+    expect((await itemChoices(db)).visitTypes).toEqual(["New", "Follow Up"]);
+    const saved = await createItem(
+      {
+        code: `P4-FU3L-${tag}`,
+        name: `Legacy 3 days ${tag}`,
+        subgroup_id: ids.subgroup,
+        base_price: 0,
+        kind: "consultation",
+        visit_type: RECENT_FOLLOW_UP,
+        doctor_id: CONSULTANTS.banshali.id,
+      },
+      desk,
+      db,
+    );
+    expect(saved).toMatchObject({ visit_type: "Follow Up", follow_up_within_days: 3 });
     const grid = await consultantFeeGrid({ doctorId: CONSULTANTS.banshali.id }, db);
-    expect(grid.visit_types).toContain(RECENT_FOLLOW_UP);
+    expect(grid.rows.find((r) => r.item.id === saved.id)).toMatchObject({
+      visit_type: "Follow Up",
+      follow_up_within_days: 3,
+    });
+    await setItemActive(saved.id, false, desk, db);
   });
 });

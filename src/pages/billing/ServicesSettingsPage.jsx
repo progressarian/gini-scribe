@@ -20,6 +20,7 @@ import PriceHistoryDialog from "../../components/billing/PriceHistoryDialog";
 import UsedInDialog from "../../components/billing/UsedInDialog";
 import { errorOf, rupees, usesOf } from "../../components/billing/format";
 import "../../styles/flow.css";
+import { followUpWindowLabel } from "../../../shared/billingVocab";
 import "../flow/FlowSettings.css";
 import "./billing.css";
 import "./billingUi.css";
@@ -29,7 +30,10 @@ const LAB_FILTER = { outsourced: "true", inhouse: "false", all: undefined };
 
 const linkOf = (item) => {
   if (item.kind === "consultation") {
-    return `${item.doctor_name ?? "Hospital default"} · ${item.visit_type}`;
+    const visit = item.follow_up_within_days
+      ? followUpWindowLabel(item.follow_up_within_days)
+      : item.visit_type;
+    return `${item.doctor_name ?? "Hospital default"} · ${visit}`;
   }
   if (item.kind === "test") return item.test_name ?? "—";
   return "—";

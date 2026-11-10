@@ -48,7 +48,8 @@ export async function loadReference(db = pool) {
     db.query(`SELECT id, code, name, group_id, sort_order, is_active FROM service_subgroups`),
     db.query(
       `SELECT id, code, name, subgroup_id, base_price, unit, allow_quantity, max_quantity,
-                tax_code_id, kind, doctor_id, visit_type, test_catalog_id, is_active
+                tax_code_id, kind, doctor_id, visit_type, follow_up_within_days, test_catalog_id,
+                is_active
            FROM service_items`,
     ),
     db.query(`SELECT id, name, is_active FROM doctors`),
@@ -408,6 +409,16 @@ function checkItemsAgainstState(sheet, state, lookup) {
       }
     }
 
+    if (entry.inFile && entry.followUpDays != null) {
+      if (entry.kind !== "consultation" || entry.visitType !== "Follow Up") {
+        fail(
+          row,
+          entry.kind !== "consultation" ? "kind" : "visit_type",
+          `${entry.name} is a ${entry.followUpDays}-day follow-up fee; keep kind consultation and visit_type Follow Up, or change it on the Consultant fees page`,
+        );
+      }
+    }
+
     if (entry.kind === "consultation" && entry.active && entry.doctorId !== undefined) {
       const [clash] = others(index.consultations, consultSlot(entry), entry);
       if (clash) {
@@ -446,7 +457,7 @@ function checkItemsAgainstState(sheet, state, lookup) {
 
 const consultSlot = (entry) =>
   entry.kind === "consultation" && entry.active && entry.doctorId !== undefined
-    ? `${entry.doctorId ?? "default"}|${entry.visitType}`
+    ? `${entry.doctorId ?? "default"}|${entry.followUpDays != null ? `within-${entry.followUpDays}` : entry.visitType}`
     : null;
 
 function buildState(sheets, ref) {
@@ -495,6 +506,7 @@ function buildState(sheets, ref) {
       kind: i.kind,
       doctorId: i.doctor_id,
       visitType: i.visit_type,
+      followUpDays: i.follow_up_within_days,
       testId: i.test_catalog_id,
     }),
     (row) => ({

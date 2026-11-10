@@ -46,6 +46,7 @@ const PAYMENT_KINDS = [
 const ACTIVITY_KINDS = [
   { key: "", label: "Everything" },
   { key: "finalised", label: "Bills finalised" },
+  { key: "closed_by_cancel", label: "Closed by test cancel" },
   { key: "cancelled", label: "Bills cancelled" },
   { key: "manual_discount", label: "Manual discounts" },
 ];

@@ -63,6 +63,19 @@ export function buildPeriods(asOf) {
 const jsonArray = (col) =>
   `CASE WHEN jsonb_typeof(${col}) = 'array' THEN ${col} ELSE '[]'::jsonb END`;
 
+const VISIT_FROM_WHERE = String.raw`FROM appointments a
+    JOIN patients p ON p.id = a.patient_id
+   WHERE a.appointment_date BETWEEN $1::date AND $2::date
+     AND lower(a.status) IN ('completed', 'seen', 'checkedin')
+     AND lower(btrim(COALESCE(a.doctor_name, ''))) NOT IN ($3, $4)
+     AND lower(btrim(COALESCE(a.visit_type, ''))) <> 'investigation'
+     AND lower(COALESCE(a.visit_type, '')) NOT LIKE '%tele%'
+     AND lower(btrim(COALESCE(a.appointment_type, ''))) NOT IN ('online', 'tele')
+     AND NOT COALESCE(p.is_blocked, false)
+     AND COALESCE(a.file_no, '') NOT LIKE $5
+     AND COALESCE(p.file_no, '') NOT LIKE $5
+     AND COALESCE(p.file_no, '') NOT LIKE $6`;
+
 const VISITS_SQL = String.raw`
   SELECT a.id, a.patient_id, a.appointment_date::text AS day, a.age AS visit_age,
          p.dob::text AS dob, p.age AS stored_age, p.sex, p.health_id, p.file_no AS uhid,
@@ -76,29 +89,69 @@ const VISITS_SQL = String.raw`
                 WHERE NULLIF(btrim(m->>'name'), '') IS NOT NULL) AS meds,
          ARRAY(SELECT (regexp_matches(lower(COALESCE(a.healthray_clinical_notes, '')), '(?:\m|pathy)cad\s*(\+|-(?!\s*(post|s/?p|p/|h/o|old)))', 'g'))[1]) AS cad_signs,
          ARRAY(SELECT (regexp_matches(lower(COALESCE(a.healthray_clinical_notes, '')), 'nephropathy\s*(\+|-(?!\s*(post|s/?p|p/|h/o|old)))', 'g'))[1]) AS neph_signs
-    FROM appointments a
-    JOIN patients p ON p.id = a.patient_id
-   WHERE a.appointment_date BETWEEN $1::date AND $2::date
-     AND lower(a.status) IN ('completed', 'seen', 'checkedin')
-     AND lower(btrim(COALESCE(a.doctor_name, ''))) NOT IN ($3, $4)
-     AND lower(btrim(COALESCE(a.visit_type, ''))) <> 'investigation'
-     AND lower(COALESCE(a.visit_type, '')) NOT LIKE '%tele%'
-     AND lower(btrim(COALESCE(a.appointment_type, ''))) NOT IN ('online', 'tele')
-     AND NOT COALESCE(p.is_blocked, false)
-     AND COALESCE(a.file_no, '') NOT LIKE $5
-     AND COALESCE(p.file_no, '') NOT LIKE $5
-     AND COALESCE(p.file_no, '') NOT LIKE $6
+    ${VISIT_FROM_WHERE}
    ORDER BY a.patient_id, a.appointment_date, a.id`;
 
+const visitParams = (from, to) => [
+  from,
+  to,
+  LAB_ONLY_DOCTOR.toLowerCase(),
+  TEST_DOCTOR,
+  `${TEST_FILE_PREFIX}%`,
+  `${DEMO_FILE_PREFIX}%`,
+];
+
+const GLP1_WORD =
+  "(?:semaglut\\w*|semanext|semasi\\w*|semaseiz\\w*|semal?ix|sembol\\w*|semabol\\w*|semaful\\w*|sematr?i?nity|semawin|semamac|tirzep\\w*|lirag\\w*|lirafit|mounj\\w*|monj\\w*|wegov\\w*|wigov\\w*|vigov\\w*|ozemp\\w*|rybel\\w*|victoz\\w*|saxend\\w*|trulic\\w*|dulag\\w*|exenat\\w*|byett\\w*|wyntid\\w*|blue? ?pen|yurpeak\\w*|erly|glp\\s*-?\\s*1(?:\\s*ra)?|incretin\\w*)";
+
+const GLP1_NOTES_SQL = String.raw`
+  SELECT a.patient_id, a.appointment_date::text AS day,
+         ARRAY(SELECT (regexp_matches(lower(a.healthray_clinical_notes), '(.{0,60}\m' || $7 || '.{0,50})', 'g'))[1]) AS snippets
+    ${VISIT_FROM_WHERE}
+     AND lower(COALESCE(a.healthray_clinical_notes, '')) ~ ('\m' || $7)`;
+
+const ADVICE_WORDS =
+  /(plan|advis|suggest|consider|discuss|counsel|option|explain|candidate|to start|can start|may start|will start|refus|declin|not willing|not start|didn'?t start|didnot start|want(s|ed)? to (wait|delay|try)|delay|defer|withheld|afford|cost|later)/;
+const PAST_USE_WORDS =
+  /(stopped|stop |discontinu|was on|h\/o|history of|\btook\b|side ?effects?|\bs\/e\b|nausea|vomit|loose motion|switched|since starting|weight loss with|expression|scan)/;
+const GLP1_WORD_RE = new RegExp(`\\b${GLP1_WORD}`);
+
+export function isGlp1Advice(snippet) {
+  const text = String(snippet || "").toLowerCase();
+  const hit = text.match(GLP1_WORD_RE);
+  if (!hit) return false;
+  const around = text.slice(Math.max(0, hit.index - 45), hit.index + hit[0].length + 35);
+  return ADVICE_WORDS.test(around) && !PAST_USE_WORDS.test(around);
+}
+
+const monthStarts = (from, to) => {
+  const out = [];
+  for (
+    let d = new Date(`${from.slice(0, 7)}-01T00:00:00Z`);
+    d.toISOString().slice(0, 10) <= to;
+    d.setUTCMonth(d.getUTCMonth() + 1)
+  ) {
+    const start = d.toISOString().slice(0, 10);
+    const end = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0))
+      .toISOString()
+      .slice(0, 10);
+    out.push([start < from ? from : start, end > to ? to : end]);
+  }
+  return out;
+};
+
+async function loadGlp1Advice(db, from, to) {
+  const advised = new Set();
+  for (const [start, end] of monthStarts(from, to)) {
+    const { rows } = await db.query(GLP1_NOTES_SQL, [...visitParams(start, end), GLP1_WORD]);
+    for (const r of rows)
+      if (r.snippets.some(isGlp1Advice)) advised.add(`${r.patient_id}|${r.day}`);
+  }
+  return advised;
+}
+
 async function loadVisits(db, from, to) {
-  const { rows } = await db.query(VISITS_SQL, [
-    from,
-    to,
-    LAB_ONLY_DOCTOR.toLowerCase(),
-    TEST_DOCTOR,
-    `${TEST_FILE_PREFIX}%`,
-    `${DEMO_FILE_PREFIX}%`,
-  ]);
+  const { rows } = await db.query(VISITS_SQL, visitParams(from, to));
   const byPatientDay = new Map();
   for (const r of rows) {
     const key = `${r.patient_id}|${r.day}`;
@@ -457,6 +510,7 @@ export function buildPatientRecord(p, visits, ctx) {
     if (inPeriod(m.started, p) || inPeriod(m.last_prescribed, p)) medNames.push(m);
   }
   const drugs = drugFlags(medNames);
+  const glp1Advised = pv.some((v) => ctx.glp1Advice?.has(`${v.patient_id}|${v.day}`));
 
   const latest = pv.filter(hasDiagnosisList).at(-1) || null;
   const latestCad = pv.filter(hasCadEvidence).at(-1) || null;
@@ -495,6 +549,7 @@ export function buildPatientRecord(p, visits, ctx) {
     aoo: onset.aoo,
     aooSource: onset.source,
     glp1: drugs.glp1,
+    glp1Advised,
     molecules: [...drugs.molecules],
     icodec: drugs.icodec,
     hasList: !!latest,
@@ -549,6 +604,17 @@ export function summarise(rows) {
     aooT2: { ...describeValues(t2.map((r) => r.aoo).filter((a) => a != null)), of: t2.length },
     diabetics: diabetics.length,
     glp1: share(rows, (r) => r.glp1),
+    glp1OrAdvised: share(rows, (r) => r.glp1 || r.glp1Advised),
+    glp1Diabetic: share(
+      rows,
+      (r) => r.glp1,
+      (r) => r.diabetic,
+    ),
+    glp1Cad: share(
+      rows,
+      (r) => r.glp1,
+      (r) => r.cad,
+    ),
     icodec: share(rows, (r) => r.icodec),
     both: share(rows, (r) => r.glp1 && r.icodec),
     dualDx: share(
@@ -621,6 +687,7 @@ export async function buildReport(db, { asOf }) {
     byPatient.get(v.patient_id).push(v);
   }
   const patientIds = [...byPatient.keys()];
+  const glp1Advice = await loadGlp1Advice(db, current[0].from, asOf);
   const [meds, diagnoses, readings] = await Promise.all([
     loadMedications(db, patientIds),
     loadDiagnosisRows(db, patientIds),
@@ -647,6 +714,7 @@ export async function buildReport(db, { asOf }) {
   }
   const ctx = {
     medsByPatient: group(meds),
+    glp1Advice,
     diagnosisByPatient: group(diagnoses),
     readingsByPatient,
   };

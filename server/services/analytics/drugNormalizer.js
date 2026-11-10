@@ -127,8 +127,16 @@ const MOLECULES = [
       "wyntide",
       "wyntde",
       "blupen",
+      "bluepen",
       "blu pen",
       "blue pen",
+      "sundae",
+      "sandae",
+      "symbolic",
+      "simbolic",
+      "semboli",
+      "obeda",
+      "noveltreat",
     ],
     wordAliases: ["vigovy", "semaglu", "ssemaglu"],
     fuzzy: ["semaglutide", "ozempic", "wegovy", "semanext"],
@@ -175,7 +183,14 @@ const MOLECULES = [
 
 const NOT_PRESCRIBED = /\b(deferred|not\s+started|refused|declined|not\s+willing)\b/i;
 
-const GLP1_HINTS = [/\bglp[\s-]?1\b/i, /\bglp1ra?\b/i, /\bglp\b/i, /\bincretin\b/i];
+const GLP1_HINTS = [
+  /\bglp[\s-]?1\b/i,
+  /\bglp1ra?\b/i,
+  /\bglp\b/i,
+  /\bincretin\b/i,
+  /\bextensior\b/i,
+  /\bgliptino\b/i,
+];
 
 const LOCAL_BRANDS = {
   statin: /\b(atchol|lipvas|tonact|storvas|atorlip|rozat|rosufit|liponorm)\b/i,
@@ -189,10 +204,12 @@ const LOCAL_BRANDS = {
   antiplatelet: /\b(ecospirin|ecosprin|deplatt)\b/i,
   diuretic: /\b(dytor|lasilactone|aldactone)\b/i,
   supplement: /\b(aktiv|maxmala|racal|nefcm|amla candy|onecan)\b/i,
-  insulin: /\b(huminsulin|insugen|mixtard|actrapid|basalog|wosulin|awiq\w*|icodec)\b/i,
+  insulin:
+    /\b(huminsulin|insugen|mixtard|actrapid|basalog|wosulin|awiq\w*|icodec|aweekl\w*|awikl\w*|awkli\w*)\b/i,
 };
 
-const INSULIN_ICODEC = /\b(awiq\w*|icodec)\b/i;
+const INSULIN_ICODEC =
+  /\b(awiq\w*|icodec|aweekl\w*|awikl\w*|awkli\w*)\b|^\W*(inj\.?\s*)?a weekly\b/i;
 
 const METFORMIN_FDC =
   /\b(glizid|diamicron|daplo|dapanorm|reclimet|sitacip|linaxa|oxra|gluconorm|zoryl|amaryl|glycomet|janumet|jalra|galvus|zita|istamet|synjardy|xigduo|invokamet|gemer|triglimisave)\b[^a-z]*\b(m|met|mex|dm|trio|sm|forte|gp)\b/i;

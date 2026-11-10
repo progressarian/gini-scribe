@@ -49,6 +49,7 @@ export const SOURCE_LABEL = {
 
 export const ACTIVITY_LABEL = {
   finalised: "Finalised",
+  closed_by_cancel: "Closed by test cancel",
   cancelled: "Cancelled",
   manual_discount: "Manual discount",
 };

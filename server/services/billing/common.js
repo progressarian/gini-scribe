@@ -24,6 +24,12 @@ export const nameKey = (name) =>
     .replace(/\s+/g, " ")
     .toLowerCase();
 
+export const CLOSED_BY_TEST_CANCEL = (bill) => `EXISTS (
+  SELECT 1 FROM billing_requests closer
+   WHERE closer.bill_id = ${bill}.id AND closer.kind = 'refund'
+     AND closer.created_by IS NOT DISTINCT FROM ${bill}.finalised_by
+     AND closer.created_at = ${bill}.finalised_at)`;
+
 export const likePattern = (text) => `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
 export const NAME_KEY_SQL = `lower(regexp_replace(btrim(name), '\\s+', ' ', 'g'))`;

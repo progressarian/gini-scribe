@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { billingVisitType } from "../../../shared/billingVisitType.js";
+import { RECENT_FOLLOW_UP } from "../../../shared/billingVocab.js";
 import { paise } from "../../../shared/labPayment.js";
 import { CAPABILITIES, hasCapability } from "../../../shared/permissions.js";
 import { writeAudit } from "./audit.js";
@@ -10,6 +11,7 @@ import { requestRefund } from "./deposits.js";
 import { applyDepositIn, moneyOn, restoreDepositLegs } from "./payments.js";
 import { PAYMENT_MODES } from "./cashShifts.js";
 import { priceBill } from "./priceBill.js";
+import { followUpWindowItem } from "./serviceItems.js";
 import { auditFields } from "./common.js";
 import { httpError, inTransaction } from "./transaction.js";
 
@@ -88,16 +90,24 @@ async function consultLines(db, visitId, toDoctorId) {
   }));
 }
 
+const plainVisitType = (type) => (type === RECENT_FOLLOW_UP ? "Follow Up" : type);
+
 const visitTypeOf = (visit, lines) =>
   (visit.appointment_id ? billingVisitType(visit.visit_type) : visit.journey_visit_type) ??
-  lines.find((line) => line.visit_type)?.visit_type ??
+  plainVisitType(lines.find((line) => line.visit_type)?.visit_type) ??
   null;
 
-async function consultItemFor(db, doctorId, visitType) {
+async function consultItemFor(db, visit, doctorId, visitType) {
   if (!visitType) return null;
+  const window = await followUpWindowItem(
+    { patientId: visit.patient_id, visitDate: visit.visit_date, doctorId },
+    db,
+  );
+  if (window) return window;
   const { rows } = await db.query(
     `SELECT id, name, doctor_id FROM service_items
       WHERE kind = 'consultation' AND is_active AND visit_type = $1
+        AND follow_up_within_days IS NULL
         AND (doctor_id = $2 OR doctor_id IS NULL)
       ORDER BY doctor_id IS NULL, id
       LIMIT 1`,
@@ -135,7 +145,7 @@ export async function consultFeeDifference(visitId, toDoctorId, ctx, db = pool) 
   const finals = lines.filter((line) => line.bill_status === "final");
   const drafts = lines.filter((line) => line.bill_status === "draft");
   const visitType = visitTypeOf(visit, lines);
-  const item = await consultItemFor(db, to.id, visitType);
+  const item = await consultItemFor(db, visit, to.id, visitType);
   const scheme = lines[0]?.scheme_code ?? null;
   const newFee = item ? await priceFor(db, visit, item, to.id, scheme, ctx?.role) : null;
   const charged = lines.reduce((sum, line) => sum + line.left, 0);
@@ -154,7 +164,7 @@ export async function consultFeeDifference(visitId, toDoctorId, ctx, db = pool) 
 }
 
 async function swapDraftLines(client, visit, lines, to, ctx) {
-  const item = await consultItemFor(client, to.id, visitTypeOf(visit, lines));
+  const item = await consultItemFor(client, visit, to.id, visitTypeOf(visit, lines));
   const reason = `Consultant changed to ${to.short_name}`;
   for (const line of lines) {
     await removeLine(line.bill_id, line.id, { reason }, ctx, client);
@@ -385,7 +395,7 @@ export async function confirmConsultantChange(changeId, input, ctx, db = pool) {
     const visit = await visitFacts(client, change.visit_id);
     const to = await doctorOf(client, change.to_doctor_id);
     const lines = await consultLines(client, change.visit_id, to.id);
-    const item = await consultItemFor(client, to.id, visitTypeOf(visit, lines));
+    const item = await consultItemFor(client, visit, to.id, visitTypeOf(visit, lines));
     if (!item) {
       throw httpError(
         409,

@@ -79,7 +79,9 @@ const RULE_COLUMNS = `r.id, r.name, r.scheme_code, r.patient_pays, r.patient_val
 
 const CELLS_SQL = `
   WITH it AS (
-    SELECT i.id, i.subgroup_id, sg.group_id, i.visit_type, i.base_price
+    SELECT i.id, i.subgroup_id, sg.group_id, i.base_price,
+           CASE WHEN i.follow_up_within_days IS NOT NULL THEN 'Follow Up'
+                ELSE i.visit_type END AS visit_type
       FROM service_items i JOIN service_subgroups sg ON sg.id = i.subgroup_id
      WHERE i.id = ANY ($1::int[])
   ),
@@ -317,7 +319,8 @@ async function pricedDoctors(db, doctorId, paging) {
 
 async function pricedItems(db, doctorIds) {
   const { rows } = await db.query(
-    `SELECT i.id, i.code, i.name, i.base_price, i.doctor_id, i.visit_type, i.subgroup_id
+    `SELECT i.id, i.code, i.name, i.base_price, i.doctor_id, i.visit_type,
+            i.follow_up_within_days, i.subgroup_id
        FROM service_items i
       WHERE i.kind = 'consultation' AND i.is_active
         AND (i.doctor_id = ANY ($1::int[]) OR i.doctor_id IS NULL)
@@ -335,7 +338,8 @@ async function unpricedDoctors(db, doctorId, paging) {
         CROSS JOIN unnest($3::text[]) WITH ORDINALITY AS v(visit_type, ord)
         WHERE NOT EXISTS (SELECT 1 FROM service_items i
                            WHERE i.kind = 'consultation' AND i.is_active
-                             AND i.doctor_id = d.id AND i.visit_type = v.visit_type)
+                             AND i.doctor_id = d.id AND i.visit_type = v.visit_type
+                             AND i.follow_up_within_days IS NULL)
           AND ($4::text IS NULL OR d.name ILIKE $4 ESCAPE '\\' OR d.short_name ILIKE $4 ESCAPE '\\')
      ),
      page AS (
@@ -350,13 +354,15 @@ async function unpricedDoctors(db, doctorId, paging) {
             old.id AS item_id, old.code AS item_code,
             EXISTS (SELECT 1 FROM service_items f
                      WHERE f.kind = 'consultation' AND f.is_active
-                       AND f.doctor_id IS NULL AND f.visit_type = m.visit_type) AS default_covers
+                       AND f.doctor_id IS NULL AND f.visit_type = m.visit_type
+                       AND f.follow_up_within_days IS NULL) AS default_covers
        FROM totals t
        LEFT JOIN (missing m JOIN page p ON p.id = m.id) ON TRUE
        LEFT JOIN LATERAL (
          SELECT i.id, i.code FROM service_items i
           WHERE i.kind = 'consultation' AND NOT i.is_active
             AND i.doctor_id = m.id AND i.visit_type = m.visit_type
+            AND i.follow_up_within_days IS NULL
           ORDER BY i.id DESC LIMIT 1
        ) old ON TRUE
       ORDER BY m.name, m.id, m.ord`,
@@ -404,20 +410,32 @@ const whoOf = (doctor, visitType) => ({
   visit_type: visitType,
 });
 
+const slotOf = (item) =>
+  item.follow_up_within_days != null ? `within-${item.follow_up_within_days}` : item.visit_type;
+
+const slotRank = (item) =>
+  item.follow_up_within_days != null
+    ? CONSULTATION_ITEM_VISIT_TYPES.length + item.follow_up_within_days
+    : CONSULTATION_ITEM_VISIT_TYPES.indexOf(item.visit_type);
+
+const bySlot = (a, b) => slotRank(a) - slotRank(b) || a.id - b.id;
+
+const rowVisit = (item) => ({
+  visit_type: item.follow_up_within_days != null ? "Follow Up" : item.visit_type,
+  follow_up_within_days: item.follow_up_within_days ?? null,
+});
+
 function defaultRows(defaults, cells) {
-  return CONSULTATION_ITEM_VISIT_TYPES.filter((v) => defaults.has(v)).map((visitType) => {
-    const item = defaults.get(visitType);
-    return {
-      doctor_id: null,
-      doctor_name: null,
-      short_name: null,
-      doctor_active: null,
-      visit_type: visitType,
-      is_default: true,
-      item: itemShape(item),
-      cells: cells.get(item.id),
-    };
-  });
+  return [...defaults.values()].sort(bySlot).map((item) => ({
+    doctor_id: null,
+    doctor_name: null,
+    short_name: null,
+    doctor_active: null,
+    ...rowVisit(item),
+    is_default: true,
+    item: itemShape(item),
+    cells: cells.get(item.id),
+  }));
 }
 
 const DEFAULT_LABEL = "hospital default";
@@ -450,9 +468,9 @@ export async function consultantFeeGrid(options = {}, db = pool) {
   const defaults = new Map(
     loaded
       .filter((i) => i.doctor_id === null && !doctorId && (!paging || defaultMatches(i, search)))
-      .map((i) => [i.visit_type, i]),
+      .map((i) => [slotOf(i), i]),
   );
-  const items = loaded.filter((i) => i.doctor_id !== null || defaults.has(i.visit_type));
+  const items = loaded.filter((i) => i.doctor_id !== null || defaults.has(slotOf(i)));
   const cells = await cellsFor(
     db,
     items,
@@ -460,18 +478,16 @@ export async function consultantFeeGrid(options = {}, db = pool) {
     date,
   );
   const doctorRows = doctors.flatMap((doctor) =>
-    CONSULTATION_ITEM_VISIT_TYPES.flatMap((visitType) => {
-      const item = items.find((i) => i.doctor_id === doctor.id && i.visit_type === visitType);
-      if (!item) return [];
-      return [
-        {
-          ...whoOf(doctor, visitType),
-          is_default: false,
-          item: itemShape(item),
-          cells: cells.get(item.id),
-        },
-      ];
-    }),
+    items
+      .filter((i) => i.doctor_id === doctor.id && slotRank(i) >= 0)
+      .sort(bySlot)
+      .map((item) => ({
+        ...whoOf(doctor, item.visit_type),
+        ...rowVisit(item),
+        is_default: false,
+        item: itemShape(item),
+        cells: cells.get(item.id),
+      })),
   );
   const base = {
     date,
@@ -506,7 +522,8 @@ export async function consultantFeeNotPriced(options = {}, db = pool) {
     paging.q ? unpricedDoctors(db, doctorId, { ...EVERYTHING, limit: 1 }) : null,
     db.query(
       `SELECT DISTINCT visit_type FROM service_items
-        WHERE kind = 'consultation' AND is_active AND doctor_id IS NULL`,
+        WHERE kind = 'consultation' AND is_active AND doctor_id IS NULL
+          AND follow_up_within_days IS NULL`,
     ),
   ]);
   const covered = new Set(defaults.rows.map((r) => r.visit_type));
@@ -527,8 +544,10 @@ export async function consultantFeeNotPriced(options = {}, db = pool) {
 
 async function loadItem(client, itemId) {
   const { rows } = await client.query(
-    `SELECT i.id, i.code, i.name, i.kind, i.is_active, i.doctor_id, i.visit_type, i.base_price,
-            d.name AS doctor_name
+    `SELECT i.id, i.code, i.name, i.kind, i.is_active, i.doctor_id, i.follow_up_within_days,
+            CASE WHEN i.follow_up_within_days IS NOT NULL THEN 'Follow Up'
+                 ELSE i.visit_type END AS visit_type,
+            i.base_price, d.name AS doctor_name
        FROM service_items i LEFT JOIN doctors d ON d.id = i.doctor_id
       WHERE i.id = $1`,
     [itemId],

@@ -1,6 +1,10 @@
 import { rupees } from "./format";
+import { followUpWindowLabel } from "../../../shared/billingVocab";
 
 export const whoOf = (row) => (row.is_default ? "Hospital default" : row.doctor_name);
+
+export const visitLabel = (row) =>
+  row.follow_up_within_days ? followUpWindowLabel(row.follow_up_within_days) : row.visit_type;
 
 export const paysText = (pays) => {
   if (pays.patient_pays === "nothing") return "pays nothing";

@@ -18,6 +18,20 @@ export function skipSunday(iso) {
   return d.toISOString().slice(0, 10);
 }
 
+const addDays = (iso, n) => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+export function windowDeadline(anchorDate, days, holidays = new Set()) {
+  const anchor = clean(anchorDate);
+  if (!anchor || !Number.isInteger(days) || days < 1) return "";
+  let day = addDays(anchor, days);
+  while (isClosedDay(day) || holidays.has(day)) day = addDays(day, 1);
+  return day;
+}
+
 export function datedFollowUp(fu) {
   return fu && clean(fu.date) ? fu : null;
 }

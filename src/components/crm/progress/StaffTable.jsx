@@ -1,8 +1,20 @@
 import { useState } from "react";
-import { pct, shortDateTime } from "./progressText.js";
+import { daysText, pct, shortDateTime } from "./progressText.js";
 
 const COLUMNS = [
   { key: "visits", label: "Visits", get: (s) => s.visits.visits },
+  {
+    key: "working_days",
+    label: "Working days",
+    get: (s) => s.visits.working_days,
+    show: (s) => daysText(s.visits.working_days),
+  },
+  {
+    key: "per_day",
+    label: "Per working day",
+    get: (s) => s.visits.per_working_day ?? -1,
+    show: (s) => (s.visits.per_working_day == null ? "—" : s.visits.per_working_day.toFixed(1)),
+  },
   { key: "unique", label: "Unique doctors", get: (s) => s.visits.unique_doctors },
   { key: "assigned", label: "Assigned", get: (s) => s.visits.assigned },
   {
@@ -105,7 +117,10 @@ export default function StaffTable({ staff, cards, colorOf, onPick }) {
           </tfoot>
         </table>
       </div>
-      <p className="rep__hint">Select a name to see that person's report.</p>
+      <p className="rep__hint">
+        Select a name to see that person's report. The team's working days count field staff with
+        doctors or visits; the Head of Growth counts only when they logged visits.
+      </p>
     </section>
   );
 }

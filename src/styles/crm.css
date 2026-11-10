@@ -1635,6 +1635,15 @@ a.dimp__btn {
   font-weight: 700;
   color: #0f172a;
 }
+.prg__hint {
+  margin: -4px 0 8px;
+  font-size: 12px;
+  color: #64748b;
+}
+.prg__off {
+  font-weight: 400;
+  color: #64748b;
+}
 .prg__h3 {
   margin: 0 0 8px;
   font-size: 13px;
@@ -2301,4 +2310,31 @@ a.rep__btn {
 .pvq__remove {
   margin-left: auto;
   font-size: 12.5px;
+}
+
+.lv__h3 {
+  margin: 16px 0 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.lv__row {
+  align-items: flex-start;
+}
+.lv__row--past {
+  opacity: 0.7;
+}
+.lv__foot {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+@media (max-width: 640px) {
+  .lv__row {
+    flex-wrap: wrap;
+  }
+  .lv__row .rep__row-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }

@@ -44,6 +44,10 @@ function methodAoa(meta) {
       "Prescribed in the period: named on a visit prescription in the period, or a medicine row started or last prescribed in the period. Deferred / not-started entries are excluded. GLP-1 includes tirzepatide, semaglutide (injectable and oral), liraglutide, dulaglutide, exenatide and lixisenatide + glargine.",
     ],
     [
+      "GLP-1 prescribed or advised",
+      "Prescribed as above, or a visit note in the period names a GLP-1 next to advice wording (plan for, advised, suggested, discussed, counselled, refused, declined, did not start, wants to wait / delay). Mentions of past use (stopped, was on, h/o, side effects) are not counted. Notes are cumulative, so advice written at an earlier visit can still be read at a later one. 2025 onwards only; the 2023–2024 imports have no notes.",
+    ],
+    [
       "Diagnosis list",
       "The diagnoses on the patient's latest visit of the period that has one (HealthRay visit note). Conditions count only if present on that visit.",
     ],
@@ -90,6 +94,7 @@ function patientAoa(report) {
       "AOO source",
       "GLP-1",
       "GLP-1 drugs",
+      "GLP-1 advised (note)",
       "Awiqli",
       "Diagnosis list date",
       "Dual adiposity (dx)",
@@ -124,6 +129,7 @@ function patientAoa(report) {
         p.aooSource,
         yn(p.glp1),
         p.molecules.map((m) => MOLECULE_LABELS[m] || m).join(", "),
+        yn(p.glp1Advised),
         yn(p.icodec),
         p.latestListDay,
         yn(p.dualDx),
@@ -221,6 +227,14 @@ const AGE_ROWS = [
 ];
 const SHARE_ROWS = [
   ["5", "On a GLP-1", "patients seen", (s) => s.glp1],
+  ["5", "On a GLP-1 — diabetic patients", "diabetic patients seen", (s) => s.glp1Diabetic],
+  ["5", "On a GLP-1 — CAD patients", "patients with CAD", (s) => s.glp1Cad],
+  [
+    "5",
+    "GLP-1 prescribed or advised (advised or planned in the visit note, including patients who deferred or declined)",
+    "patients seen",
+    (s) => s.glp1OrAdvised,
+  ],
   ["6", "On Awiqli", "patients seen", (s) => s.icodec],
   ["7", "On both GLP-1 and Awiqli", "patients seen", (s) => s.both],
   ["8", "Dual adiposity — diagnosis", "patients with a diagnosis list", (s) => s.dualDx],

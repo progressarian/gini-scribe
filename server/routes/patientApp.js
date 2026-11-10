@@ -8,6 +8,7 @@
 //   POST /api/patient/app/ensure-scribe-patient {}
 //   POST /api/patient/app/link-file-no          { file_no }
 //   GET  /api/patient/app/gini-db-token
+//   GET  /api/patient/app/dev/patients
 //
 import { Router } from "express";
 import jwt from "jsonwebtoken";
@@ -267,6 +268,62 @@ router.post("/patient/app/link-file-no", async (req, res) => {
 });
 
 const GINI_DB_TOKEN_TTL_S = 3600;
+const DEV_PATIENTS_PAGE_MAX = 50;
+const DEV_PHONES = ["9999999001"];
+
+function isDevPhone(phone) {
+  const l10 = last10(phone);
+  if (l10.length !== 10) return false;
+  return DEV_PHONES.includes(l10);
+}
+
+function requireDevPatient(req, res) {
+  const patient = requirePatient(req, res);
+  if (!patient) return null;
+  if (!isDevPhone(patient.phone)) {
+    res.status(403).json({ error: "Not allowed" });
+    return null;
+  }
+  return patient;
+}
+
+router.get("/patient/app/dev/patients", async (req, res) => {
+  try {
+    const patient = requireDevPatient(req, res);
+    if (!patient) return;
+    const q = String(req.query.q || "").trim();
+    const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
+    const limit = Math.min(
+      DEV_PATIENTS_PAGE_MAX,
+      Math.max(1, Number.parseInt(req.query.limit, 10) || 30),
+    );
+    const like = q ? `%${q}%` : null;
+    const where = like ? "WHERE name ILIKE $1 OR file_no ILIKE $1 OR phone LIKE $1" : "";
+    const params = like ? [like] : [];
+    const [{ rows }, { rows: countRows }] = await Promise.all([
+      pool.query(
+        `SELECT id, name, dob, file_no, phone FROM patients ${where}
+          ORDER BY name ASC NULLS LAST, id ASC
+          LIMIT ${limit} OFFSET ${offset}`,
+        params,
+      ),
+      pool.query(`SELECT count(*)::int AS total FROM patients ${where}`, params),
+    ]);
+    console.log(`[PatientApp] dev patient search by app patient ${patient.id}`);
+    res.json({ rows, total: countRows[0].total });
+  } catch (e) {
+    handleError(res, e, "Dev patient search");
+  }
+});
+
+async function devPatientId(req, patient) {
+  const id = Number.parseInt(req.query.dev_patient_id, 10);
+  if (!Number.isInteger(id) || !isDevPhone(patient.phone)) return null;
+  const { rows } = await pool.query("SELECT id FROM patients WHERE id = $1", [id]);
+  if (!rows.length) return null;
+  console.log(`[PatientApp] dev DB token for patient ${id} issued to app patient ${patient.id}`);
+  return id;
+}
 
 router.get("/patient/app/gini-db-token", async (req, res) => {
   try {
@@ -283,7 +340,10 @@ router.get("/patient/app/gini-db-token", async (req, res) => {
 
     const linked = await listLinkedPatients("hospital", patient.phone || "");
     const own = patient.db === "hospital" ? [Number(patient.id)] : [];
-    const ids = [...new Set([...own, ...linked.map((p) => Number(p.id))])].filter(Number.isInteger);
+    const dev = await devPatientId(req, patient);
+    const ids = [
+      ...new Set([...own, ...linked.map((p) => Number(p.id)), ...(dev ? [dev] : [])]),
+    ].filter(Number.isInteger);
     if (!ids.length) return res.json({ enabled: false });
 
     const token = jwt.sign(

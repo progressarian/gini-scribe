@@ -140,6 +140,15 @@ export const REMOVAL_STATUSES = [
 ];
 export const REMOVAL_STATUS_VALUES = REMOVAL_STATUSES.map((s) => s.value);
 
+export const DAY_OFF_STATUSES = [
+  { value: "pending", label: "Waiting for approval", tone: "amb" },
+  { value: "approved", label: "Approved", tone: "grn" },
+  { value: "rejected", label: "Rejected", tone: "red" },
+  { value: "cancelled", label: "Cancelled", tone: "ink" },
+];
+
+export const DAY_OFF_STATUS_VALUES = DAY_OFF_STATUSES.map((s) => s.value);
+
 export const VISIT_ROW_STATES = [
   { value: "ready", label: "Ready", tone: "ok" },
   { value: "already_logged", label: "Already logged", tone: "dup" },
@@ -315,3 +324,4 @@ export const urgencyLabel = labeller(URGENCIES);
 export const removalReasonLabel = labeller(DOCTOR_REMOVAL_REASONS);
 export const removalStatusMeta = metaFinder(REMOVAL_STATUSES);
 export const taskKindLabel = labeller(TASK_KINDS);
+export const dayOffStatusMeta = metaFinder(DAY_OFF_STATUSES);

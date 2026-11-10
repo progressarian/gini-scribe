@@ -244,3 +244,12 @@ Applied to the import years (`mergeNearbyImported`, chained, across New Year, la
 ### Reconciled with Monthly summary (2026-11-10)
 
 Ran the Monthly summary counting base (`opdSummary.js` `BASE`, type `opd`) read-only over 2025, 2025 to 9 Nov and 2026 to 9 Nov. Recounted one visit per patient per day, attended statuses only, report exclusions: identical to the report in all three periods (0 visits, 0 patients difference). The Monthly summary shows more because it counts every appointment row (same patient twice the same day: +1,505 rows in 2025, +291 in 2026) and counts 130 still "in visit" 2026 appointments as came.
+
+## GLP-1 cross-check and extra lines (2026-11-10)
+
+- Read-only check of GLP-1 words in 2025–26 notes and medicine lists: patients mentioned but not counted were mostly "plan for / advised" (305 in 2026) or "refused / stopped / past" (182); about 22 sounded current, and 3 had an unrecognised list spelling ("bluepen", "exena"). Recorded GLP-1 use is not materially undercounted.
+- 9–15% of patients per year have no medicine record at all.
+- Added to the report (page, Excel, summary): #5 GLP-1 among diabetic patients and GLP-1 among CAD patients (CAD in the latest diagnosis list). 2026 to 9 Nov: 23.9% and 29.6%; seen 3+ times: 37.6% and 45.5%.
+- "bluepen" added as a semaglutide spelling (+3 GLP-1 patients in 2026, all seen 3+ times, all diabetic, none with CAD).
+- Added #5 "GLP-1 prescribed or advised": prescribed, or a visit note in the period names a GLP-1 next to advice wording (plan / advised / counselled / refused / did not start / wants to wait); past-use wording excluded (`isGlp1Advice`, note search month by month). As at 9 Nov 2026: 2025 20.5%, 2025 to 9 Nov 19.2%, 2026 26.3% (1,967 / 7,466); seen 3+ times 32.4% → 42.3%. 2023–24 imports have no notes, so prescribed only. Spot check: 24 of 25 sampled note extracts were real advice or plans.
+- Client feedback round (2026-11-10): read-only scan of every 2025–26 prescription entry. Missed brands added — semaglutide: Sundae / Sundae Pro (Pen) / Sandae, Symbolic / Simbolic / Semboli(x), Obeda, Noveltreat; GLP-1 drug not named: Gliptino, Extensior; Awiqli: Aweekly / Awikly / "A weekly". Effect as at 9 Nov 2026: GLP-1 1,505 → 1,566 (21.0%), Awiqli 314 → 354 (4.7%), both 148 → 201 (2.7%); 2025 +1. Support medicines (`support_for`) never carry a GLP-1 that is missing from the list. Jan–Feb 2025 visits have almost no stored prescriptions (≈400 entries a month against ≈9,000 later), which keeps early-2025 GLP-1 low.

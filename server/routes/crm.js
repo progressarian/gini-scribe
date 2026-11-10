@@ -56,6 +56,14 @@ import {
   requestRemoval,
   restoreDoctor,
 } from "../crm/removals.js";
+import {
+  addHoliday,
+  cancelLeave,
+  decideLeave,
+  listDaysOff,
+  removeHoliday,
+  requestLeave,
+} from "../crm/daysOff.js";
 import { handleError } from "../utils/errorHandler.js";
 import { listDueDoctors, listMyDoctors, listReferrals } from "../crm/homeLists.js";
 import {
@@ -187,6 +195,9 @@ function doctorError(res, e, context) {
       .json({ error: message, code, fields, doctor_id, doctor_name, similar });
   }
   console.error(`${context} error:`, e?.message, e?.detail || "", e?.stack || "");
+  if (e?.code === "23505" && e.constraint?.startsWith("days_off_")) {
+    return res.status(409).json({ error: "Those days were just added. Refresh and try again." });
+  }
   if (e?.code === "23505") {
     return res.status(409).json({ error: "This mobile is already in the CRM." });
   }
@@ -255,6 +266,23 @@ doctorRoute("post", "/crm/tasks/:id/cancel", "Cancel task", (req) =>
 );
 doctorRoute("post", "/crm/tasks/:id/reopen", "Reopen task", (req) =>
   reopenTask(req.crmUser, req.params.id),
+);
+doctorRoute("get", "/crm/days-off", "Holidays and leave", (req) =>
+  listDaysOff(req.crmUser, req.query),
+);
+doctorRoute("post", "/crm/holidays", "Add holiday", (req) => addHoliday(req.crmUser, req.body));
+doctorRoute("post", "/crm/holidays/:id/remove", "Remove holiday", (req) =>
+  removeHoliday(req.crmUser, req.params.id),
+);
+doctorRoute("post", "/crm/leave", "Request leave", (req) => requestLeave(req.crmUser, req.body));
+doctorRoute("post", "/crm/leave/:id/approve", "Approve leave", (req) =>
+  decideLeave(req.crmUser, req.params.id, { approve: true, note: req.body?.note }),
+);
+doctorRoute("post", "/crm/leave/:id/reject", "Reject leave", (req) =>
+  decideLeave(req.crmUser, req.params.id, { approve: false, note: req.body?.note }),
+);
+doctorRoute("post", "/crm/leave/:id/cancel", "Cancel leave", (req) =>
+  cancelLeave(req.crmUser, req.params.id),
 );
 doctorRoute("put", "/crm/visits/:id", "Change visit", (req) =>
   editVisit(req.crmUser, req.params.id, req.body),

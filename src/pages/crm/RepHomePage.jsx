@@ -13,6 +13,7 @@ import {
 import PendingVisits from "../../components/crm/home/PendingVisits.jsx";
 import AssignmentsPanel from "../../components/crm/AssignmentsPanel.jsx";
 import RemovalRequestsPanel from "../../components/crm/doctors/RemovalRequestsPanel.jsx";
+import DaysOffPanel from "../../components/crm/daysOff/DaysOffPanel.jsx";
 import DueList from "../../components/crm/home/DueList.jsx";
 import DoctorsList from "../../components/crm/home/DoctorsList.jsx";
 import ReferralsList from "../../components/crm/home/ReferralsList.jsx";
@@ -35,6 +36,7 @@ const TABS = [
   { key: "today", label: "Today" },
   { key: "doctors", label: "My doctors" },
   { key: "tasks", label: "Tasks" },
+  { key: "leave", label: "Holidays & leave" },
 ];
 
 const ASSIGNMENTS_TAB = { key: "assignments", label: "Assignments" };
@@ -64,6 +66,7 @@ export default function RepHomePage() {
   const [data, setData] = useState(null);
   const requestedTab = params.get("tab") || rememberedTab() || "due";
   const [removalsWaiting, setRemovalsWaiting] = useState(0);
+  const [leaveWaiting, setLeaveWaiting] = useState(0);
   const [pending, setPending] = useState(pendingCount());
   const [queueItems, setQueueItems] = useState(pendingItems());
   const [retrying, setRetrying] = useState(false);
@@ -143,6 +146,10 @@ export default function RepHomePage() {
       .get("/api/crm/removal-requests", { params: { status: "pending" } })
       .then(({ data: body }) => setRemovalsWaiting(body.counts.pending))
       .catch(() => setRemovalsWaiting(0));
+    api
+      .get("/api/crm/days-off", { params: { status: "pending" } })
+      .then(({ data: body }) => setLeaveWaiting(body.pending))
+      .catch(() => setLeaveWaiting(0));
   }, [leadView, refreshKey]);
 
   const tabs = [...TABS, ...(leadView ? [ASSIGNMENTS_TAB, REMOVALS_TAB] : [])];
@@ -232,6 +239,10 @@ export default function RepHomePage() {
             <dt>Visits this month</dt>
             <dd>{p.visits_month}</dd>
           </div>
+          <div title="Leaves out Sundays, holidays and approved leave">
+            <dt>Per working day</dt>
+            <dd>{p.per_working_day_month == null ? "—" : p.per_working_day_month.toFixed(1)}</dd>
+          </div>
           <div>
             <dt>Unique doctors</dt>
             <dd>{p.unique_doctors_month}</dd>
@@ -274,6 +285,14 @@ export default function RepHomePage() {
           <p className="rep__perf-note" role="status">
             {removalsWaiting} removal request{removalsWaiting === 1 ? "" : "s"} waiting for you.{" "}
             <button type="button" className="asg__link" onClick={() => setTab("removals")}>
+              Review
+            </button>
+          </p>
+        )}
+        {leadView && leaveWaiting > 0 && (
+          <p className="rep__perf-note" role="status">
+            {leaveWaiting} leave request{leaveWaiting === 1 ? "" : "s"} waiting for you.{" "}
+            <button type="button" className="asg__link" onClick={() => setTab("leave")}>
               Review
             </button>
           </p>
@@ -323,6 +342,9 @@ export default function RepHomePage() {
             {t.key === "removals" && removalsWaiting > 0 && (
               <span className="rep__badge">{removalsWaiting}</span>
             )}
+            {t.key === "leave" && leadView && leaveWaiting > 0 && (
+              <span className="rep__badge">{leaveWaiting}</span>
+            )}
           </button>
         ))}
       </nav>
@@ -362,6 +384,8 @@ export default function RepHomePage() {
       )}
 
       {tab === "tasks" && <TasksPanel refreshKey={refreshKey} onChanged={load} />}
+
+      {tab === "leave" && <DaysOffPanel onPendingChange={setLeaveWaiting} onChanged={load} />}
     </div>
   );
 }

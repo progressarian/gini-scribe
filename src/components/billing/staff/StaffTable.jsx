@@ -49,6 +49,7 @@ export default function StaffTable({ data, onPick, picked }) {
     cleared: cleared(total) !== 0,
     cashCheck: people.some((person) => person.short || person.over),
     discounts: total.manual_discounts > 0,
+    closedByCancel: total.closed_by_cancel > 0,
   };
   return (
     <section className="flow-card bdash-card" aria-labelledby="sd-staff">
@@ -78,6 +79,15 @@ export default function StaffTable({ data, onPick, picked }) {
               <th scope="col" className="brep-num">
                 Bills finalised
               </th>
+              {show.closedByCancel ? (
+                <th
+                  scope="col"
+                  className="brep-num"
+                  title="Bills made final automatically because this person cancelled an already-paid test on the floor; the test was refunded."
+                >
+                  Closed by test cancel
+                </th>
+              ) : null}
               <th scope="col" className="brep-num">
                 Cash
               </th>
@@ -145,6 +155,11 @@ export default function StaffTable({ data, onPick, picked }) {
                   </th>
                   <td className="brep-num">{count(person.patients)}</td>
                   <td className="brep-num">{count(person.finalised)}</td>
+                  {show.closedByCancel ? (
+                    <td className="brep-num">
+                      {person.closed_by_cancel ? count(person.closed_by_cancel) : "—"}
+                    </td>
+                  ) : null}
                   <td className="brep-num">{amount(person.taken?.cash)}</td>
                   {show.nonCash ? (
                     <td className="brep-num" title={split || undefined}>
@@ -187,6 +202,9 @@ export default function StaffTable({ data, onPick, picked }) {
               </th>
               <td className="brep-num">{count(total.patients)}</td>
               <td className="brep-num">{count(total.finalised)}</td>
+              {show.closedByCancel ? (
+                <td className="brep-num">{count(total.closed_by_cancel)}</td>
+              ) : null}
               <td className="brep-num">{money(total.taken?.cash ?? 0)}</td>
               {show.nonCash ? (
                 <td className="brep-num" title={splitText(total, columns) || undefined}>

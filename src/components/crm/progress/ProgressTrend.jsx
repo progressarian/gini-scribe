@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   Bar,
   CartesianGrid,
+  Cell,
   ComposedChart,
   Legend,
   Line,
@@ -10,9 +11,19 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { SERIES } from "./progressText.js";
+import { SERIES, daysText, offLabel } from "./progressText.js";
 
 const AXIS = { fontSize: 12, fill: "#475569" };
+const OFF_FILL = "#cbd5e1";
+
+function tooltipLabel(label, payload) {
+  const row = payload?.[0]?.payload;
+  if (!row) return label;
+  const off = offLabel(row.off);
+  if (off) return `${label} · ${off}`;
+  if (row.group === "day") return label;
+  return `${label} · ${daysText(row.working_days)} ${row.team ? "staff " : ""}working days`;
+}
 
 export default function ProgressTrend({ trend, colorOf }) {
   const [split, setSplit] = useState(false);
@@ -23,6 +34,10 @@ export default function ProgressTrend({ trend, colorOf }) {
     label: b.label,
     visits: b.visits,
     unique_doctors: b.unique_doctors,
+    working_days: b.working_days,
+    off: b.off,
+    group: trend.group,
+    team: trend.reps.length > 1,
     ...Object.fromEntries(trend.reps.map((r) => [r.id, b.by_rep[r.id] ?? 0])),
   }));
   const empty = trend.buckets.every((b) => b.visits === 0);
@@ -41,6 +56,11 @@ export default function ProgressTrend({ trend, colorOf }) {
           </label>
         )}
       </div>
+      {trend.group === "day" && !empty && (
+        <p className="prg__hint">
+          Sundays without visits are left out. Grey bars are Sundays, holidays or leave.
+        </p>
+      )}
       {empty ? (
         <p className="rep__empty">No visits logged in this period.</p>
       ) : (
@@ -62,7 +82,10 @@ export default function ProgressTrend({ trend, colorOf }) {
                 axisLine={false}
                 width={44}
               />
-              <Tooltip cursor={{ fill: "rgba(148, 163, 184, 0.15)" }} />
+              <Tooltip
+                cursor={{ fill: "rgba(148, 163, 184, 0.15)" }}
+                labelFormatter={tooltipLabel}
+              />
               <Legend wrapperStyle={{ fontSize: 12, color: "#334155" }} />
               {bySplit ? (
                 trend.reps.map((r) => (
@@ -86,7 +109,11 @@ export default function ProgressTrend({ trend, colorOf }) {
                   radius={[4, 4, 0, 0]}
                   maxBarSize={36}
                   isAnimationActive={false}
-                />
+                >
+                  {rows.map((row) => (
+                    <Cell key={row.start} fill={row.off ? OFF_FILL : SERIES[0]} />
+                  ))}
+                </Bar>
               )}
               {!bySplit && (
                 <Line
@@ -117,6 +144,7 @@ export default function ProgressTrend({ trend, colorOf }) {
                 <th scope="col">Period</th>
                 <th scope="col">Visits</th>
                 <th scope="col">Unique doctors</th>
+                <th scope="col">Working days</th>
                 {canSplit &&
                   trend.reps.map((r) => (
                     <th key={r.id} scope="col">
@@ -128,9 +156,13 @@ export default function ProgressTrend({ trend, colorOf }) {
             <tbody>
               {rows.map((row) => (
                 <tr key={row.start}>
-                  <th scope="row">{row.label}</th>
+                  <th scope="row">
+                    {row.label}
+                    {row.off && <span className="prg__off"> · {offLabel(row.off)}</span>}
+                  </th>
                   <td>{row.visits}</td>
                   <td>{row.unique_doctors}</td>
+                  <td>{daysText(row.working_days)}</td>
                   {canSplit && trend.reps.map((r) => <td key={r.id}>{row[r.id]}</td>)}
                 </tr>
               ))}

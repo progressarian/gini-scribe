@@ -336,7 +336,7 @@ test.describe.serial("P1-17 service items service", () => {
       const error = await second;
       expect(error?.status).toBe(409);
       expect(error.message).toBe(
-        "There is already an active consultation item for that doctor and visit type",
+        "There is already an active consultation item for that doctor, visit type and follow-up window",
       );
     } finally {
       await first.query("ROLLBACK").catch(() => {});

@@ -160,7 +160,11 @@ export default function ProgressPage() {
 
       {data && !err && (
         <div className={loading ? "prg__body prg__body--loading" : "prg__body"} aria-busy={loading}>
-          <ProgressCards cards={data.cards} previous={data.previous_cards} />
+          <ProgressCards
+            cards={data.cards}
+            previous={data.previous_cards}
+            team={data.trend.reps.length > 1}
+          />
           <ProgressTrend trend={data.trend} colorOf={colorOf} />
           {data.staff.length > 0 && (
             <StaffTable

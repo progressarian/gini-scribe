@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { CONSULTATION_ITEM_VISIT_TYPES } from "../../shared/billingVocab.js";
+import {
+  CONSULTATION_ITEM_VISIT_TYPES,
+  FOLLOW_UP_WINDOW_MAX_DAYS,
+  RECENT_FOLLOW_UP,
+} from "../../shared/billingVocab.js";
 import { CATEGORY_RULE_MODES, GENDERS, ITEM_KINDS } from "../services/billing/importColumns.js";
 import { STACKING_MODES } from "../services/billing/billingSettings.js";
 import { cleanDate, INT_MAX, MONEY_MAX } from "../services/billing/common.js";
@@ -192,7 +196,16 @@ const itemFields = {
   is_outsourced: flag,
   kind: z.enum(ITEM_KINDS),
   doctor_id: z.union([id, z.null()]),
-  visit_type: z.union([z.enum(CONSULTATION_ITEM_VISIT_TYPES), z.null()]),
+  visit_type: z.union([z.enum([...CONSULTATION_ITEM_VISIT_TYPES, RECENT_FOLLOW_UP]), z.null()]),
+  follow_up_within_days: z.preprocess(
+    (value) => (value === "" ? null : typeof value === "string" ? Number(value) : value),
+    z
+      .number("must be a whole number of days")
+      .int("must be a whole number of days")
+      .min(1, `must be 1 to ${FOLLOW_UP_WINDOW_MAX_DAYS} days`)
+      .max(FOLLOW_UP_WINDOW_MAX_DAYS, `must be 1 to ${FOLLOW_UP_WINDOW_MAX_DAYS} days`)
+      .nullable(),
+  ),
   test_catalog_id: z.union([
     z.string().trim().regex(UUID_TEXT, "must be a catalogue test id"),
     z.null(),
@@ -214,6 +227,7 @@ export const billingItemCreateSchema = z
     is_outsourced: itemFields.is_outsourced.optional(),
     doctor_id: itemFields.doctor_id.optional(),
     visit_type: itemFields.visit_type.optional(),
+    follow_up_within_days: itemFields.follow_up_within_days.optional(),
     test_catalog_id: itemFields.test_catalog_id.optional(),
   })
   .superRefine((item, ctx) => {
@@ -716,6 +730,7 @@ export const BILLING_FIELD_LABELS = {
   kind: "Kind",
   doctor_id: "Consultant",
   visit_type: "Visit type",
+  follow_up_within_days: "Follow-up window (days)",
   test_catalog_id: "Catalogue test",
   reason: "Reason for the price change",
   label: "Label",

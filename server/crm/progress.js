@@ -1,6 +1,14 @@
 import ExcelJS from "exceljs";
 import { withCrmContext } from "./db.js";
 import { VISIT_DUE_CTE } from "./visitDue.js";
+import {
+  DAYS_OFF_IN_RANGE_SQL,
+  isSunday,
+  offIndex,
+  perWorkingDay,
+  workedOn,
+  workingDays,
+} from "./daysOff.js";
 import { ASSIGNABLE_ROLES, ASSIGNING_ROLES } from "./assignees.js";
 import {
   REFERRAL_STATUSES,
@@ -276,10 +284,15 @@ const ZERO = {
   tasks_overdue_now: 0,
 };
 
-function shape(m) {
+const NO_DAYS = { working: 0, off: 0 };
+
+function shape(m, days = NO_DAYS) {
   return {
     visits: {
       visits: m.visits,
+      working_days: days.working,
+      days_off: days.off,
+      per_working_day: perWorkingDay(m.visits, days.working),
       unique_doctors: m.unique_doctors,
       assigned: m.assigned,
       covered: m.covered,
@@ -371,15 +384,36 @@ const trendSql = `SELECT x.start, x.executive_id,
                 AND ${territoryClause("d", "$4")}) x
       GROUP BY GROUPING SETS ((x.start, x.executive_id), (x.start))`;
 
-function trendFrom(rows, f) {
-  const all = buckets(f.from, f.to, f.group);
-  const withYear = all[0].slice(0, 4) !== f.to.slice(0, 4);
+function bucketEnd(start, group, to) {
+  const end = group === "week" ? addDays(start, 6) : group === "month" ? monthEndOf(start) : start;
+  return end < to ? end : to;
+}
+
+function dayOff(index, repIds, day) {
+  if (isSunday(day)) return { kind: "sunday" };
+  const holiday = index.holidays.get(day);
+  if (holiday) return { kind: "holiday", title: holiday };
+  if (repIds.length !== 1) return null;
+  const worked = workedOn(index, repIds[0], day);
+  return worked < 1 ? { kind: "leave", half: worked > 0 } : null;
+}
+
+function trendFrom(rows, f, index) {
+  const all = buckets(f.from, f.to, f.group).filter(
+    (start) =>
+      f.group !== "day" || !isSunday(start) || rows.some((r) => r.start === start && r.visits),
+  );
+  const withYear = (all[0] ?? f.from).slice(0, 4) !== f.to.slice(0, 4);
   return all.map((start) => {
     const here = rows.filter((r) => r.start === start);
     const total = here.find((r) => r.executive_id == null);
+    const from = start < f.from ? f.from : start;
     return {
       start,
       label: bucketLabel(start, f.group, withYear),
+      working_days: workingDays(index, f.repIds, from, bucketEnd(start, f.group, f.to)).total
+        .working,
+      off: f.group === "day" ? dayOff(index, f.repIds, start) : null,
       visits: total?.visits ?? 0,
       unique_doctors: total?.unique_doctors ?? 0,
       by_rep: Object.fromEntries(
@@ -454,6 +488,7 @@ async function reportData(sql, f) {
     added: addedSql,
     added_before: addedBeforeSql,
     territories: territorySql,
+    days_off: DAYS_OFF_IN_RANGE_SQL,
   };
   const { rows } = await sql(
     `WITH ${VISIT_DUE_CTE}
@@ -470,6 +505,7 @@ async function reportData(sql, f) {
       f.previous.to,
       f.group,
       allCreators(f),
+      f.previous.from < f.from ? f.previous.from : f.from,
     ],
   );
   const r = rows[0];
@@ -479,10 +515,13 @@ async function reportData(sql, f) {
     referrals: r[`${prefix}_referrals`],
     tasks: r[`${prefix}_tasks`],
   });
+  const index = offIndex(r.days_off ?? []);
   return {
     current: metricsFrom(pick("current")),
     previous: metricsFrom(pick("previous")),
-    trendRows: trendFrom(r.trend ?? [], f),
+    days: workingDays(index, f.repIds, f.from, f.to),
+    previousDays: workingDays(index, f.repIds, f.previous.from, f.previous.to),
+    trendRows: trendFrom(r.trend ?? [], f, index),
     split: breakdownsFrom(r.breakdowns ?? []),
     added: addedFrom(r.added ?? [], r.added_before),
     territories: r.territories ?? [],
@@ -515,15 +554,19 @@ function breakdownsFrom(rows) {
 export async function progressReport(crmUser, query) {
   return withCrmContext(crmUser, async (sql) => {
     const f = await resolveIn(sql, crmUser, query);
-    const { current, previous, trendRows, split, added, territories } = await reportData(sql, f);
+    const { current, previous, days, previousDays, trendRows, split, added, territories } =
+      await reportData(sql, f);
     const names = new Map(f.staffOptions.map((o) => [o.id, o.full_name]));
+    const leads = new Set(
+      f.staffOptions.filter((o) => o.role === "head_of_growth").map((o) => o.id),
+    );
     if (!names.has(crmUser.id)) names.set(crmUser.id, crmUser.full_name);
     const staff =
       f.canPickStaff && f.rep === "all"
         ? f.repIds.map((id) => ({
             id,
             full_name: names.get(id),
-            ...shape(current.get(id) ?? ZERO),
+            ...shape(current.get(id) ?? ZERO, days.byUser.get(id)),
           }))
         : [];
     return {
@@ -540,8 +583,14 @@ export async function progressReport(crmUser, query) {
       staff_options: f.staffOptions.map(({ id, full_name }) => ({ id, full_name })),
       territories,
       viewer: { id: crmUser.id, full_name: crmUser.full_name },
-      cards: shape(current.get("total") ?? ZERO),
-      previous_cards: shape(previous.get("total") ?? ZERO),
+      cards: shape(
+        current.get("total") ?? ZERO,
+        fieldDays(days, current, current, f.repIds, leads),
+      ),
+      previous_cards: shape(
+        previous.get("total") ?? ZERO,
+        fieldDays(previousDays, previous, current, f.repIds, leads),
+      ),
       staff,
       trend: {
         group: f.group,
@@ -659,6 +708,31 @@ export async function progressDoctors(crmUser, query) {
   });
 }
 
+function fieldDays(days, metrics, currentMetrics, repIds, leads) {
+  if (repIds.length === 1) return days.total;
+  const total = { working: 0, off: 0 };
+  for (const id of repIds) {
+    const visited = metrics.get(id)?.visits > 0;
+    const assigned = currentMetrics.get(id)?.assigned > 0;
+    if (!visited && (leads.has(id) || !assigned)) continue;
+    const d = days.byUser.get(id);
+    total.working += d.working;
+    total.off += d.off;
+  }
+  return total;
+}
+
+const offText = (off) =>
+  !off
+    ? ""
+    : off.kind === "sunday"
+      ? "Sunday"
+      : off.kind === "holiday"
+        ? `Holiday: ${off.title}`
+        : off.half
+          ? "Half-day leave"
+          : "Leave";
+
 const outcomeLabel = (v) => VISIT_OUTCOMES.find((o) => o.value === v)?.label ?? "";
 const istDateOf = (ts) => (ts ? ddmmyyyy(istDate(new Date(ts))) : "");
 
@@ -709,6 +783,16 @@ export async function progressWorkbook(crmUser, query) {
   const line = (label, now, before = "") => summary.addRow({ label, now, before });
   line("Staff", who, who);
   line("Visits", cards.visits.visits, prev.visits.visits);
+  line(
+    filters.rep === "all" ? "Working days (all staff added up)" : "Working days",
+    cards.visits.working_days,
+    prev.visits.working_days,
+  );
+  line(
+    "Visits per working day",
+    cards.visits.per_working_day ?? "",
+    prev.visits.per_working_day ?? "",
+  );
   line("Unique doctors", cards.visits.unique_doctors, prev.visits.unique_doctors);
   line("Assigned doctors (now)", cards.visits.assigned, "");
   line("Coverage %", cards.visits.coverage_pct ?? "", prev.visits.coverage_pct ?? "");
@@ -733,12 +817,15 @@ export async function progressWorkbook(crmUser, query) {
   bold(summary);
   summary.addRow([]);
   summary.addRow(["India time; weeks start Monday. '(now)' rows are as of the download."]);
+  summary.addRow(["Working days leave out Sundays, holidays and approved leave (half day = 0.5)."]);
 
   const trendSheet = book.addWorksheet("Trend");
   trendSheet.columns = [
     { header: "Period", key: "label", width: 20 },
     { header: "Visits", key: "visits", width: 10 },
     { header: "Unique doctors", key: "unique_doctors", width: 16 },
+    { header: "Working days", key: "working_days", width: 13 },
+    { header: "Day off", key: "off", width: 20 },
     ...report.trend.reps.map((r) => ({ header: r.full_name, key: `rep:${r.id}`, width: 18 })),
   ];
   report.trend.buckets.forEach((b) =>
@@ -746,6 +833,8 @@ export async function progressWorkbook(crmUser, query) {
       label: b.label,
       visits: b.visits,
       unique_doctors: b.unique_doctors,
+      working_days: b.working_days,
+      off: offText(b.off),
       ...Object.fromEntries(report.trend.reps.map((r) => [`rep:${r.id}`, b.by_rep[r.id] ?? 0])),
     }),
   );
@@ -756,6 +845,8 @@ export async function progressWorkbook(crmUser, query) {
     staff.columns = [
       { header: "Rep", key: "name", width: 22 },
       { header: "Visits", key: "visits", width: 9 },
+      { header: "Working days", key: "working_days", width: 13 },
+      { header: "Visits per working day", key: "per_day", width: 20 },
       { header: "Unique doctors", key: "unique", width: 15 },
       { header: "Assigned", key: "assigned", width: 10 },
       { header: "Coverage %", key: "coverage", width: 11 },
@@ -772,6 +863,8 @@ export async function progressWorkbook(crmUser, query) {
       staff.addRow({
         name: s.full_name,
         visits: s.visits.visits,
+        working_days: s.visits.working_days,
+        per_day: s.visits.per_working_day ?? "",
         unique: s.visits.unique_doctors,
         assigned: s.visits.assigned,
         coverage: s.visits.coverage_pct ?? "",

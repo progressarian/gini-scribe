@@ -5,7 +5,7 @@ import {
 } from "../../queries/hooks/useBillingMaster";
 import { toast } from "../../stores/uiStore";
 import { codeTyped, moneyTyped, requestErrorOf } from "./format";
-import { cellSummary, whoOf } from "./consultantFeeText";
+import { cellSummary, visitLabel, whoOf } from "./consultantFeeText";
 import useDialog from "./useDialog";
 import BillDialogLayer from "./BillDialogLayer";
 
@@ -79,7 +79,7 @@ export default function ConsultantFeeEditor({ target, parentLabel, today, date, 
   const clear = useClearBillingConsultantFee();
   const ref = useDialog(true, onClose);
   const titleId = useId();
-  const who = `${whoOf(row)} (${row.visit_type})`;
+  const who = `${whoOf(row)} (${visitLabel(row)})`;
   const set = (key) => (e) =>
     setForm({ ...form, [key]: TYPED[key] ? TYPED[key](e.target.value) : e.target.value });
   const hasOwn = Boolean(cell.own || cell.own_rule);

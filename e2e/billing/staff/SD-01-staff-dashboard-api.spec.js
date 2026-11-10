@@ -17,6 +17,7 @@ const payments = await import("../../../server/services/billing/payments.js");
 const shifts = await import("../../../server/services/billing/cashShifts.js");
 const staffBoard = await import("../../../server/services/billing/staffDashboard.js");
 const dashboard = await import("../../../server/services/billing/dashboard.js");
+const bills = await import("../../../server/services/billing/bills.js");
 
 const tag = newTag();
 const ME = USERS.reception.id;
@@ -153,5 +154,43 @@ test.describe.serial("SD-01 staff dashboard service", () => {
     await expect(
       staffBoard.staffDashboard({ from: ids.day, to: "2999-01-01" }, db, { today: ids.day }),
     ).rejects.toMatchObject({ status: 400 });
+  });
+
+  test("7. a bill made final by a test cancel is counted as closed by test cancel", async () => {
+    const LAB = USERS.lab.id;
+    const { bill } = await payDraft("SdCancel", (amount) => [
+      { mode: "card", amount, reference: `CANCEL-${tag}` },
+    ]);
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query(`SELECT version FROM bills WHERE id = $1`, [bill.id]);
+      await bills.finaliseBill(
+        bill.id,
+        { version: rows[0].version },
+        { role: "lab", actorId: LAB },
+        client,
+      );
+      const { rows: lines } = await client.query(
+        `SELECT id FROM bill_lines WHERE bill_id = $1 AND is_live ORDER BY line_no LIMIT 1`,
+        [bill.id],
+      );
+      await client.query(
+        `INSERT INTO billing_requests (kind, reason, bill_id, created_by, refund_lines, requested_mode)
+         VALUES ('refund', 'Cancelled at the lab station by E2E Lab', $1, $2, $3::jsonb, 'as_paid')`,
+        [bill.id, LAB, JSON.stringify([{ line_id: lines[0].id, quantity: 1 }])],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    const lab = rowOf(await board({ staff: LAB }), LAB);
+    expect(lab).toMatchObject({ finalised: 0, closed_by_cancel: 1 });
+    const all = await board();
+    expect(all.total.closed_by_cancel).toBeGreaterThanOrEqual(1);
+    expect(rowOf(all)).toMatchObject({ closed_by_cancel: 0 });
   });
 });

@@ -2,7 +2,7 @@ import pool from "../../config/db.js";
 import { paise } from "../../../shared/labPayment.js";
 import { DEPOSIT_MODE, HEALTHRAY_MODE, PREPAID_MODE } from "../../../shared/billingVocab.js";
 import { indiaToday } from "./categoryResolver.js";
-import { cleanDate, INT_MAX } from "./common.js";
+import { cleanDate, CLOSED_BY_TEST_CANCEL, INT_MAX } from "./common.js";
 import { daysBetween, previousRange } from "./dashboardPeriods.js";
 import { RANGE_DAYS_MAX, IST } from "./reportsFilters.js";
 import { DRAWER_MODE, SHIFT_SQL, shape } from "./cashShifts.js";
@@ -118,7 +118,10 @@ async function workFacts(filters, db) {
   const by = (col) => staff.replace("{col}", col);
   const { rows } = await db.query(
     `SELECT staff, kind, COUNT(*) AS n, COALESCE(SUM(amount), 0) AS amount FROM (
-       SELECT b.finalised_by AS staff, 'finalised' AS kind, 0 AS amount
+       SELECT b.finalised_by AS staff,
+              CASE WHEN ${CLOSED_BY_TEST_CANCEL("b")} THEN 'closed_by_cancel'
+                   ELSE 'finalised' END AS kind,
+              0 AS amount
          FROM bills b
         WHERE b.bill_type = 'invoice' AND b.finalised_at IS NOT NULL
           AND ${dayOf("b.finalised_at")} BETWEEN $1::date AND $2::date${by("b.finalised_by")}
@@ -328,6 +331,7 @@ function blankStaff(id, person) {
     patients: 0,
     collected: 0,
     finalised: 0,
+    closed_by_cancel: 0,
     cancelled: 0,
     check_ins: 0,
     manual_discounts: 0,
@@ -405,6 +409,7 @@ export async function staffDashboard(input = {}, db = pool, { today = indiaToday
   for (const row of work) {
     const person = staffOf(row.staff);
     if (row.kind === "finalised") person.finalised = Number(row.n);
+    if (row.kind === "closed_by_cancel") person.closed_by_cancel = Number(row.n);
     if (row.kind === "cancelled") person.cancelled = Number(row.n);
     if (row.kind === "check_in") person.check_ins = Number(row.n);
     if (row.kind === "manual_discount") {
@@ -433,6 +438,7 @@ export async function staffDashboard(input = {}, db = pool, { today = indiaToday
     payments: sum("payments"),
     deposits: sum("deposits"),
     finalised: sum("finalised"),
+    closed_by_cancel: sum("closed_by_cancel"),
     cancelled: sum("cancelled"),
     check_ins: sum("check_ins"),
     manual_discounts: sum("manual_discounts"),
@@ -565,7 +571,9 @@ async function shiftActivity(id, db) {
   const { rows } = await db.query(
     `SELECT kind, at, bill_id, bill_no, visit_id, bill_date, patient_name, file_no, amount, note
        FROM (
-         SELECT 'finalised' AS kind, b.finalised_at AS at, b.id AS bill_id, b.bill_no, b.visit_id,
+         SELECT CASE WHEN ${CLOSED_BY_TEST_CANCEL("b")} THEN 'closed_by_cancel'
+                     ELSE 'finalised' END AS kind,
+                b.finalised_at AS at, b.id AS bill_id, b.bill_no, b.visit_id,
                 b.bill_date::text AS bill_date, p.name AS patient_name, p.file_no,
                 b.patient_payable AS amount, NULL AS note
            FROM cash_shifts s

@@ -174,6 +174,9 @@ const P = M.compare;
 const SECTIONS = [
   { title: "Treatment", hint: "Share of patients seen in the year who were prescribed the drug that year.", rows: [
     { no: "5", t: "On a GLP-1", key: "glp1", d: "of patients seen" },
+    { no: "5", t: "On a GLP-1 — diabetic patients", key: "glp1Diabetic", d: "of diabetic patients seen" },
+    { no: "5", t: "On a GLP-1 — CAD patients", key: "glp1Cad", d: "of patients with CAD in the latest diagnosis list" },
+    { no: "5", t: "GLP-1 prescribed or advised", key: "glp1OrAdvised", d: "prescribed, or advised / planned in the visit note (including patients who deferred or declined), of patients seen" },
     { no: "6", t: "On Awiqli", key: "icodec", d: "of patients seen" },
     { no: "7", t: "On both GLP-1 and Awiqli", key: "both", d: "of patients seen" } ] },
   { title: "Weight and control", hint: "Latest diagnosis or reading in the year. Only patients who have that diagnosis list or test are counted.", rows: [
@@ -293,6 +296,9 @@ function renderTable() {
     ["4", "Average age at diabetes onset — all diabetes", (s) => avg(s.aoo)],
     ["4", "Average age at diabetes onset — Type 2", (s) => avg(s.aooT2)],
     ["5", "On a GLP-1", (s) => share(s.glp1)],
+    ["5", "On a GLP-1 — diabetic patients", (s) => share(s.glp1Diabetic)],
+    ["5", "On a GLP-1 — CAD patients", (s) => share(s.glp1Cad)],
+    ["5", "GLP-1 prescribed or advised", (s) => share(s.glp1OrAdvised)],
     ["6", "On Awiqli", (s) => share(s.icodec)],
     ["7", "On both", (s) => share(s.both)],
     ["8", "Dual adiposity — diagnosis", (s) => share(s.dualDx)],

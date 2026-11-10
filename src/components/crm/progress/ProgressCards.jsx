@@ -1,7 +1,12 @@
-import { deltaText, pct } from "./progressText.js";
+import { daysText, deltaDecimal, deltaText, pct } from "./progressText.js";
 
-function Card({ label, value, before, note, tone }) {
-  const delta = before === undefined ? null : deltaText(value, before);
+function Card({ label, value, before, note, tone, decimal }) {
+  const delta =
+    before === undefined
+      ? null
+      : decimal
+        ? deltaDecimal(Number(value), before)
+        : deltaText(value, before);
   return (
     <div className={`prg__card ${tone ? `prg__card--${tone}` : ""}`}>
       <span className="prg__card-n">{value ?? "—"}</span>
@@ -24,7 +29,7 @@ function Section({ title, children }) {
   );
 }
 
-export default function ProgressCards({ cards, previous }) {
+export default function ProgressCards({ cards, previous, team }) {
   const v = cards.visits;
   const pv = previous.visits;
   const r = cards.referrals;
@@ -35,6 +40,17 @@ export default function ProgressCards({ cards, previous }) {
     <>
       <Section title="Visits and coverage">
         <Card label="Visits" value={v.visits} before={pv.visits} />
+        <Card
+          label="Visits per working day"
+          value={v.per_working_day == null ? "—" : v.per_working_day.toFixed(1)}
+          before={pv.per_working_day == null ? undefined : pv.per_working_day}
+          decimal
+          note={
+            v.working_days
+              ? `${daysText(v.working_days)} ${team ? "staff " : ""}working days · ${daysText(v.days_off)} off`
+              : "No working days in this period"
+          }
+        />
         <Card label="Unique doctors" value={v.unique_doctors} before={pv.unique_doctors} />
         <Card
           label="Coverage"

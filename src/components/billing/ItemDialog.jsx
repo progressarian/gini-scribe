@@ -4,6 +4,11 @@ import { codeTyped, digitsTyped, errorOf, moneyTyped } from "./format";
 import useDialog from "./useDialog";
 import BillDialogLayer from "./BillDialogLayer";
 import AlsoBilledAs from "./AlsoBilledAs";
+import {
+  FOLLOW_UP_WINDOW_MAX_DAYS,
+  FOLLOW_UP_WITHIN_DAYS,
+  RECENT_FOLLOW_UP,
+} from "../../../shared/billingVocab";
 
 function Field({ label, hint, className = "", children }) {
   const id = useId();
@@ -30,7 +35,11 @@ const formOf = (item, subgroupId, prefill = {}) => ({
   tax_code_id: text(item?.tax_code_id),
   price_includes_tax: item?.price_includes_tax ?? false,
   doctor_id: text(item?.doctor_id),
-  visit_type: text(item?.visit_type),
+  visit_type: item?.visit_type === RECENT_FOLLOW_UP ? "Follow Up" : text(item?.visit_type),
+  follow_up_within_days: text(
+    item?.follow_up_within_days ??
+      (item?.visit_type === RECENT_FOLLOW_UP ? FOLLOW_UP_WITHIN_DAYS : null),
+  ),
   test_catalog_id: text(item?.test_catalog_id),
   price_per_patient: item?.price_per_patient ?? false,
   is_outsourced: item?.is_outsourced ?? false,
@@ -55,6 +64,10 @@ const payloadOf = (form) => {
     price_includes_tax: taxed ? form.price_includes_tax : false,
     doctor_id: consultation && form.doctor_id ? Number(form.doctor_id) : null,
     visit_type: consultation ? form.visit_type || null : null,
+    follow_up_within_days:
+      consultation && form.visit_type === "Follow Up" && form.follow_up_within_days
+        ? Number(form.follow_up_within_days)
+        : null,
     test_catalog_id: form.kind === "test" ? form.test_catalog_id || null : null,
     price_per_patient: FIXED_PRICE_KINDS.includes(form.kind) ? false : form.price_per_patient,
     is_outsourced: form.kind === "test" ? form.is_outsourced : false,
@@ -64,7 +77,12 @@ const payloadOf = (form) => {
 const withCurrent = (options, id, current) =>
   !id || options.some((o) => String(o.id) === String(id)) ? options : [...options, current()];
 
-const TYPED = { base_price: moneyTyped, code: codeTyped, max_quantity: digitsTyped };
+const TYPED = {
+  base_price: moneyTyped,
+  code: codeTyped,
+  max_quantity: digitsTyped,
+  follow_up_within_days: (value) => digitsTyped(value).slice(0, 2),
+};
 
 const same = (key, a, b) =>
   key === "base_price" ? Number(a) === Number(b) : String(a ?? "") === String(b ?? "");
@@ -356,6 +374,20 @@ export default function ItemDialog({
                     ))}
                   </select>
                 </Field>
+                {form.visit_type === "Follow Up" ? (
+                  <Field
+                    label="Follow-up window (days)"
+                    hint={`Leave blank for the normal Follow Up fee. Enter 1–${FOLLOW_UP_WINDOW_MAX_DAYS} to use this fee only when the patient's last full-fee visit with this consultant was within that many days.`}
+                    className="bill-item__span2"
+                  >
+                    <input
+                      className="jb-assign"
+                      inputMode="numeric"
+                      value={form.follow_up_within_days}
+                      onChange={set("follow_up_within_days")}
+                    />
+                  </Field>
+                ) : null}
               </div>
             </>
           ) : null}

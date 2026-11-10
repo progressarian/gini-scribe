@@ -16,6 +16,7 @@ export const GENERAL_RULES = [
   "A payment rule's amount may not be higher than the price of any item it covers. Make a separate rule for cheaper items.",
   "Columns that take several values (visit_types, groups, doctors, categories, allowed_roles…) are comma-separated: New, Follow Up",
   "On the Consultant fees sheet, a blank visit_type means the fee is for both New and Follow Up visits of that doctor. Investigation visits have no consultation fee. The doctor must already have a consultation item for each of those visit types (on the Items sheet or the Services page); each row saves the doctor's price for the category and what the patient pays for it.",
+  "Follow-up window fees (for example Follow Up within 7 days) are set up on the Consultant fees page, not in this file; their items still appear on the Items sheet and can be renamed or repriced there.",
   "On the Discounts sheet, groups, subgroups and items are written as their codes, doctors by name (or id if two share a name) and categories by category code. A discount is matched by its rule_name: uploading the same name again updates it.",
   "The upload only adds and updates. To retire a row, set active to no; rows are never deleted by an upload.",
   "Uploading the same file twice changes nothing the second time. A blank start date (valid_from) is set to the upload day only when the row is first created; later uploads keep it.",

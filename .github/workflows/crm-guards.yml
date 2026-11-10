@@ -75,6 +75,7 @@ jobs:
         2026-10-27_crm_doctor_manage.sql
         2026-10-28_crm_tasks_kinds.sql
         2026-10-28_crm_rls_speed.sql
+        2026-11-10_crm_days_off.sql
 
     steps:
       - uses: actions/checkout@v4

@@ -87,6 +87,9 @@ export default function StaffTiles({ data }) {
         value={`${count(total.patients)} ${total.patients === 1 ? "patient" : "patients"}`}
       >
         <Line label="Bills finalised" value={count(total.finalised)} />
+        {total.closed_by_cancel ? (
+          <Line label="Closed by test cancel" value={count(total.closed_by_cancel)} />
+        ) : null}
         <Line label="Check-ins" value={count(total.check_ins)} />
         <Line label="Payments taken" value={count(total.payments)} />
         {total.cancelled ? <Line label="Bills cancelled" value={count(total.cancelled)} /> : null}

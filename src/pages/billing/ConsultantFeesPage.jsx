@@ -17,7 +17,12 @@ import Pagination from "../../components/ui/Pagination";
 import ConsultantFeeCopy from "../../components/billing/ConsultantFeeCopy";
 import ConsultantFeeCreateItem from "../../components/billing/ConsultantFeeCreateItem";
 import ConsultantFeeEditor from "../../components/billing/ConsultantFeeEditor";
-import { cellSummary, paysText, whoOf } from "../../components/billing/consultantFeeText";
+import {
+  cellSummary,
+  paysText,
+  visitLabel,
+  whoOf,
+} from "../../components/billing/consultantFeeText";
 import { requestErrorOf, rupees } from "../../components/billing/format";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
@@ -61,7 +66,7 @@ function inheritedNote(cell) {
 }
 
 function FeeCell({ row, column, cell, parentLabel, onEdit }) {
-  const who = `${whoOf(row)} (${row.visit_type})`;
+  const who = `${whoOf(row)} (${visitLabel(row)})`;
   if (cell.general) {
     return (
       <td className="cf-cell cf-cell--general">
@@ -321,9 +326,10 @@ export default function ConsultantFeesPage() {
           <h2 className="flow-sec-title">Consultant fees</h2>
         </div>
         <div className="fset__cardsub">
-          Each doctor's New, Follow Up and Follow-up within 3 days fee for every category, and what
-          the patient pays. Click a cell to change it. Greyed values are inherited — from the parent
-          category, a wider rule or the base price — until the cell gets its own.
+          Each doctor's New and Follow Up fee, and any follow-up window fees (for example Follow Up
+          within 7 days), for every category, and what the patient pays. Click a cell to change it.
+          Greyed values are inherited — from the parent category, a wider rule or the base price —
+          until the cell gets its own.
         </div>
         <div className="bill-form cf-filters">
           <Picker
@@ -484,6 +490,28 @@ export default function ConsultantFeesPage() {
                           <span className="flow-muted"> (inactive)</span>
                         ) : null}
                         <div className="flow-muted bill-items__sub">{row.item.code}</div>
+                        {row.visit_type === "Follow Up" &&
+                        !row.follow_up_within_days &&
+                        row.doctor_active !== false ? (
+                          <button
+                            type="button"
+                            className="flow-btn flow-btn-ghost flow-btn-mini"
+                            aria-label={`Add a follow-up window fee for ${whoOf(row)}`}
+                            onClick={() =>
+                              setCreating({
+                                doctor: {
+                                  doctor_id: row.is_default ? null : row.doctor_id,
+                                  doctor_name: row.is_default ? null : row.doctor_name,
+                                  visit_type: "Follow Up",
+                                  window: true,
+                                },
+                                index: null,
+                              })
+                            }
+                          >
+                            + Follow-up window
+                          </button>
+                        ) : null}
                         {isAdmin && !row.is_default && row.doctor_active !== false ? (
                           <button
                             type="button"
@@ -498,7 +526,7 @@ export default function ConsultantFeesPage() {
                         ) : null}
                       </th>
                       <td className="cf-grid__visit">
-                        <span className="bill-tree__badge">{row.visit_type}</span>
+                        <span className="bill-tree__badge">{visitLabel(row)}</span>
                       </td>
                       {grid.columns.map((column) => (
                         <FeeCell
@@ -574,7 +602,7 @@ export default function ConsultantFeesPage() {
           doctor={creating.doctor}
           onClose={() => setCreating(null)}
           onCreated={() => {
-            setFocusAfter(creating.index);
+            if (creating.index !== null) setFocusAfter(creating.index);
             setCreating(null);
           }}
         />

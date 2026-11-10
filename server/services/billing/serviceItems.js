@@ -11,11 +11,14 @@ import { orderedNamesNotPriced } from "./serviceItemAliases.js";
 import { TEST_MATCHES_SQL } from "./testMatch.js";
 import { itemRates } from "./priceLine.js";
 import { FLAT } from "../giniflow/labCatalog.js";
+import { windowDeadline } from "../../../shared/followUp.js";
 import {
   CONSULTATION_DEFAULT_GROUP,
   CONSULTATION_DEFAULT_SUBGROUP,
   CONSULTATION_ITEM_VISIT_TYPES,
+  FOLLOW_UP_WINDOW_MAX_DAYS,
   FOLLOW_UP_WITHIN_DAYS,
+  RECENT_FOLLOW_UP,
 } from "../../../shared/billingVocab.js";
 import { httpError, inTransaction } from "./transaction.js";
 import {
@@ -50,6 +53,7 @@ const COLUMNS = [
   "kind",
   "doctor_id",
   "visit_type",
+  "follow_up_within_days",
   "test_catalog_id",
   "price_per_patient",
   "is_outsourced",
@@ -101,10 +105,20 @@ function cleanMaxQuantity(value) {
 
 function cleanVisitType(value) {
   if (value === undefined || value === null || value === "") return null;
+  if (value === RECENT_FOLLOW_UP) return "Follow Up";
   if (!CONSULTATION_ITEM_VISIT_TYPES.includes(value)) {
     throw httpError(400, `Visit type must be one of: ${CONSULTATION_ITEM_VISIT_TYPES.join(", ")}`);
   }
   return value;
+}
+
+function cleanWindowDays(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const days = readNumber(value, "Enter the number of days as a whole number");
+  if (!Number.isInteger(days) || days < 1 || days > FOLLOW_UP_WINDOW_MAX_DAYS) {
+    throw httpError(400, `Enter a number of days from 1 to ${FOLLOW_UP_WINDOW_MAX_DAYS}`);
+  }
+  return days;
 }
 
 function cleanKind(value) {
@@ -127,6 +141,7 @@ const CLEANERS = {
   kind: cleanKind,
   doctor_id: (v) => cleanId(v, "doctor"),
   visit_type: cleanVisitType,
+  follow_up_within_days: cleanWindowDays,
   test_catalog_id: cleanUuid,
   price_per_patient: (v) => cleanFlag(v, "Price decided per patient"),
   is_outsourced: (v) => cleanFlag(v, "Outsourced"),
@@ -140,6 +155,7 @@ const CREATE_DEFAULTS = {
   price_includes_tax: false,
   doctor_id: null,
   visit_type: null,
+  follow_up_within_days: null,
   test_catalog_id: null,
   price_per_patient: false,
   is_outsourced: false,
@@ -151,6 +167,9 @@ function cleanInput(input, { partial }) {
     if (hasField(input, key)) out[key] = CLEANERS[key](input[key]);
     else if (!partial && key in CREATE_DEFAULTS) out[key] = CREATE_DEFAULTS[key];
     else if (!partial) out[key] = CLEANERS[key](undefined);
+  }
+  if (input?.visit_type === RECENT_FOLLOW_UP && out.follow_up_within_days == null) {
+    out.follow_up_within_days = FOLLOW_UP_WITHIN_DAYS;
   }
   return out;
 }
@@ -172,6 +191,15 @@ function checkShape(item) {
     }
   } else if (item.doctor_id !== null || item.visit_type !== null) {
     throw httpError(400, "Only consultation items have a doctor and a visit type");
+  }
+  if (
+    item.follow_up_within_days != null &&
+    !(item.kind === "consultation" && ["Follow Up", RECENT_FOLLOW_UP].includes(item.visit_type))
+  ) {
+    throw httpError(
+      400,
+      "Only a Follow Up consultation can have a follow-up window; clear the days or set the visit type to Follow Up",
+    );
   }
   if (item.kind === "test" && !item.test_catalog_id) {
     throw httpError(400, "A test item must be linked to a test in the test catalogue");
@@ -287,18 +315,22 @@ async function checkTest(client, testCatalogId, exceptId) {
 
 async function checkConsultationFree(client, item, exceptId) {
   if (item.kind !== "consultation" || !item.is_active) return;
+  const days = item.follow_up_within_days ?? null;
   const { rows } = await client.query(
     `SELECT i.code, i.name FROM service_items i
       WHERE i.kind = 'consultation' AND i.is_active
-        AND i.doctor_id IS NOT DISTINCT FROM $1 AND i.visit_type = $2
-        AND i.id IS DISTINCT FROM $3`,
-    [item.doctor_id, item.visit_type, exceptId],
+        AND i.doctor_id IS NOT DISTINCT FROM $1
+        AND i.follow_up_within_days IS NOT DISTINCT FROM $3::smallint
+        AND ($3::smallint IS NOT NULL OR i.visit_type = $2)
+        AND i.id IS DISTINCT FROM $4`,
+    [item.doctor_id, item.visit_type, days, exceptId],
   );
   if (!rows.length) return;
   const whose = item.doctor_id ? "this doctor" : "the hospital default";
+  const what = days ? `${days}-day follow-up fee` : `active ${item.visit_type} consultation item`;
   throw httpError(
     409,
-    `There is already an active ${item.visit_type} consultation item for ${whose}: ${rows[0].name} (${rows[0].code})`,
+    `There is already ${days ? "a" : "an"} ${what} for ${whose}: ${rows[0].name} (${rows[0].code})`,
   );
 }
 
@@ -319,7 +351,7 @@ function uniqueViolation(error) {
   if (error.constraint === "service_items_consultation_key") {
     return httpError(
       409,
-      "There is already an active consultation item for that doctor and visit type",
+      "There is already an active consultation item for that doctor, visit type and follow-up window",
     );
   }
   if (error.constraint === "service_items_test_catalog_key") {
@@ -336,11 +368,11 @@ async function validate(client, item, { id = null, before = null } = {}) {
   if (changed("doctor_id")) await checkDoctor(client, item.doctor_id);
   if (changed("test_catalog_id")) await checkTest(client, item.test_catalog_id, id);
   if (changed("code")) await assertCodeFree(client, SPEC, item.code, id);
+  if (["kind", "doctor_id", "visit_type", "follow_up_within_days", "is_active"].some(changed)) {
+    await checkConsultationFree(client, item, id);
+  }
   if (changed("name") || changed("subgroup_id")) {
     await checkNameFree(client, item.name, item.subgroup_id, id);
-  }
-  if (["kind", "doctor_id", "visit_type", "is_active"].some(changed)) {
-    await checkConsultationFree(client, item, id);
   }
 }
 
@@ -361,21 +393,63 @@ function cleanReason(value) {
 export const DESK_SEARCH_LIMIT = 30;
 const DESK_SEARCH_TERMS = 8;
 
-export async function seenRecentlyBy({ patientId, visitDate }, doctorId, db = pool) {
-  if (!patientId || !visitDate || !doctorId) return false;
+export async function followUpAnchor({ patientId, visitDate }, doctorId, db = pool) {
+  if (!patientId || !visitDate || !doctorId) return null;
   const { rows } = await db.query(
-    `SELECT EXISTS (
-       SELECT 1 FROM appointments a
-        WHERE a.patient_id = $1
-          AND a.status = 'completed'
-          AND a.appointment_date BETWEEN $2::date - $4::int AND $2::date - 1
-          AND (a.doctor_id = $3
-               OR lower(btrim(a.doctor_name)) =
-                  (SELECT lower(btrim(d.name)) FROM doctors d WHERE d.id = $3))
-     ) AS recent`,
-    [patientId, visitDate, doctorId, FOLLOW_UP_WITHIN_DAYS],
+    `SELECT max(a.appointment_date)::text AS anchor
+       FROM appointments a
+      WHERE a.patient_id = $1
+        AND a.status = 'completed'
+        AND a.appointment_date < $2::date
+        AND (a.doctor_id = $3
+             OR lower(btrim(a.doctor_name)) =
+                (SELECT lower(btrim(d.name)) FROM doctors d WHERE d.id = $3))
+        AND NOT EXISTS (
+          SELECT 1 FROM bills b
+            JOIN bill_lines l ON l.bill_id = b.id AND l.is_live
+            JOIN service_items i ON i.id = l.service_item_id
+           WHERE b.appointment_id = a.id AND b.bill_type = 'invoice'
+             AND b.status <> 'cancelled' AND i.follow_up_within_days IS NOT NULL)`,
+    [patientId, visitDate, doctorId],
   );
-  return rows[0].recent;
+  return rows[0].anchor;
+}
+
+async function holidaysFrom(anchor, db) {
+  const { rows } = await db.query(
+    `SELECT holiday_date::text AS day FROM clinic_holidays
+      WHERE holiday_date BETWEEN $1::date AND $1::date + $2::int`,
+    [anchor, FOLLOW_UP_WINDOW_MAX_DAYS + 30],
+  );
+  return new Set(rows.map((r) => r.day));
+}
+
+export async function windowCovers(item, { patientId, visitDate, doctorId }, db = pool) {
+  if (item?.follow_up_within_days == null) return false;
+  const anchor = await followUpAnchor({ patientId, visitDate }, doctorId, db);
+  if (!anchor) return false;
+  const holidays = await holidaysFrom(anchor, db);
+  return windowDeadline(anchor, item.follow_up_within_days, holidays) >= String(visitDate);
+}
+
+export async function followUpWindowItem({ patientId, visitDate, doctorId }, db = pool) {
+  if (!patientId || !visitDate || !doctorId) return null;
+  const { rows: windows } = await db.query(
+    `SELECT id, name, doctor_id, visit_type, follow_up_within_days FROM service_items
+      WHERE kind = 'consultation' AND is_active AND follow_up_within_days IS NOT NULL
+        AND (doctor_id = $1 OR doctor_id IS NULL)
+      ORDER BY follow_up_within_days, doctor_id IS NULL, id`,
+    [doctorId],
+  );
+  if (!windows.length) return null;
+  const anchor = await followUpAnchor({ patientId, visitDate }, doctorId, db);
+  if (!anchor) return null;
+  const holidays = await holidaysFrom(anchor, db);
+  return (
+    windows.find(
+      (w) => windowDeadline(anchor, w.follow_up_within_days, holidays) >= String(visitDate),
+    ) ?? null
+  );
 }
 
 export async function visitConsultationType(visitId, db = pool) {
@@ -389,12 +463,30 @@ export async function visitConsultationType(visitId, db = pool) {
   return rows.length ? billingVisitType(rows[0].visit_type) : null;
 }
 
+async function visitWindowItemId(visitId, db) {
+  if (!visitId) return null;
+  const { rows } = await db.query(
+    `SELECT v.patient_id, v.visit_date::text AS visit_date,
+            COALESCE(a.doctor_id, v.assigned_doctor_id) AS doctor_id
+       FROM giniflow_visits v LEFT JOIN appointments a ON a.id = v.appointment_id
+      WHERE v.id = $1`,
+    [visitId],
+  );
+  if (!rows.length) return null;
+  const window = await followUpWindowItem(
+    { patientId: rows[0].patient_id, visitDate: rows[0].visit_date, doctorId: rows[0].doctor_id },
+    db,
+  );
+  return window?.id ?? null;
+}
+
 export async function searchDeskItems(filters = {}, db = pool) {
   const q = typeof filters.q === "string" ? filters.q.trim() : "";
   const asked = cleanId(filters.limit, "limit") ?? DESK_SEARCH_LIMIT;
   const limit = Math.min(asked, DESK_SEARCH_LIMIT);
   const consultationType = await visitConsultationType(filters.visitId, db);
-  const params = [limit + 1, consultationType];
+  const windowId = consultationType ? await visitWindowItemId(filters.visitId, db) : null;
+  const params = [limit + 1, consultationType, windowId];
   const terms = q
     .split(",")
     .map((term) => term.split(/\s+/).filter(Boolean).slice(0, 6))
@@ -427,9 +519,11 @@ export async function searchDeskItems(filters = {}, db = pool) {
   const { rows } = await db.query(
     `WITH found AS (
        SELECT i.id, i.code, i.name, i.kind, i.unit, i.allow_quantity, i.max_quantity,
-              i.doctor_id, i.visit_type, i.price_per_patient, i.is_outsourced,
+              i.doctor_id, i.visit_type, i.follow_up_within_days, i.price_per_patient, i.is_outsourced,
               s.name AS subgroup_name, g.name AS group_name,
-              ($2::text IS NULL OR i.kind <> 'consultation' OR i.visit_type = $2::text) AS shown,
+              ($2::text IS NULL OR i.kind <> 'consultation'
+               OR (i.follow_up_within_days IS NULL AND i.visit_type = $2::text)
+               OR i.id = $3::int) AS shown,
               ${termRank} AS term_rank,
               (${wordStart}) AS word_start
          FROM service_items i
@@ -697,12 +791,14 @@ export async function notPricedList(db = pool) {
             own.id AS item_id, own.code AS item_code, own.is_active AS item_active,
             EXISTS (SELECT 1 FROM service_items f
                      WHERE f.kind = 'consultation' AND f.is_active
-                       AND f.doctor_id IS NULL AND f.visit_type = v.visit_type) AS default_covers
+                       AND f.doctor_id IS NULL AND f.visit_type = v.visit_type
+                       AND f.follow_up_within_days IS NULL) AS default_covers
        FROM doctors d
       CROSS JOIN unnest($1::text[]) AS v(visit_type)
        LEFT JOIN LATERAL (
          SELECT i.id, i.code, i.is_active FROM service_items i
           WHERE i.kind = 'consultation' AND i.doctor_id = d.id AND i.visit_type = v.visit_type
+            AND i.follow_up_within_days IS NULL
           ORDER BY i.is_active DESC, i.id DESC LIMIT 1
        ) own ON TRUE
       WHERE d.role = 'consultant' AND COALESCE(d.is_active, TRUE)
