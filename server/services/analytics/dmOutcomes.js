@@ -47,7 +47,7 @@ export const LAB_CONFIRMED_SOURCES = [
   "vitals_sheet",
 ];
 
-const DM_SLUG =
+export const DM_SLUG =
   "^(type_?[12]_?(diabetes(_mellitus)?|dm)|dm[12]|t[12]dm|diabetes(_mellitus)?|lada|early_onset_(type_2_dm|t2dm|type_2_diabetes_mellitus)|young_type_2_dm|type_1b_dm|mody|type_3c_dm|pancreatogenous_diabetes(_type_3c)?|nadm)$";
 
 const TYPE_RULES = [
@@ -808,55 +808,6 @@ function sameGroupTrajectory(people, end) {
   };
 }
 
-function firstVsLatest(people, period) {
-  const pairs = [];
-  for (const p of people) {
-    const tests = (p.series.get("hba1c") || []).filter(
-      (r) => r.d >= period.start && r.d <= period.end,
-    );
-    if (tests.length < 2) continue;
-    const first = tests[0];
-    const latest = tests[tests.length - 1];
-    pairs.push({
-      first: first.val,
-      latest: latest.val,
-      months: dayDiff(first.d, latest.d) / 30.44,
-    });
-  }
-  const change = pairs.map((x) => round(x.latest - x.first, 2));
-  const gap = (lo, hi) => {
-    const sub = pairs.filter((x) => x.months >= lo && x.months < hi);
-    const ch = sub.map((x) => round(x.latest - x.first, 2));
-    return {
-      n: sub.length,
-      change_mean: round(mean(ch), 2),
-      improved_05: share(ch.filter((c) => c <= -0.5).length, sub.length),
-    };
-  };
-  return {
-    n: pairs.length,
-    first_mean: round(mean(pairs.map((x) => x.first)), 2),
-    latest_mean: round(mean(pairs.map((x) => x.latest)), 2),
-    change_mean: round(mean(change), 2),
-    change_median: round(median(change), 2),
-    change_ci95: meanCi(change),
-    any_improvement: share(change.filter((c) => c < 0).length, pairs.length),
-    improved_05: share(change.filter((c) => c <= -0.5).length, pairs.length),
-    improved_10: share(change.filter((c) => c <= -1).length, pairs.length),
-    no_real_change: share(change.filter((c) => c > -0.5 && c < 0.5).length, pairs.length),
-    worsened_05: share(change.filter((c) => c >= 0.5).length, pairs.length),
-    below7_first: share(pairs.filter((x) => x.first < 7).length, pairs.length),
-    below7_latest: share(pairs.filter((x) => x.latest < 7).length, pairs.length),
-    months_between_median: round(median(pairs.map((x) => x.months)), 1),
-    by_time_between: [
-      { label: "Under 6 months apart", ...gap(0, 6) },
-      { label: "6–12 months apart", ...gap(6, 12) },
-      { label: "1–2 years apart", ...gap(12, 24) },
-      { label: "2 years or more apart", ...gap(24, 999) },
-    ],
-  };
-}
-
 function stripPairs(rows) {
   return rows.map(({ pairs, _withBaseline, ...rest }) => rest);
 }
@@ -1079,7 +1030,6 @@ export async function buildDmOutcomes(db, period = DM_PERIOD, { audit = 0, rows 
       deaths_transfers: "not recorded in Scribe",
     },
     funnel,
-    first_vs_latest: firstVsLatest(people, period),
     new_patients: {
       patients: people.filter((p) => p.new_patient).length,
       first_new_visit:

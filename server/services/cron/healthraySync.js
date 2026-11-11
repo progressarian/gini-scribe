@@ -1236,7 +1236,7 @@ export function getDoctorsWithApptsToday(date) {
 
 // ── Run sync for a given date ───────────────────────────────────────────────
 // Accepts optional pre-fetched doctors to avoid redundant API calls in range sync
-async function runSync(date, prefetched = null, opts = {}) {
+export async function runSync(date, prefetched = null, opts = {}) {
   const force = !!opts.force;
   if (!prefetched && !force && syncInFlight) {
     log("Sync", `Skipping ${date} — previous run still in progress`);

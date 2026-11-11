@@ -62,6 +62,17 @@ export default function LoginPage() {
 
   useEffect(() => {
     fetchDoctorsList();
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "visible") fetchDoctorsList();
+    };
+    const timer = setInterval(refreshIfVisible, 60_000);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+    window.addEventListener("focus", refreshIfVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+      window.removeEventListener("focus", refreshIfVisible);
+    };
   }, [fetchDoctorsList]);
 
   // Land each role on a page it can actually open under the capability matrix.

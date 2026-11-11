@@ -68,12 +68,23 @@ if (report) {
   await fs.writeFile(path.join(outDir, "outcomes.xlsx"), await buildDmWorkbook(report));
   const file = path.join(outDir, "dm-outcomes.json");
   await fs.writeFile(file, JSON.stringify(report, null, 2));
-  const all = JSON.parse(
-    await fs.readFile(path.join(outDir, "all-patients.json"), "utf8").catch(() => "null"),
+  const allCount = JSON.parse(
+    await fs.readFile(path.join(outDir, "all-patients-count.json"), "utf8").catch(() => "null"),
   );
-  const html = renderDmScorecard(report, all);
+  const onsetInsulin = JSON.parse(
+    await fs.readFile(path.join(outDir, "onset-insulin.json"), "utf8").catch(() => "null"),
+  );
+  const html = renderDmScorecard(report, allCount, onsetInsulin);
   if (/https?:\/\/|<script\s+src|@import/.test(html))
     throw new Error("scorecard references external resources");
   await fs.writeFile(path.join(outDir, "scorecard.html"), html);
+  await fs.writeFile(
+    path.join(outDir, "scorecard-client.html"),
+    renderDmScorecard(report, allCount, onsetInsulin, { client: true }),
+  );
+  await fs.writeFile(
+    path.join(outDir, "scorecard-client-print.html"),
+    renderDmScorecard(report, allCount, onsetInsulin, { client: true, print: true }),
+  );
   console.log(`Built in ${(report.meta.build_ms / 1000).toFixed(1)}s -> ${file}`);
 }

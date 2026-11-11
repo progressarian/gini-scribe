@@ -70,10 +70,15 @@ function css() {
   .guide dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;margin:6px 0 0}
   .guide dt{font-weight:600}.guide dd{margin:0;color:var(--ink2)}
   .tile .how{margin-top:8px}
+  .more{margin:8px 0 0}
+  .more > summary{cursor:pointer;color:var(--accent);font-size:13px;width:max-content;margin-bottom:8px}
+  .mini{list-style:none;margin:8px 0 0;padding:0}
+  .mini li{display:flex;justify-content:space-between;padding:2px 0;border-top:1px solid var(--grid)}
+  .mini strong{color:var(--ink);font-variant-numeric:tabular-nums}
   .def{color:var(--ink2);font-size:12.5px;margin:6px 0 0}
   ul.caveats{padding-left:18px;margin:6px 0}ul.caveats li{margin:4px 0}
   footer{margin-top:32px;color:var(--muted);font-size:12px}
-  @media print{body{background:#fff}.scroll,.tile{break-inside:avoid}}`;
+  @media print{body{background:#fff;font-size:11px}main{max-width:none;padding:0}.scroll{overflow:visible;break-inside:avoid}.tile{break-inside:avoid}table{font-size:9.5px;table-layout:auto}th,td{white-space:normal;padding:4px 5px}.grid{grid-template-columns:repeat(3,1fr)}.grid--tables{grid-template-columns:repeat(2,1fr)}h2{break-after:avoid}}`;
 }
 
 function how(steps) {
@@ -91,104 +96,59 @@ function tile(label, value, detail, steps) {
 }
 
 function section(title, intro, steps) {
-  return `<h2>${title}</h2>${intro ? `<p class="def">${intro}</p>` : ""}${steps ? how(steps) : ""}`;
+  const id = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return `<h2 id="${id}">${title}</h2>${intro ? `<p class="def">${intro}</p>` : ""}${steps ? how(steps) : ""}`;
 }
 
-const HEAD = {
-  eligible: "Enough time had passed",
-  baseline: "Had a test at first visit",
-  measured: "Re-tested in this window",
-  means: "Average HbA1c: first test → re-test",
-  change: "Average change (points)",
-  any: "Any fall",
-  imp05: "Fell 0.5+ points",
-  imp10: "Fell 1+ point",
-  worse: "Rose 0.5+ points",
-  reached: "Got below 7% (started at 7%+)",
-  stayed: "Stayed below 7% (started below 7%)",
-  below7: "Below 7% at re-test",
-};
-
-function windowRows(windows, keys) {
-  return windows
+function windowTable(label, windows, keys) {
+  const rows = windows
     .filter((w) => keys.includes(w.window))
     .map((w) => {
       const o = w.outcome;
-      return `<tr><th scope="row">${esc(w.label)}<span class="nd">re-test ${w.measurement_range_days[0]}–${w.measurement_range_days[1]} days after first visit; typical ${num(w.median_days_to_followup)} days</span></th>
-        <td class="num">${num(w.eligible)}</td><td class="num">${num(w.with_baseline)}</td>${cell(w.measured)}
-        <td class="num">${fixed(o.baseline_mean)}% → ${fixed(o.follow_mean)}%<span class="nd">middle patient ${fixed(o.baseline_median)}% → ${fixed(o.follow_median)}%</span></td>
-        <td class="num"><strong>${signed(o.change_mean)}</strong><span class="nd">middle patient ${signed(o.change_median)}</span><span class="nd">${ciText(o.change_ci95)}</span></td>
-        ${cell(o.any_improvement)}${cell(o.improved_05)}${cell(o.improved_10)}${cell(o.worsened_05)}
-        ${cell(o.reached_below7)}${cell(o.maintained_below7)}${cell(o.below7_at_follow)}</tr>`;
+      return `<tr><th scope="row">${esc(w.label)} after first visit</th>
+        <td class="num">${num(w.measured.n)}<span class="nd">of ${num(w.with_baseline)} (${pctOf(w.measured)})</span></td>
+        <td class="num">${fixed(o.baseline_mean, 1)}% → <strong>${fixed(o.follow_mean, 1)}%</strong></td>
+        <td class="num"><strong>${signed(o.change_mean)}</strong></td>
+        ${cell(o.improved_05)}${cell(o.worsened_05)}${cell(o.below7_at_follow)}</tr>`;
     })
     .join("");
+  return `<div class="scroll"><table aria-label="${esc(label)}"><thead><tr><th scope="col">Second test</th><th class="num" scope="col">Patients re-tested</th>
+    <th class="num" scope="col">Average HbA1c</th><th class="num" scope="col">Change (points)</th><th class="num" scope="col">Improved 0.5+</th>
+    <th class="num" scope="col">Got worse 0.5+</th><th class="num" scope="col">Below 7%</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
-const WINDOW_HEAD = `<tr><th scope="col">Re-test time</th><th class="num" scope="col">${HEAD.eligible}</th><th class="num" scope="col">${HEAD.baseline}</th>
-  <th class="num" scope="col">${HEAD.measured}</th><th class="num" scope="col">${HEAD.means}</th>
-  <th class="num" scope="col">${HEAD.change}</th><th class="num" scope="col">${HEAD.any}</th>
-  <th class="num" scope="col">${HEAD.imp05}</th><th class="num" scope="col">${HEAD.imp10}</th><th class="num" scope="col">${HEAD.worse}</th>
-  <th class="num" scope="col">${HEAD.reached}</th><th class="num" scope="col">${HEAD.stayed}</th><th class="num" scope="col">${HEAD.below7}</th></tr>`;
+function fullWindowTable(label, windows, keys, open = false) {
+  const rows = windows
+    .filter((w) => keys.includes(w.window))
+    .map((w) => {
+      const o = w.outcome;
+      return `<tr><th scope="row">${esc(w.label)}</th><td class="num">${num(w.eligible)}</td>${cell(w.measured)}
+        <td class="num">${fixed(o.baseline_mean)} / ${fixed(o.baseline_median)}</td><td class="num">${fixed(o.follow_mean)} / ${fixed(o.follow_median)}</td>
+        <td class="num">${signed(o.change_mean)} / ${signed(o.change_median)}</td>
+        ${cell(o.any_improvement)}${cell(o.improved_05)}${cell(o.improved_10)}${cell(o.worsened_05)}${cell(o.reached_below7)}${cell(o.maintained_below7)}</tr>`;
+    })
+    .join("");
+  return `<details class="more"${open ? " open" : ""}><summary>Show all measures</summary><div class="scroll"><table aria-label="${esc(label)}"><thead><tr><th scope="col">Second test</th>
+    <th class="num" scope="col">Eligible</th><th class="num" scope="col">Tested again</th><th class="num" scope="col">First HbA1c (average / middle)</th>
+    <th class="num" scope="col">Second HbA1c (average / middle)</th><th class="num" scope="col">Change (average / middle)</th><th class="num" scope="col">Any fall</th>
+    <th class="num" scope="col">Fell 0.5+</th><th class="num" scope="col">Fell 1.0+</th><th class="num" scope="col">Rose 0.5+</th>
+    <th class="num" scope="col">Reached below 7% (started 7%+)</th><th class="num" scope="col">Stayed below 7% (started below 7%)</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+}
 
 function severityTable(window) {
   const rows = window.by_severity
     .map(
       (b) => `<tr><th scope="row">${esc(b.band)}</th><td class="num">${num(b.n)}</td>
-      <td class="num">${fixed(b.baseline_mean)}% → ${fixed(b.follow_mean)}%</td>
-      <td class="num"><strong>${signed(b.change_mean)}</strong><span class="nd">middle patient ${signed(b.change_median)}</span></td>
-      ${cell(b.improved_05)}${cell(b.worsened_05)}${cell(b.below7_at_follow)}</tr>`,
+      <td class="num">${fixed(b.baseline_mean, 1)}% → <strong>${fixed(b.follow_mean, 1)}%</strong></td>
+      <td class="num"><strong>${signed(b.change_mean)}</strong></td>${cell(b.improved_05)}${cell(b.below7_at_follow)}</tr>`,
     )
     .join("");
-  return `<div class="scroll"><table aria-label="HbA1c change by starting level at ${esc(window.label)}">
-    <thead><tr><th scope="col">HbA1c at first visit</th><th class="num" scope="col">Patients re-tested</th><th class="num" scope="col">Average: first test → re-test</th>
-    <th class="num" scope="col">Average change</th><th class="num" scope="col">${HEAD.imp05}</th><th class="num" scope="col">${HEAD.worse}</th><th class="num" scope="col">${HEAD.below7}</th></tr></thead>
+  return `<div class="scroll"><table aria-label="Results by starting HbA1c"><thead><tr><th scope="col">HbA1c at first visit</th><th class="num" scope="col">Patients</th>
+    <th class="num" scope="col">Average HbA1c</th><th class="num" scope="col">Change (points)</th><th class="num" scope="col">Improved 0.5+</th><th class="num" scope="col">Below 7%</th></tr></thead>
     <tbody>${rows}</tbody></table></div>`;
-}
-
-function controlTable(c) {
-  const a = c.among_complete;
-  const row = (label, s) => `<tr><th scope="row">${label}</th>${cell(s)}</tr>`;
-  return `<div class="scroll"><table aria-label="Latest combined control">
-    <thead><tr><th scope="col">Target (using each patient's latest results)</th><th class="num" scope="col">Patients meeting it</th></tr></thead>
-    <tbody>${row("HbA1c below 7%", a.hba1c_below7)}${row("Blood pressure below 130/80", a.bp_below_130_80)}${row("Blood pressure below 140/90 (looser target)", a.bp_below_140_90)}
-    ${row("LDL cholesterol below 100 mg/dL", a.ldl_below100)}${row("LDL cholesterol below 70 mg/dL (stricter target)", a.ldl_below70)}
-    ${row("<strong>All three: HbA1c below 7%, BP below 130/80, LDL below 100</strong>", a.all_three)}
-    ${row("All three, using the looser BP target", a.all_three_bp140)}</tbody></table></div>`;
-}
-
-function treatmentTable(treatments, mode) {
-  const rows = treatments
-    .map((t) => {
-      const parts = ["m3", "m6", "m12"].map((w) => {
-        const src = mode === "new" ? t.new_start[w] : t[w];
-        const a = src.hba1c;
-        const wt = src.weight;
-        return `<td class="num">${a.n ? `<strong>${signed(a.change_mean)}</strong> HbA1c<span class="nd">${num(a.n)} re-tested of ${num(a.with_baseline)}</span>` : `—<span class="nd">${a.eligible ? `none re-tested yet` : "too recent"}</span>`}
-        ${wt.n ? `<span class="nd">weight ${signed(wt.change_mean, 1)} kg (${num(wt.n)} weighed)</span>` : ""}</td>`;
-      });
-      return `<tr><th scope="row">${esc(t.label)}<span class="nd">first prescribed ${longDate(t.first_start)}</span></th>
-        <td class="num">${num(mode === "new" ? t.new_starts : t.started_in_period)}</td>
-        ${mode === "new" ? "" : `<td class="num">${fixed(t.baseline_hba1c.mean)}%<span class="nd">${num(t.baseline_hba1c.n)} tested</span></td>`}${parts.join("")}</tr>`;
-    })
-    .join("");
-  return `<div class="scroll"><table aria-label="Treatment groups">
-    <thead><tr><th scope="col">Medicine</th><th class="num" scope="col">Patients</th>${mode === "new" ? "" : `<th class="num" scope="col">Average HbA1c when started</th>`}
-    <th class="num" scope="col">After 3 months</th><th class="num" scope="col">After 6 months</th><th class="num" scope="col">After 12 months</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-}
-
-function retentionTable(rows) {
-  const body = rows
-    .map(
-      (
-        r,
-      ) => `<tr><th scope="row">${esc(r.enrollment_year)}</th><td class="num">${num(r.enrolled)}</td>
-      ${["m3", "m6", "m12", "m24"].map((k) => (r[k].visit_in_window.d ? cell(r[k].visit_in_window) : `<td class="num">—<span class="nd">too recent</span></td>`)).join("")}</tr>`,
-    )
-    .join("");
-  return `<div class="scroll"><table aria-label="Patients coming back, by first-visit year">
-    <thead><tr><th scope="col">Year of first visit</th><th class="num" scope="col">Patients</th><th class="num" scope="col">Came back around 3 months</th>
-    <th class="num" scope="col">Around 6 months</th><th class="num" scope="col">Around 12 months</th><th class="num" scope="col">Around 24 months</th></tr></thead>
-    <tbody>${body}</tbody></table></div>`;
 }
 
 function shareTable(label, head, rows) {
@@ -196,427 +156,476 @@ function shareTable(label, head, rows) {
     <tbody>${rows.map(([k, v]) => `<tr><th scope="row">${esc(k)}</th>${cell(v)}</tr>`).join("")}</tbody></table></div>`;
 }
 
-function funnelTable(f) {
-  const rows = [
-    ["All diabetes patients seen in the period", { n: f.registry, d: f.registry, pct: 100 }],
-    ["Came only once", f.single_visit],
-    ["Had an HbA1c test at their first visit", f.with_baseline_hba1c],
-    ["Had at least one HbA1c test in the period", f.with_any_hba1c_in_period],
-    ["Had 2 or more HbA1c tests", f.with_two_plus_hba1c],
-    ["Came 3 or more times", f.three_plus_visits],
-    ["Came 3 or more times, over at least 6 months", f.three_visits_over_six_months],
-  ];
-  const windows = f.windows
-    .map(
-      (
-        w,
-      ) => `<tr><th scope="row">${esc(w.label)}</th><td class="num">${num(w.eligible)}</td><td class="num">${num(w.too_recent)}</td>
-      <td class="num">${num(w.with_baseline)}</td>${cell(w.measured)}</tr>`,
-    )
-    .join("");
-  return `${shareTable("Diabetes patients", "Group", rows)}
-  <div class="scroll" style="margin-top:12px"><table aria-label="Who could be re-tested at each time"><thead><tr><th scope="col">Re-test time</th>
-  <th class="num" scope="col">${HEAD.eligible}</th><th class="num" scope="col">Joined too recently</th><th class="num" scope="col">${HEAD.baseline}</th>
-  <th class="num" scope="col">${HEAD.measured}</th></tr></thead><tbody>${windows}</tbody></table></div>`;
-}
-
-const MARKER_LABEL = {
-  weight: ["Weight", "kg"],
-  bmi: ["BMI", "kg/m²"],
-  sbp: ["Blood pressure (top number)", "mmHg"],
-  dbp: ["Blood pressure (bottom number)", "mmHg"],
-  ldl: ["LDL cholesterol", "mg/dL"],
-  egfr: ["Kidney function (eGFR)", "mL/min/1.73m²"],
-  uacr: ["Urine protein (UACR)", "mg/g"],
-};
+const MARKERS_SHOWN = [
+  ["sbp", "Blood pressure (top number)", "mmHg", 0],
+  ["dbp", "Blood pressure (bottom number)", "mmHg", 0],
+  ["ldl", "LDL cholesterol", "mg/dL", 0],
+  ["egfr", "Kidney function (eGFR)", "", 0],
+  ["weight", "Weight (rough, see limits)", "kg", 1],
+  ["bmi", "BMI (rough, see limits)", "kg/m²", 1],
+];
 
 function markerTable(markers) {
-  const rows = Object.entries(markers)
-    .map(([key, byWindow]) => {
-      const [label, unit] = MARKER_LABEL[key];
-      return `<tr><th scope="row">${label}<span class="nd">${unit}</span></th>${["m6", "m12", "m24"]
-        .map((wk) => {
-          const r = byWindow[wk];
-          return r.n
-            ? `<td class="num">${fixed(r.baseline_mean, 1)} → ${fixed(r.follow_mean, 1)}<span class="nd">average change ${signed(r.change_mean, 1)}, middle patient ${signed(r.change_median, 1)}; ${num(r.n)} re-tested of ${num(r.with_baseline)}</span></td>`
-            : `<td class="num">—</td>`;
-        })
-        .join("")}</tr>`;
-    })
-    .join("");
-  return `<div class="scroll"><table aria-label="Other health measures"><thead><tr><th scope="col">Measure</th><th class="num" scope="col">After 6 months</th>
-    <th class="num" scope="col">After 12 months</th><th class="num" scope="col">After 24 months</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  const rows = MARKERS_SHOWN.map(([key, label, unit, d]) => {
+    const cells = ["m6", "m12", "m24"]
+      .map((wk) => {
+        const r = markers[key][wk];
+        return r.n
+          ? `<td class="num">${fixed(r.baseline_mean, d)} → <strong>${fixed(r.follow_mean, d)}</strong><span class="nd">${signed(r.change_mean, 1)} · ${num(r.n)} patients</span></td>`
+          : `<td class="num">—</td>`;
+      })
+      .join("");
+    return `<tr><th scope="row">${label}${unit ? `<span class="nd">${unit}</span>` : ""}</th>${cells}</tr>`;
+  }).join("");
+  return `<div class="scroll"><table aria-label="Other health measures"><thead><tr><th scope="col">Measure (average)</th><th class="num" scope="col">After 6 months</th>
+    <th class="num" scope="col">After 1 year</th><th class="num" scope="col">After 2 years</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function kidneyTable(k) {
   const row = (wk, label) => {
     const u = k[wk].uacr;
-    const e = k[wk].egfr;
-    return `<tr><th scope="row">${label}</th>
-      <td class="num">${fixed(u.median_baseline, 1)} → ${fixed(u.median_follow, 1)}<span class="nd">${num(u.measured.n)} re-tested of ${num(u.with_baseline)}</span></td>
-      ${cell(u.stage_better)}${cell(u.stage_worse)}${cell(u.albuminuric_fell_30pct)}
-      <td class="num">${num(e.median_baseline)} → ${num(e.median_follow)}<span class="nd">${num(e.measured.n)} re-tested of ${num(e.with_baseline)}</span></td>${cell(e.fell_30pct)}</tr>`;
+    return `<tr><th scope="row">${label}</th><td class="num">${num(u.measured.n)}</td>${cell(u.stage_better)}${cell(u.stage_same)}${cell(u.stage_worse)}${cell(u.albuminuric_fell_30pct)}</tr>`;
   };
-  return `<div class="scroll"><table aria-label="Kidney results"><thead><tr><th scope="col">Re-test time</th>
-    <th class="num" scope="col">Urine protein, middle patient (mg/g)</th><th class="num" scope="col">Protein level improved</th><th class="num" scope="col">Protein level worsened</th>
-    <th class="num" scope="col">Protein fell by 30%+ (those who had raised protein)</th><th class="num" scope="col">Kidney function (eGFR), middle patient</th><th class="num" scope="col">Kidney function fell by 30%+</th></tr></thead>
-    <tbody>${row("m12", "After 12 months")}${row("m24", "After 24 months")}</tbody></table></div>`;
+  return `<div class="scroll"><table aria-label="Urine protein results"><thead><tr><th scope="col">Second test</th><th class="num" scope="col">Patients</th>
+    <th class="num" scope="col">Protein level better</th><th class="num" scope="col">Same</th><th class="num" scope="col">Worse</th>
+    <th class="num" scope="col">Fell by 30%+ (those with raised protein)</th></tr></thead>
+    <tbody>${row("m12", "After 1 year")}${row("m24", "After 2 years")}</tbody></table></div>`;
 }
 
-function combinedChangeTable(rows) {
-  return `<div class="scroll"><table aria-label="All three targets over time"><thead><tr><th scope="col">Re-test time</th><th class="num" scope="col">Patients with all three tested at both times</th>
-    <th class="num" scope="col">All three on target at first visit</th><th class="num" scope="col">All three on target at re-test</th></tr></thead><tbody>
-    ${rows.map((r) => `<tr><th scope="row">${r.window === "m6" ? "After 6 months" : "After 12 months"}</th><td class="num">${num(r.complete_pairs)}<span class="nd">of ${num(r.eligible)} with enough time</span></td>${cell(r.all_three_at_baseline)}${cell(r.all_three_at_follow_up)}</tr>`).join("")}
-    </tbody></table></div>`;
+function controlTable(c) {
+  const a = c.among_complete;
+  const row = (label, s) => `<tr><th scope="row">${label}</th>${cell(s)}</tr>`;
+  return `<div class="scroll"><table aria-label="Targets met"><thead><tr><th scope="col">Target (latest result)</th><th class="num" scope="col">Patients meeting it</th></tr></thead>
+    <tbody>${row("HbA1c below 7%", a.hba1c_below7)}${row("Blood pressure below 140/90", a.bp_below_140_90)}${row("Blood pressure below 130/80 (stricter)", a.bp_below_130_80)}
+    ${row("LDL cholesterol below 100", a.ldl_below100)}${row("LDL cholesterol below 70 (stricter)", a.ldl_below70)}
+    ${row("<strong>All three (BP below 140/90)</strong>", a.all_three_bp140)}${row("All three (BP below 130/80)", a.all_three)}</tbody></table></div>`;
 }
 
-function biasTable(cmp, label) {
+function medicineTable(treatments) {
+  const rows = treatments
+    .map((t) => {
+      const parts = ["m3", "m6", "m12"].map((w) => {
+        const a = t.new_start[w].hba1c;
+        return `<td class="num">${a.n >= 10 ? `<strong>${signed(a.change_mean)}</strong><span class="nd">${num(a.n)} patients</span>` : `—<span class="nd">${a.eligible ? "too few re-tested" : "too new"}</span>`}</td>`;
+      });
+      return `<tr><th scope="row">${esc(t.label)}</th><td class="num">${num(t.started_in_period)}</td><td class="num">${num(t.new_starts)}</td>${parts.join("")}</tr>`;
+    })
+    .join("");
+  return `<div class="scroll"><table aria-label="Medicines"><thead><tr><th scope="col">Medicine</th><th class="num" scope="col">Prescribed</th><th class="num" scope="col">Started at Gini</th>
+    <th class="num" scope="col">HbA1c change after 3 months</th><th class="num" scope="col">After 6 months</th><th class="num" scope="col">After 1 year</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function retentionTable(rows) {
+  const body = rows
+    .filter((r) => r.enrolled >= 10)
+    .map(
+      (
+        r,
+      ) => `<tr><th scope="row">${esc(r.enrollment_year)}</th><td class="num">${num(r.enrolled)}</td>
+      ${["m3", "m6", "m12", "m24"].map((k) => (r[k].visit_in_window.d ? cell(r[k].visit_in_window) : `<td class="num">—<span class="nd">too recent</span></td>`)).join("")}</tr>`,
+    )
+    .join("");
+  return `<div class="scroll"><table aria-label="Coming back by first-visit year"><thead><tr><th scope="col">First visit in</th><th class="num" scope="col">Patients</th>
+    <th class="num" scope="col">Visit around 3 months</th><th class="num" scope="col">Around 6 months</th><th class="num" scope="col">Around 1 year</th><th class="num" scope="col">Around 2 years</th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+
+function biasTable(cmp) {
   const r = (k, f) =>
     `<tr><th scope="row">${k}</th><td class="num">${f(cmp.measured)}</td><td class="num">${f(cmp.not_measured)}</td></tr>`;
-  return `<div class="scroll"><table aria-label="Re-tested versus not re-tested at ${label}">
-    <thead><tr><th scope="col">At first visit (${label} group)</th><th class="num" scope="col">Came back and re-tested</th><th class="num" scope="col">Not re-tested</th></tr></thead>
-    <tbody>${r("Patients", (g) => num(g.n))}${r("Average age", (g) => fixed(g.mean_age, 1))}${r("Women", (g) => pctOf(g.female))}
-    ${r("Average HbA1c at first visit", (g) => `${fixed(g.mean_baseline_hba1c)}%`)}${r("Visits (middle patient)", (g) => num(g.median_visits))}${r("Type 1 / LADA", (g) => pctOf(g.type1))}</tbody></table></div>`;
+  return `<div class="scroll"><table aria-label="Re-tested versus not re-tested"><thead><tr><th scope="col">At first visit</th><th class="num" scope="col">Re-tested at 1 year</th><th class="num" scope="col">Not re-tested</th></tr></thead>
+    <tbody>${r("Patients", (g) => num(g.n))}${r("Average age", (g) => fixed(g.mean_age, 0))}${r("Women", (g) => pctOf(g.female))}
+    ${r("Average HbA1c", (g) => `${fixed(g.mean_baseline_hba1c, 1)}%`)}${r("Visits (middle patient)", (g) => num(g.median_visits))}</tbody></table></div>`;
 }
 
-function allPatientsSection(all, dmRegistry) {
-  if (!all) {
-    return `<h2>All patients seen at Gini</h2><p class="def">Not built yet. Run <code>node server/scripts/build-all-patients.mjs --out=&lt;this folder&gt;</code> when the database is quiet.</p>`;
-  }
-  const m = all.meta;
-  const newPts = all.new_patients_2025_26;
-  return `${section(
-    "All patients seen at Gini (not only diabetes)",
-    `Everyone with at least one visit between ${longDate(m.period.start)} and ${longDate(m.period.end)}, whatever their condition. Diabetes patients are ${pctOf({ n: dmRegistry, d: all.total_seen, pct: (dmRegistry / all.total_seen) * 100 })} of them. Data taken ${longDate(m.generated_at)}.`,
-    [
-      `Scribe holds ${num(m.patients_in_scribe)} patient records in total`,
-      `${num(all.never_seen_in_period)} had no visit in the period (no consultation and no attended appointment), so they are left out`,
-      `${num(m.duplicate_records_merged)} duplicate records of the same person (same name and date of birth) were merged`,
-      `= <strong>${num(all.total_seen)} people seen</strong>`,
-      `Scribe has records from 2022 and full appointment data from January 2025, so this is not Gini's lifetime patient count in HealthRay`,
-    ],
-  )}
-  <div class="grid">
-    ${tile("People seen", num(all.total_seen), `at least one visit in the period`)}
-    ${tile("New patients in 2025–26", num(newPts.n), `${pctOf(newPts)} of everyone seen; first visit was a "New Patient" visit`)}
-    ${tile("Diabetes patients", num(dmRegistry), `${pctOf({ n: dmRegistry, d: all.total_seen, pct: (dmRegistry / all.total_seen) * 100 })} of everyone seen`)}
-    ${tile("Seen in the last 6 months", num(all.status[0].n), `${pctOf(all.status[0])} of everyone seen`)}
-  </div>
-  <div class="grid grid--tables">
-    ${shareTable(
-      "All patients by year of first visit",
-      "Year of first visit",
-      all.first_visit_year.map((x) => [x.label, x]),
-    )}
-    ${shareTable(
-      "All patients by sex",
-      "Sex",
-      all.sex.map((x) => [x.label, x]),
-    )}
-    ${shareTable(
-      "All patients by age at first visit",
-      "Age at first visit",
-      all.age.map((x) => [x.label, x]),
-    )}
-    ${shareTable(
-      "All patients by number of visits",
-      "Visits in the period",
-      all.visits.map((x) => [x.label, x]),
-    )}
-    ${shareTable(
-      "All patients by last visit",
-      "Last visit",
-      all.status.map((x) => [x.label, x]),
-    )}
-    ${shareTable(
-      "All patients by recorded condition",
-      "Recorded condition (a patient can have several)",
-      all.conditions.map((x) => [x.label, x]),
-    )}
-  </div>`;
-}
-
-function twoTestSection(report, all) {
-  const fl = report.first_vs_latest;
-  const f = report.funnel;
-  if (!fl) return "";
-  const totalSeen = all ? all.total_seen : null;
-  const rows = [
-    ...(totalSeen ? [["All patients seen at Gini", { n: totalSeen, d: totalSeen, pct: 100 }]] : []),
-    [
-      "Have diabetes",
-      {
-        n: f.registry,
-        d: totalSeen ?? f.registry,
-        pct: totalSeen ? (f.registry / totalSeen) * 100 : 100,
-      },
-    ],
-    [
-      "Had HbA1c tested 2 or more times",
-      { n: fl.n, d: f.registry, pct: (fl.n / f.registry) * 100 },
-    ],
-    ["Improved by 0.5 points or more (first test → latest test)", fl.improved_05],
-    ["Improved by 1 point or more", fl.improved_10],
-    ["Stayed about the same (within 0.5 points)", fl.no_real_change],
-    ["Got worse by 0.5 points or more", fl.worsened_05],
-  ];
-  return `${section(
-    "From all patients to patients who improved",
-    `Of the ${num(fl.n)} diabetes patients with at least two HbA1c tests, average HbA1c went from <strong>${fixed(fl.first_mean)}%</strong> at their first test to <strong>${fixed(fl.latest_mean)}%</strong> at their latest test, a change of <strong>${signed(fl.change_mean)} points</strong> (likely true range ${signed(fl.change_ci95[0])} to ${signed(fl.change_ci95[1])}). <strong>${pctOf(fl.improved_05)}</strong> improved by 0.5 points or more. Below 7%: ${pctOf(fl.below7_first)} at the first test, ${pctOf(fl.below7_latest)} at the latest.`,
-    [
-      ...(totalSeen
-        ? [`${num(totalSeen)} people seen at Gini in the period (see "All patients" above)`]
-        : []),
-      `${num(f.registry)} of them have diabetes`,
-      `${num(fl.n)} had HbA1c tested on 2 or more different dates in the period (after removing values copied forward from old notes)`,
-      `For each of them: latest test − first test. Improved = fell by 0.5 points or more`,
-      `The time between first and latest test varies (middle patient ${fixed(fl.months_between_median, 1)} months), so this is a simple overall picture. The tables further down compare everyone at the same time point (3, 6, 12 months) and are the stronger measure`,
-    ],
-  )}
-  ${shareTable("All patients to improved", "Group", rows)}
-  <div class="scroll" style="margin-top:12px"><table aria-label="Change by time between tests"><thead><tr><th scope="col">Time between first and latest test</th><th class="num" scope="col">Patients</th><th class="num" scope="col">Average change</th><th class="num" scope="col">Improved 0.5+ points</th></tr></thead>
-  <tbody>${fl.by_time_between.map((g) => `<tr><th scope="row">${esc(g.label)}</th><td class="num">${num(g.n)}</td><td class="num"><strong>${signed(g.change_mean)}</strong></td>${cell(g.improved_05)}</tr>`).join("")}</tbody></table></div>`;
-}
-
-export function renderDmScorecard(report, all = null) {
+export function renderDmScorecard(
+  report,
+  allCount = null,
+  onsetInsulin = null,
+  { client = false, print = false } = {},
+) {
   const f = report.funnel;
   const w = Object.fromEntries(report.hba1c.windows.map((x) => [x.window, x]));
+  const lab12 = report.hba1c.lab_confirmed_only.find((x) => x.window === "m12").outcome;
   const ctl = report.latest_control.all;
+  const a3 = ctl.among_complete;
   const tr = Object.fromEntries(report.treatments.map((t) => [t.key, t]));
   const eng = report.engagement;
   const st = Object.fromEntries(eng.status.map((s) => [s.status, s]));
   const m = report.meta;
-  const yr = Object.fromEntries(
-    report.demographics.enrollment_by_year.map((y) => [y.year, y.patients]),
-  );
   const np = Object.fromEntries(report.new_patients.windows.map((x) => [x.window, x]));
   const conf = f.confirmation;
   const sg = report.new_patients.same_patients;
   const confirmed12 = report.confirmed_only.find((x) => x.window === "m12").outcome;
   const byDate = (days) => longDate(addDays(m.period.end, -days));
-  const chain = (win, label) => [
-    `${num(f.registry)} diabetes patients`,
-    `${num(win.eligible)} had their first visit by ${byDate(win.measurement_range_days[1])}, so enough time had passed`,
-    `${num(win.with_baseline)} of them had an HbA1c test at their first visit (the starting value)`,
-    `${num(win.measured.n)} had another HbA1c test ${label} (${win.measurement_range_days[0]}–${win.measurement_range_days[1]} days after the first visit)`,
-  ];
-  const registrySteps = [
-    `Patients in Scribe with a recorded diabetes diagnosis, plus ${num(f.by_definition.lab_confirmed)} without one but with two HbA1c tests of 6.5% or more on different dates`,
-    `Keep only those seen at least once between ${longDate(m.period.start)} and ${longDate(m.period.end)} (a consultation or an attended appointment)`,
-    `Merge ${num(m.duplicate_records_merged)} duplicate records of the same person (same name and date of birth)`,
-    `= <strong>${num(f.registry)} people</strong>: ${num(conf.medicine.n)} on diabetes medicines + ${num(conf.hba1c_only.n)} with HbA1c 6.5% or more + ${num(conf.unconfirmed.n)} with a diagnosis only`,
+  const fl = allCount?.first_vs_latest_diabetes;
+  const on = onsetInsulin?.onset;
+  const gi = onsetInsulin?.glp1_insulin;
+  const group = (title, cards) =>
+    `<h3>${title}</h3><div class="grid">${cards.filter(Boolean).join("")}</div>`;
+  const targetCard = (label, s, extra, steps) =>
+    tile(label, pctOf(s), `${num(s.n)} of ${num(s.d)} patients.${extra}`, steps);
+  const targetSteps = (count, label) => [
+    `Each diabetes patient's latest HbA1c, blood pressure and LDL from the 12 months before their last visit`,
+    `${num(ctl.complete.n)} patients had all three tested; all target cards use this same group`,
+    `${num(count)} of them ${label}`,
   ];
 
-  const tiles = [
+  const patientCards = group("Patients", [
+    allCount &&
+      tile(
+        "All patients seen at Gini",
+        num(allCount.total_seen),
+        `Any condition, at least one visit in the period.`,
+        [
+          `${num(allCount.patients_in_scribe)} patient records in Scribe`,
+          `${num(allCount.never_seen_in_period)} with no visit in the period removed`,
+          `${num(allCount.duplicate_records_merged)} duplicate records of the same person merged`,
+          `= ${num(allCount.total_seen)} people`,
+        ],
+      ),
+    allCount &&
+      tile(
+        "Patients without diabetes",
+        num(allCount.total_seen - f.registry),
+        `${fixed(((allCount.total_seen - f.registry) / allCount.total_seen) * 100, 1)}% of all patients: thyroid, BP, PCOS, obesity, prediabetes and others.`,
+        [
+          `${num(allCount.total_seen)} all patients − ${num(f.registry)} diabetes patients = ${num(allCount.total_seen - f.registry)}`,
+        ],
+      ),
     tile(
-      "Diabetes patients seen",
+      "Diabetes patients",
       num(f.registry),
-      `At least one visit between ${longDate(m.period.start)} and ${longDate(m.period.end)}. ${fixed(conf.medicine.pct + conf.hba1c_only.pct, 1)}% confirmed by medicines or a high HbA1c. ${num(f.single_visit.n)} came only once.`,
-      registrySteps,
-    ),
-    tile(
-      "Had HbA1c tested 2 or more times",
-      num(f.with_two_plus_hba1c.n),
-      `${pctOf(f.with_two_plus_hba1c)} of diabetes patients. A change can only be seen with two tests.`,
+      `${allCount ? `${fixed((f.registry / allCount.total_seen) * 100, 1)}% of all patients. ` : ""}${fixed(conf.medicine.pct + conf.hba1c_only.pct, 1)}% confirmed by medicine or a blood test.`,
       [
-        `All HbA1c tests dated inside the period`,
-        `Removed values copied forward from old notes and tests with only a year as the date`,
-        `Patients with 2 or more different test dates = ${num(f.with_two_plus_hba1c.n)} of ${num(f.registry)}`,
+        `Diabetes is written in their record, or two HbA1c tests were 6.5% or more`,
+        `Not counted: prediabetes, and diabetes only during pregnancy`,
+        `Visited Gini at least once in the period (each person counted once)`,
+        `${num(conf.medicine.n)} take diabetes medicine · ${num(conf.hba1c_only.n)} have a high HbA1c · ${num(conf.unconfirmed.n)} have the diagnosis only`,
       ],
     ),
     tile(
       "Came 3 or more times",
       num(f.three_plus_visits.n),
-      `${pctOf(f.three_plus_visits)} of diabetes patients; ${num(f.three_visits_over_six_months.n)} of them over at least 6 months.`,
+      `${pctOf(f.three_plus_visits)} of diabetes patients. ${num(f.single_visit.n)} came only once.`,
       [
-        `A visit = a day with a consultation or an attended appointment (several records on one day count once)`,
-        `Patients with 3 or more visit days = ${num(f.three_plus_visits.n)}`,
-        `Of these, ${num(f.three_visits_over_six_months.n)} had at least 6 months between their first and last visit`,
+        `A visit = a day the patient was seen at Gini`,
+        `${num(f.three_plus_visits.n)} diabetes patients came on 3 or more different days`,
+        `${num(f.single_visit.n)} came only once`,
       ],
     ),
+  ]);
+
+  const hba1cCards = group("HbA1c (blood sugar)", [
     tile(
-      "Re-tested about 6 months later",
-      num(w.m6.measured.n),
-      `Out of ${num(w.m6.with_baseline)} who had a first-visit test and enough time (${pctOf(w.m6.measured)}).`,
-      chain(w.m6, "about 6 months later"),
+      "Had HbA1c tested 2 or more times",
+      num(f.with_two_plus_hba1c.n),
+      `${pctOf(f.with_two_plus_hba1c)} of diabetes patients.`,
+      [
+        `HbA1c tests dated in the period, after removing values copied from old notes`,
+        `Diabetes patients with tests on 2 or more different dates = ${num(f.with_two_plus_hba1c.n)}`,
+      ],
     ),
+    fl &&
+      tile(
+        "Change between first and latest HbA1c",
+        `${signed(fl.change_mean)} points`,
+        `${num(fl.patients)} patients · ${fixed(fl.first_mean)}% → ${fixed(fl.latest_mean)}%<ul class="mini"><li><span>Improved</span><strong>${fixed(fl.improved_05.pct, 1)}%</strong></li><li><span>About the same</span><strong>${fixed(fl.about_same.pct, 1)}%</strong></li><li><span>Got worse</span><strong>${fixed(fl.worsened_05.pct, 1)}%</strong></li></ul>`,
+        [
+          `${num(fl.patients)} diabetes patients with 2 or more HbA1c tests`,
+          `Change = latest test − first test`,
+          `Improved: fell 0.5+ points (${num(fl.improved_05.n)}). Same: within 0.5 (${num(fl.about_same.n)}). Worse: rose 0.5+ points (${num(fl.worsened_05.n)})`,
+          `Below 7%: ${fixed(fl.below7_first.pct, 1)}% → ${fixed(fl.below7_latest.pct, 1)}%`,
+          `Tests are about ${Math.round(fl.months_between_median)} months apart on average`,
+        ],
+      ),
     tile(
-      "Re-tested about 1 year later",
-      num(w.m12.measured.n),
-      `Out of ${num(w.m12.with_baseline)} who had a first-visit test and enough time (${pctOf(w.m12.measured)}).`,
-      chain(w.m12, "about 1 year later"),
-    ),
-    tile(
-      "Average HbA1c change after 1 year",
+      "Average change after 1 year",
       `${signed(w.m12.outcome.change_mean)} points`,
-      `${fixed(w.m12.outcome.baseline_mean)}% → ${fixed(w.m12.outcome.follow_mean)}% in the ${num(w.m12.outcome.n)} re-tested. Likely true range: a fall of ${fixed(Math.abs(w.m12.outcome.change_ci95[1]), 2)} to ${fixed(Math.abs(w.m12.outcome.change_ci95[0]), 2)} points.`,
+      `HbA1c ${fixed(w.m12.outcome.baseline_mean, 1)}% → ${fixed(w.m12.outcome.follow_mean, 1)}% in ${num(w.m12.outcome.n)} patients tested again after about 1 year.`,
       [
-        ...chain(w.m12, "about 1 year later"),
-        `For each of the ${num(w.m12.outcome.n)}: re-test value − first value`,
-        `Average of these changes = ${signed(w.m12.outcome.change_mean)} points (middle patient ${signed(w.m12.outcome.change_median)})`,
+        `${num(w.m12.with_baseline)} patients had an HbA1c at their first visit and enough time for a 1-year test`,
+        `${num(w.m12.outcome.n)} of them came back and were tested again 9–15 months later`,
+        `For each: second test − first test, then the average = ${signed(w.m12.outcome.change_mean)} points`,
+        `After about 6 months: ${signed(w.m6.outcome.change_mean)} points (${num(w.m6.outcome.n)} patients)`,
       ],
     ),
     tile(
-      "Fell by 0.5 points or more (1 year)",
+      "Improved by 0.5 points or more (1 year)",
       pctOf(w.m12.outcome.improved_05),
-      `${num(w.m12.outcome.improved_05.n)} of ${num(w.m12.outcome.n)} re-tested. After 6 months: ${pctOf(w.m6.outcome.improved_05)}.`,
+      `${num(w.m12.outcome.improved_05.n)} of ${num(w.m12.outcome.n)} patients tested again after about 1 year.`,
       [
-        `The ${num(w.m12.outcome.n)} patients re-tested about 1 year later`,
-        `Those whose HbA1c was at least 0.5 points lower than at their first visit = ${num(w.m12.outcome.improved_05.n)}`,
-        `0.5 points is the change doctors regard as meaningful`,
+        `${num(w.m12.outcome.n)} patients were tested again about 1 year after their first visit`,
+        `${num(w.m12.outcome.improved_05.n)} of them had HbA1c at least 0.5 points lower than at the first visit`,
+        `A fall of 0.5 points is the change doctors count as a real improvement`,
       ],
     ),
     tile(
       "Got below 7% within a year",
       pctOf(w.m12.outcome.reached_below7),
-      `${num(w.m12.outcome.reached_below7.n)} of ${num(w.m12.outcome.reached_below7.d)} who started at 7% or above. ${pctOf(w.m12.outcome.maintained_below7)} of those already below 7% stayed there.`,
+      `${num(w.m12.outcome.reached_below7.n)} of ${num(w.m12.outcome.reached_below7.d)} who started at 7% or above.<ul class="mini"><li><span>Already below 7% and stayed there</span><strong>${pctOf(w.m12.outcome.maintained_below7)}</strong></li></ul>`,
       [
         `Of the ${num(w.m12.outcome.n)} re-tested at 1 year, ${num(w.m12.outcome.reached_below7.d)} started at 7% or above`,
-        `${num(w.m12.outcome.reached_below7.n)} of them were below 7% at the re-test`,
-        `The other ${num(w.m12.outcome.maintained_below7.d)} started below 7%; ${num(w.m12.outcome.maintained_below7.n)} were still below 7%`,
-      ],
-    ),
-    tile(
-      "All three targets met now",
-      pctOf(ctl.among_complete.all_three),
-      `About 1 in ${Math.round(100 / ctl.among_complete.all_three.pct)}: HbA1c below 7%, BP below 130/80 and LDL below 100, using latest results.`,
-      [
-        `Each patient's latest HbA1c, blood pressure and LDL from the 12 months before their last visit`,
-        `${num(ctl.complete.n)} patients had all three tested`,
-        `${num(ctl.among_complete.all_three.n)} of them met all three targets at the same time`,
+        `${num(w.m12.outcome.reached_below7.n)} were below 7% at the re-test`,
       ],
     ),
     tile(
       "New patients: change after 1 year",
       `${signed(np.m12.outcome.change_mean)} points`,
-      `${fixed(np.m12.outcome.baseline_mean)}% → ${fixed(np.m12.outcome.follow_mean)}% in ${num(np.m12.outcome.n)} patients new to Gini in 2025–26.`,
+      `${fixed(np.m12.outcome.baseline_mean, 1)}% → ${fixed(np.m12.outcome.follow_mean, 1)}% in ${num(np.m12.outcome.n)} patients new to Gini in 2025–26.`,
       [
         `${num(report.new_patients.patients)} diabetes patients new to Gini in 2025–26`,
-        `${num(np.m12.eligible)} had their first visit by ${byDate(np.m12.measurement_range_days[1])}`,
-        `${num(np.m12.with_baseline)} had an HbA1c test at their first visit`,
-        `${num(np.m12.outcome.n)} were re-tested about 1 year later`,
+        `${num(np.m12.eligible)} joined by ${byDate(np.m12.measurement_range_days[1])} → ${num(np.m12.with_baseline)} had a first-visit HbA1c → ${num(np.m12.outcome.n)} re-tested about 1 year later`,
       ],
     ),
+  ]);
+
+  const targetCards = group("Targets (latest results)", [
+    tile(
+      "All three targets met",
+      pctOf(a3.all_three_bp140),
+      `HbA1c below 7%, BP below 140/90, LDL below 100 (about 1 in ${Math.round(100 / a3.all_three_bp140.pct)}).<ul class="mini"><li><span>With stricter BP 130/80</span><strong>${pctOf(a3.all_three)}</strong></li></ul>`,
+      targetSteps(
+        a3.all_three_bp140.n,
+        `met all three (${num(a3.all_three.n)} with BP below 130/80)`,
+      ),
+    ),
+    targetCard(
+      "HbA1c below 7%",
+      a3.hba1c_below7,
+      "",
+      targetSteps(a3.hba1c_below7.n, "had HbA1c below 7%"),
+    ),
+    tile(
+      "Blood pressure below 140/90",
+      pctOf(a3.bp_below_140_90),
+      `${num(a3.bp_below_140_90.n)} of ${num(a3.bp_below_140_90.d)} patients.<ul class="mini"><li><span>Below 130/80</span><strong>${pctOf(a3.bp_below_130_80)}</strong></li></ul>`,
+      targetSteps(
+        a3.bp_below_140_90.n,
+        `had BP below 140/90 (${num(a3.bp_below_130_80.n)} below 130/80)`,
+      ),
+    ),
+    targetCard(
+      "LDL cholesterol below 100",
+      a3.ldl_below100,
+      "",
+      targetSteps(a3.ldl_below100.n, "had LDL below 100"),
+    ),
+  ]);
+
+  const medicineCards = group("Medicines", [
     tile(
       "On GLP-1 or tirzepatide",
       num(tr.any_incretin.started_in_period),
-      `${num(tr.any_incretin.new_starts)} started it at Gini; their HbA1c fell ${fixed(Math.abs(tr.any_incretin.new_start.m6.hba1c.change_mean), 2)} points after 6 months (${num(tr.any_incretin.new_start.m6.hba1c.n)} re-tested).`,
+      `${num(tr.glp1.started_in_period)} GLP-1, ${num(tr.tirzepatide.started_in_period)} tirzepatide (some had both).`,
       [
-        `Prescriptions matched to GLP-1 medicines (semaglutide, liraglutide, dulaglutide…) or tirzepatide by brand and generic name`,
-        `Patients with one first prescribed in the period = ${num(tr.any_incretin.started_in_period)} (GLP-1 ${num(tr.glp1.started_in_period)}, tirzepatide ${num(tr.tirzepatide.started_in_period)}; some had both)`,
-        `"Started at Gini" = first prescribed at least 30 days after their first visit = ${num(tr.any_incretin.new_starts)}`,
+        `Prescriptions matched by brand and generic name (semaglutide, liraglutide, dulaglutide, tirzepatide…)`,
+        `${num(tr.any_incretin.started_in_period)} patients with a first prescription in the period`,
       ],
     ),
     tile(
       "On weekly insulin",
       num(tr.weekly_insulin.started_in_period),
-      `First prescribed ${longDate(tr.weekly_insulin.first_start)}. Too new for results.`,
+      `Started from ${longDate(tr.weekly_insulin.first_start, false)}. Too new for results.`,
       [
-        `Prescriptions of insulin icodec (Awiqli and its spellings)`,
-        `Earliest prescription ${longDate(tr.weekly_insulin.first_start)}; a 3-month result needs a first prescription by ${byDate(150)}`,
+        `Prescriptions of insulin icodec (Awiqli); the first was on ${longDate(tr.weekly_insulin.first_start)}`,
       ],
     ),
-    tile(
-      "Came back for a 1-year test",
-      pctOf(w.m12.measured),
-      `${num(w.m12.measured.n)} of ${num(w.m12.with_baseline)}. The other ${num(w.m12.missing.n)} are left out, not counted as good or bad.`,
-      chain(w.m12, "about 1 year later"),
-    ),
-  ].join("");
+    gi &&
+      tile(
+        "Stopped insulin after starting GLP-1",
+        num(gi.stopped_insulin),
+        `${fixed((gi.stopped_insulin / gi.on_insulin_at_glp1_start) * 100, 1)}% of ${num(gi.on_insulin_at_glp1_start)} patients who were on insulin when GLP-1 or tirzepatide was started.`,
+        [
+          `Diabetes patients who started GLP-1 or tirzepatide in the period while already on insulin = ${num(gi.on_insulin_at_glp1_start)}`,
+          `Of them, every insulin was marked stopped after the GLP-1 start and none is still active = ${num(gi.stopped_insulin)}`,
+          `Checked against visit prescriptions from 2025–26: about 1 in 10 there too`,
+        ],
+      ),
+  ]);
 
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Diabetes Outcomes Scorecard</title><style>${css()}</style></head><body><main>
+  const onsetCards =
+    on &&
+    group("Age when diabetes started", [
+      tile(
+        "Diabetes started before age 40",
+        num(on.under40),
+        `${fixed((on.under40 / on.known) * 100, 1)}% of ${num(on.known)} patients whose age at onset is recorded.`,
+        [
+          `${num(on.diabetes)} diabetes patients; age at onset recorded for ${num(on.known)}`,
+          `Age at onset = the "AOO" or "age of onset" the doctor wrote (${num(on.under40_written)} of the ${num(on.under40)}), else age at the visit minus years since diagnosis`,
+          `Before 40: ${num(on.under40_type2)} Type 2, ${num(on.under40_type1)} Type 1 / LADA, ${num(on.under40_other)} other`,
+        ],
+      ),
+    ]);
+
+  const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Diabetes Outcomes Scorecard</title><style>${css()}h3{font-size:14px;margin:18px 0 8px;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em}</style></head><body><main>
 <h1>Gini diabetes outcomes scorecard</h1>
 <p class="sub">Gini Advanced Care Hospital, Mohali · patients seen ${longDate(m.period.start)} to ${longDate(m.period.end)} · data taken ${longDate(m.generated_at)} from Scribe · totals only, no patient names</p>
-<div class="banner" role="note"><strong>Draft for clinical review.</strong> Dr Bhansali and the clinical team must approve every figure before it is used publicly. These results show what happened to patients treated at Gini. They do not prove the treatment caused it.</div>
+${client ? "" : `<div class="banner" role="note"><strong>Draft for clinical review.</strong> Dr Bhansali and the clinical team must approve every figure before it is used publicly. These results show what happened to patients treated at Gini. They do not prove the treatment caused it.</div>`}
 
 <div class="guide"><strong>How to read this page</strong>
 <dl>
-<dt>HbA1c</dt><dd>A blood test showing average blood sugar over about 3 months. Below 7% is the usual target for people with diabetes; 6.5% or more means diabetes.</dd>
+<dt>HbA1c</dt><dd>A blood test showing average blood sugar over about 3 months. Below 7% is the usual target; 6.5% or more means diabetes.</dd>
 <dt>Points</dt><dd>HbA1c going from 8.8% to 7.4% is a fall of 1.4 points.</dd>
-<dt>Re-tested</dt><dd>Results come only from patients who came back and had a second test. Patients without one are left out, not counted as good or bad.</dd>
-<dt>Likely true range</dt><dd>The "95% CI": with this many patients, the true average is very likely inside this range.</dd>
-<dt>Middle patient</dt><dd>The median: half the patients are above this value and half below.</dd>
+<dt>Re-tested</dt><dd>Results come only from patients who came back for a second test. Others are left out, not counted as good or bad.</dd>
+<dt>Likely true range</dt><dd>The "95% CI": the true average is very likely inside this range.</dd>
 </dl></div>
 
-${allPatientsSection(all, f.registry)}
-
-${twoTestSection(report, all)}
-
-<h2>Statements cleared by the data</h2>
-<p class="def">Read these as written. Each one says who it covers, when they were tested and how many patients it is based on.</p>
+<h2>${client ? "Key findings" : "Key points for the press"}</h2>
+<p class="def">${print ? "The steps behind each finding are shown under it." : client ? 'Open "How this number was counted" to see the steps behind each finding.' : 'Read each point as written. Open "How this number was counted" to see the steps.'}</p>
 <ol class="press">
-<li><p class="say"><strong>${num(f.registry)} people with diabetes</strong> were seen at Gini between ${longDate(m.period.start)} and ${longDate(m.period.end)}.</p>
-<p class="say-sub">Their diabetes is confirmed: ${pctOf(conf.medicine)} take diabetes medicines, and another ${pctOf(conf.hba1c_only)} have an HbA1c test of 6.5% or higher. ${pctOf(conf.unconfirmed)} have a diabetes diagnosis only.</p>
-${how(registrySteps)}</li>
-<li><p class="say">Patients who came to Gini <strong>new in 2025–2026</strong>: average HbA1c went from <strong>${fixed(np.m12.outcome.baseline_mean, 1)}% to ${fixed(np.m12.outcome.follow_mean, 1)}% after one year</strong> (${num(np.m12.outcome.n)} patients).</p>
-<p class="say-sub">A fall of ${fixed(Math.abs(np.m12.outcome.change_mean), 1)} points (likely true range ${fixed(Math.abs(np.m12.outcome.change_ci95[1]), 1)} to ${fixed(Math.abs(np.m12.outcome.change_ci95[0]), 1)}). ${num(np.m12.outcome.improved_05.n)} of ${num(np.m12.outcome.n)} (${pctOf(np.m12.outcome.improved_05)}) improved by 0.5 points or more.</p>
+<li><p class="say">${allCount ? `<strong>${num(allCount.total_seen)} patients</strong> were seen at Gini between ${longDate(m.period.start)} and ${longDate(m.period.end)}. <strong>${num(f.registry)}</strong> of them (${fixed((f.registry / allCount.total_seen) * 100, 1)}%) have diabetes.` : `<strong>${num(f.registry)} people with diabetes</strong> were seen at Gini between ${longDate(m.period.start)} and ${longDate(m.period.end)}.`}</p>
+<p class="say-sub">${fixed(conf.medicine.pct + conf.hba1c_only.pct, 1)}% of the diabetes patients are confirmed by diabetes medicines or an HbA1c of 6.5% or more.</p>
+${how([
+  ...(allCount
+    ? [
+        `${num(allCount.patients_in_scribe)} patient records → ${num(allCount.total_seen)} people seen (${num(allCount.never_seen_in_period)} with no visit removed, ${num(allCount.duplicate_records_merged)} duplicates merged)`,
+      ]
+    : []),
+  `Diabetes = a diabetes diagnosis in the record, or two HbA1c tests of 6.5% or more (prediabetes and pregnancy-only diabetes not included) = ${num(f.registry)}`,
+  `Confirmed: ${num(conf.medicine.n)} on diabetes medicines + ${num(conf.hba1c_only.n)} with HbA1c 6.5%+. Diagnosis only: ${num(conf.unconfirmed.n)}`,
+])}</li>
+<li><p class="say"><strong>Patients new to Gini in 2025–2026</strong>: average HbA1c fell from <strong>${fixed(np.m12.outcome.baseline_mean, 1)}% to ${fixed(np.m12.outcome.follow_mean, 1)}%</strong> in one year.</p>
+<p class="say-sub">Same group of new patients; the rows differ only in when the second test was done.</p>
+<div class="scroll" style="margin-top:8px"><table aria-label="New patients HbA1c">
+<thead><tr><th scope="col">Second test</th><th class="num" scope="col">Patients</th><th class="num" scope="col">Average HbA1c</th><th class="num" scope="col">Improved 0.5+ points</th></tr></thead>
+<tbody>
+<tr><th scope="row">About 3 months after first visit</th><td class="num">${num(np.m3.outcome.n)}</td><td class="num">${fixed(np.m3.outcome.baseline_mean, 1)}% → <strong>${fixed(np.m3.outcome.follow_mean, 1)}%</strong></td>${cell(np.m3.outcome.improved_05)}</tr>
+<tr><th scope="row">About 1 year after first visit</th><td class="num">${num(np.m12.outcome.n)}</td><td class="num">${fixed(np.m12.outcome.baseline_mean, 1)}% → <strong>${fixed(np.m12.outcome.follow_mean, 1)}%</strong></td>${cell(np.m12.outcome.improved_05)}</tr>
+<tr><th scope="row">Same patients, tested at both times</th><td class="num">${num(sg.n)}</td><td class="num">${fixed(sg.baseline_mean, 1)}% → ${fixed(sg.m3_mean, 1)}% → <strong>${fixed(sg.m12_mean, 1)}%</strong></td>${cell(sg.improved_05_at_12)}</tr>
+</tbody></table></div>
 ${how([
   `${num(report.new_patients.patients)} diabetes patients whose first Gini visit was a "New Patient" visit in 2025–2026`,
-  `${num(np.m12.eligible)} had their first visit by ${byDate(np.m12.measurement_range_days[1])}, so a full year had passed`,
-  `${num(np.m12.with_baseline)} of them had an HbA1c test at their first visit (the starting value)`,
-  `${num(np.m12.outcome.n)} had a second HbA1c test about one year later (9 to 15 months after the first visit)`,
-  `Average of their first tests = ${fixed(np.m12.outcome.baseline_mean, 2)}%; average of their one-year tests = ${fixed(np.m12.outcome.follow_mean, 2)}%`,
+  `3 months: ${num(np.m3.eligible)} joined by ${byDate(np.m3.measurement_range_days[1])} → ${num(np.m3.with_baseline)} had a first-visit HbA1c → ${num(np.m3.outcome.n)} re-tested 2–5 months later`,
+  `1 year: ${num(np.m12.eligible)} joined by ${byDate(np.m12.measurement_range_days[1])} → ${num(np.m12.with_baseline)} had a first-visit HbA1c → ${num(np.m12.outcome.n)} re-tested 9–15 months later`,
+  `More at 3 months because more patients joined early enough and more come back after 3 months`,
 ])}</li>
-<li><p class="say">After <strong>3 months</strong>, new patients' average HbA1c went from <strong>${fixed(np.m3.outcome.baseline_mean, 1)}% to ${fixed(np.m3.outcome.follow_mean, 1)}%</strong> (${num(np.m3.outcome.n)} patients).</p>
-<p class="say-sub">${num(np.m3.outcome.improved_05.n)} of ${num(np.m3.outcome.n)} (${pctOf(np.m3.outcome.improved_05)}) improved by 0.5 points or more.</p>
+<li><p class="say"><strong>All diabetes patients</strong> re-tested one year after their first visit: average HbA1c fell from <strong>${fixed(w.m12.outcome.baseline_mean, 1)}% to ${fixed(w.m12.outcome.follow_mean, 1)}%</strong> (${num(w.m12.outcome.n)} patients).</p>
+<p class="say-sub">${pctOf(w.m12.outcome.improved_05)} improved by 0.5 points or more. Of those starting at 7% or above, ${pctOf(w.m12.outcome.reached_below7)} got below 7%.</p>
 ${how([
-  `The same ${num(report.new_patients.patients)} new patients`,
-  `${num(np.m3.eligible)} had their first visit by ${byDate(np.m3.measurement_range_days[1])}, so 3 months had passed`,
-  `${num(np.m3.with_baseline)} of them had an HbA1c test at their first visit`,
-  `${num(np.m3.outcome.n)} had a second HbA1c test about 3 months later (2 to 5 months after the first visit)`,
-  `Statements 2 and 3 count partly different patients: more people come back at 3 months than at one year, and those re-tested early started higher (${fixed(np.m3.outcome.baseline_mean, 1)}% against ${fixed(np.m12.outcome.baseline_mean, 1)}%). Statement 4 follows one group through all three tests.`,
+  `${num(w.m12.eligible)} had their first visit by ${byDate(w.m12.measurement_range_days[1])} → ${num(w.m12.with_baseline)} had a first-visit HbA1c → ${num(w.m12.outcome.n)} re-tested 9–15 months later`,
+  `Improved 0.5+ points: ${num(w.m12.outcome.improved_05.n)} of ${num(w.m12.outcome.n)}. Got below 7%: ${num(w.m12.outcome.reached_below7.n)} of ${num(w.m12.outcome.reached_below7.d)}`,
 ])}</li>
-<li><p class="say">The <strong>same ${num(sg.n)} new patients</strong>, tested three times: <strong>${fixed(sg.baseline_mean, 1)}% at the start → ${fixed(sg.m3_mean, 1)}% at 3 months → ${fixed(sg.m12_mean, 1)}% at one year</strong>.</p>
-<p class="say-sub">The improvement came in the first 3 months and held at one year. ${pctOf(sg.improved_05_at_12)} were 0.5 points or more better at one year, and ${pctOf(sg.below7_at_12)} were below 7%.</p>
+<li><p class="say"><strong>${pctOf(ctl.among_complete.all_three_bp140)}</strong> of diabetes patients (about 1 in ${Math.round(100 / ctl.among_complete.all_three_bp140.pct)}) meet all three targets: HbA1c below 7%, blood pressure below 140/90 and LDL below 100.</p>
+<p class="say-sub">With the stricter blood-pressure target of 130/80: ${pctOf(ctl.among_complete.all_three)} (about 1 in ${Math.round(100 / ctl.among_complete.all_three.pct)}).</p>
 ${how([
-  `Of the ${num(np.m12.outcome.n)} new patients in statement 2, ${num(sg.n)} also had a test at about 3 months`,
-  `Each of these ${num(sg.n)} people has all three tests: first visit, about 3 months and about 1 year`,
-])}</li>
-<li><p class="say">Across <strong>all</strong> diabetes patients re-tested about one year after their first visit, average HbA1c fell by <strong>${fixed(Math.abs(w.m12.outcome.change_mean), 1)} points</strong> (${num(w.m12.outcome.n)} patients).</p>
-<p class="say-sub">${pctOf(w.m12.outcome.improved_05)} improved by 0.5 points or more. Of those who started at 7% or above, ${pctOf(w.m12.outcome.reached_below7)} got below 7%.</p>
-${how(chain(w.m12, "about 1 year later"))}</li>
-<li><p class="say">About <strong>1 in ${Math.round(100 / ctl.among_complete.all_three.pct)}</strong> diabetes patients (${pctOf(ctl.among_complete.all_three)}) met all three targets at once: HbA1c below 7%, blood pressure below 130/80 and LDL cholesterol below 100.</p>
-<p class="say-sub">Based on the ${num(ctl.complete.n)} patients with all three tested in the last year.</p>
-${how([
-  `Each patient's latest HbA1c, blood pressure and LDL from the 12 months before their last visit`,
+  `Latest HbA1c, blood pressure and LDL from the last year`,
   `${num(ctl.complete.n)} patients had all three tested`,
-  `${num(ctl.among_complete.all_three.n)} met all three targets at the same time`,
+  `BP below 140/90: ${num(ctl.among_complete.all_three_bp140.n)} met all three. BP below 130/80: ${num(ctl.among_complete.all_three.n)} met all three`,
 ])}</li>
-<li><p class="say"><strong>${num(tr.any_incretin.started_in_period)}</strong> patients have been prescribed a GLP-1 medicine or tirzepatide, and <strong>${num(tr.weekly_insulin.started_in_period)}</strong> have started once-weekly insulin since ${longDate(tr.weekly_insulin.first_start, false)}.</p></li>
-<li><p class="say">These results are for patients who came back and were re-tested.</p>
-<p class="say-sub">${pctOf(w.m12.measured)} of patients who could have had a one-year test had one, so the results do not describe every patient.</p></li>
+<li><p class="say"><strong>${num(tr.any_incretin.started_in_period)}</strong> patients have been prescribed GLP-1 or tirzepatide, and <strong>${num(tr.weekly_insulin.started_in_period)}</strong> have started weekly insulin since ${longDate(tr.weekly_insulin.first_start, false)}.</p></li>
+${
+  on
+    ? `<li><p class="say"><strong>${num(on.under40)}</strong> diabetes patients (about 1 in ${Math.round(on.known / on.under40)}) got diabetes <strong>before age 40</strong>.</p>
+<p class="say-sub">Out of ${num(on.known)} patients whose age at onset is recorded.</p>
+${how([
+  `${num(on.diabetes)} diabetes patients; age at onset recorded for ${num(on.known)}`,
+  `${num(on.under40)} started before 40: ${num(on.under40_type2)} Type 2, ${num(on.under40_type1)} Type 1 / LADA, ${num(on.under40_other)} other`,
+])}</li>`
+    : ""
+}
+${
+  gi
+    ? `<li><p class="say"><strong>${num(gi.stopped_insulin)}</strong> of ${num(gi.on_insulin_at_glp1_start)} patients on insulin (about 1 in ${Math.round(gi.on_insulin_at_glp1_start / gi.stopped_insulin)}) <strong>stopped insulin</strong> after starting GLP-1 or tirzepatide.</p>
+${how([
+  `Patients already on insulin when GLP-1 or tirzepatide was started in the period = ${num(gi.on_insulin_at_glp1_start)}`,
+  `All their insulin was later stopped = ${num(gi.stopped_insulin)}`,
+])}</li>`
+    : ""
+}
 </ol>
-<ul class="avoid" aria-label="Do not say">
-<li><strong>Do not say</strong> "${pctOf(w.m12.outcome.improved_05)} of our patients improved". Say "of patients re-tested at one year".</li>
-<li><strong>Do not</strong> put the 3-month and 1-year figures side by side as if they were the same patients. Use statement 4, which follows one group.</li>
-<li><strong>Do not say</strong> Gini's treatment caused the change. These are real-world results with no comparison group.</li>
-<li><strong>Do not say</strong> "five years of follow-up". Records start in 2022, and 3-year results rest on ${num(w.m36.outcome.n)} patients.</li>
-<li><strong>Do not</strong> quote weight loss on GLP-1 or tirzepatide, weekly-insulin results (none yet) or CGM results (no data).</li>
-<li><strong>Do not</strong> present complication figures as screening rates, or compare these numbers with trials or other hospitals.</li>
-</ul>
+<p class="def"><strong>Note:</strong> HbA1c results are for patients who came back for a test. At one year, ${pctOf(w.m12.measured)} of patients who could be re-tested were re-tested.</p>
+${
+  client
+    ? ""
+    : `<ul class="avoid" aria-label="Do not say">
+<li>Say "of patients re-tested", not "of our patients".</li>
+<li>${num(np.m3.outcome.n)} are new patients re-tested about 3 months after their first visit, not "${num(np.m3.outcome.n)} new patients in 3 months".</li>
+<li>Do not say Gini's treatment caused the change; there is no comparison group.</li>
+<li>Do not say "five years of follow-up"; records start in 2022.</li>
+<li>Do not quote GLP-1 weight loss, weekly-insulin results (too new), CGM (no data), complication rates as screening, or comparisons with trials or other hospitals.</li>
+</ul>`
+}
+
 
 <h2>Summary cards</h2>
-<p class="def">Open "How this number was counted" on any card to see the steps behind it.</p>
-<div class="grid">${tiles}</div>
+<p class="def">Open "How this number was counted" on any card to see the steps.</p>
+${patientCards}${onsetCards || ""}${hba1cCards}${targetCards}${medicineCards}
 
 ${section(
-  "Patients new to Gini (2025–2026)",
-  `The clearest group: their first visit was a "New Patient" visit, so their first HbA1c is their true starting point before Gini's care. ${num(report.new_patients.patients)} diabetes patients qualify. Results go up to 1 year because appointment types are only recorded from January 2025.`,
+  "Patient groups",
+  `The groups overlap: one patient can be in several. Patients who stopped coming to Gini are still counted.`,
+)}
+${shareTable("Patient groups", "Group", [
+  ["All diabetes patients", { n: f.registry, d: f.registry, pct: 100 }],
+  ["Had an HbA1c at their first visit", f.with_baseline_hba1c],
+  ["Had HbA1c tested 2 or more times", f.with_two_plus_hba1c],
+  ["Came 3 or more times, over at least 6 months", f.three_visits_over_six_months],
+  ["Last seen in the past 6 months", st.active],
+  ["Last seen 6–12 months ago", st.overdue],
+  ["Last seen more than 12 months ago", st.long_gap],
+])}
+<p class="def">Moved to another hospital or died: not recorded in Scribe, so these patients cannot be separated out.</p>
+<div class="scroll" style="margin-top:12px"><table aria-label="Patients at each time point"><thead><tr><th scope="col">Time after first visit</th>
+<th class="num" scope="col">Eligible (could be tested by now)</th><th class="num" scope="col">Too recent (not counted)</th><th class="num" scope="col">Had a first-visit HbA1c</th><th class="num" scope="col">Tested again at this time</th></tr></thead>
+<tbody>${f.windows.map((x) => `<tr><th scope="row">${esc(x.label)}<span class="nd">first visit by ${byDate(m.windows.find((y) => y.key === x.window).maxDays)}</span></th><td class="num">${num(x.eligible)}</td><td class="num">${num(x.too_recent)}</td><td class="num">${num(x.with_baseline)}</td>${cell(x.measured)}</tr>`).join("")}</tbody></table></div>
+
+${section(
+  "HbA1c over time: all diabetes patients",
+  `Each row compares the first-visit HbA1c with a second test at a fixed time after it.`,
   [
-    `First visit in Scribe was an attended "New Patient" appointment, and no Gini visit more than 30 days before it`,
-    `30 days are allowed because a consultation for the same first visit is often recorded a few days before the appointment`,
-    `Total: ${num(report.new_patients.patients)} diabetes patients`,
+    `First test = HbA1c closest to the first visit (6 months before to 2 weeks after)`,
+    `Second test = HbA1c closest to 3, 6, 12, 24 or 36 months after the first visit`,
+    `Only patients whose first visit was early enough for that time to have passed`,
   ],
 )}
-<div class="scroll"><table aria-label="New patients HbA1c results"><thead>${WINDOW_HEAD}</thead><tbody>${windowRows(report.new_patients.windows, ["m3", "m6", "m12"])}</tbody></table></div>
+${windowTable("HbA1c over time, all patients", report.hba1c.windows, ["m3", "m6", "m12", "m24", "m36"])}
+${fullWindowTable("All measures, all patients", report.hba1c.windows, ["m3", "m6", "m12", "m24", "m36"], print)}
+<p class="def">Checks: using only lab-report values, the 1-year change is ${signed(lab12.change_mean)} (${num(lab12.n)} patients); leaving out the ${num(conf.unconfirmed.n)} patients with a diagnosis only, it is ${signed(confirmed12.change_mean)}. The results hold.</p>
+
+${section(
+  "HbA1c over time: patients new to Gini (2025–2026)",
+  `Their first visit was a "New Patient" visit, so the first test is their true starting point. Longer follow-up is not available yet.`,
+  [
+    `${num(report.new_patients.patients)} diabetes patients whose first Gini visit was a "New Patient" visit in 2025–2026`,
+    `The same ${num(sg.n)} patients tested at the start, at 3 months and at 1 year: ${fixed(sg.baseline_mean, 1)}% → ${fixed(sg.m3_mean, 1)}% → ${fixed(sg.m12_mean, 1)}%`,
+  ],
+)}
+${windowTable("HbA1c over time, new patients", report.new_patients.windows, ["m3", "m6", "m12"])}
+${fullWindowTable("All measures, new patients", report.new_patients.windows, ["m3", "m6", "m12"], print)}
+
+${section(
+  "Results by starting HbA1c (1 year)",
+  `Patients who start very high fall the most; part of this is a natural statistical effect.`,
+)}
+${severityTable(w.m12)}
+<details class="more"${print ? " open" : ""}><summary>Show 3 months, 6 months, 2 years and 3 years</summary>
+${["m3", "m6", "m24", "m36"].map((k) => `<h3>${esc(w[k].label)}</h3>${severityTable(w[k])}`).join("")}
+</details>
+
+${section("Targets (latest results)", `Each patient's latest HbA1c, blood pressure and LDL from the last year. ${num(ctl.complete.n)} patients had all three tested.`)}
+${controlTable(ctl)}
+<details class="more"${print ? " open" : ""}><summary>Show change over time</summary>
+<p class="def">Patients with HbA1c, blood pressure and LDL tested both at their first visit and again later. Uses the stricter BP target 130/80.</p>
+<div class="scroll"><table aria-label="All three targets over time"><thead><tr><th scope="col">Second test</th><th class="num" scope="col">Patients</th>
+<th class="num" scope="col">All three met at first visit</th><th class="num" scope="col">All three met at second test</th></tr></thead><tbody>
+${report.combined_control_change.map((r) => `<tr><th scope="row">${r.window === "m6" ? "6 months" : "1 year"}</th><td class="num">${num(r.complete_pairs)}</td>${cell(r.all_three_at_baseline)}${cell(r.all_three_at_follow_up)}</tr>`).join("")}
+</tbody></table></div></details>
+
+${section(
+  "Blood pressure, cholesterol, kidney and weight",
+  `First-visit value compared with the value at a fixed time later, same method as HbA1c.`,
+)}
+${markerTable(report.other_markers)}
+<h3>Urine protein (kidney damage sign)</h3>
+${kidneyTable(report.kidney)}
 
 ${section(
   "Who the diabetes patients are",
-  `Everyone with diabetes seen in the period, including those who came only once. Gestational diabetes and prediabetes are not included.`,
-  registrySteps,
+  `All ${num(f.registry)} diabetes patients seen in the period, including those who came only once.`,
 )}
-${funnelTable(f)}
 <div class="grid grid--tables">
 ${shareTable(
   "Sex",
@@ -628,106 +637,52 @@ ${shareTable(
   "Diabetes type",
   report.demographics.dm_type.map((x) => [x.type, x]),
 )}
-${shareTable("Age at first visit", `Age at first visit (average ${fixed(report.demographics.age_at_enrollment.mean, 1)})`, [...report.demographics.age_at_enrollment.bands.map((x) => [x.band, x]), ["Not recorded", report.demographics.age_at_enrollment.unknown]])}
+${shareTable("Age at first visit", "Age at first visit", [...report.demographics.age_at_enrollment.bands.map((x) => [x.band, x]), ["Not recorded", report.demographics.age_at_enrollment.unknown]])}
 ${shareTable(
   "Year of first visit",
   "Year of first visit",
-  report.demographics.enrollment_by_year.map((y) => [
-    y.year,
-    { n: y.patients, d: f.registry, pct: (y.patients / f.registry) * 100 },
-  ]),
+  report.demographics.enrollment_by_year
+    .filter((y) => y.patients >= 10)
+    .map((y) => [y.year, { n: y.patients, d: f.registry, pct: (y.patients / f.registry) * 100 }]),
 )}
 </div>
 
 ${section(
-  "HbA1c results for all diabetes patients",
-  `For each re-test time: how many had enough time, how many had a first-visit test, how many were re-tested, and what changed. Every percentage shows "number / out of".`,
-  [
-    `First-visit test = the HbA1c closest to the first visit, from 6 months before to 2 weeks after`,
-    `Re-test = the HbA1c closest to 3, 6, 12, 24 or 36 months after the first visit, inside that time's range`,
-    `"Enough time had passed" = first visit early enough for the whole range to be over by ${longDate(m.period.end)}`,
-    `Patients without a re-test are left out of the results, not counted as good or bad`,
-  ],
-)}
-<div class="scroll"><table aria-label="HbA1c results by re-test time"><thead>${WINDOW_HEAD}</thead><tbody>${windowRows(report.hba1c.windows, ["m3", "m6", "m12", "m24", "m36"])}</tbody></table></div>
-<p class="def">Leaving out the ${num(conf.unconfirmed.n)} patients with a diagnosis only (no diabetes medicine and no HbA1c of 6.5% or more) gives the same result: change after 1 year ${signed(confirmed12.change_mean)} points (${num(confirmed12.n)} patients), ${pctOf(confirmed12.improved_05)} improved by 0.5 points or more.</p>
-
-${section(
-  "Check: lab reports only",
-  `The same results using only HbA1c values from lab reports, not values written in doctors' notes. The results are almost the same, so they are not caused by copying values from notes.`,
-)}
-<div class="scroll"><table aria-label="Lab reports only"><thead>${WINDOW_HEAD}</thead><tbody>${windowRows(report.hba1c.lab_confirmed_only, ["m3", "m6", "m12", "m24", "m36"])}</tbody></table></div>
-
-${section(
-  "Results by HbA1c at first visit (1 year)",
-  `Patients who start very high fall the most. Part of that is a natural statistical effect, so compare within a row, not across rows.`,
-)}
-${severityTable(w.m12)}
-<h2>Results by HbA1c at first visit (6 months)</h2>
-${severityTable(w.m6)}
-<h2>Results by HbA1c at first visit (2 years)</h2>
-${severityTable(w.m24)}
-
-${section(
-  "Weight, blood pressure, cholesterol and kidney tests",
-  `Same method as HbA1c: first-visit value compared with the value about 6, 12 or 24 months later. Weight records that just repeated the previous value were removed, so weight results are rough.`,
-)}
-${markerTable(report.other_markers)}
-${section(
-  "Kidney results",
-  `Urine protein (UACR) stages: below 30 normal, 30–300 raised, above 300 high. Middle-patient values are used because a few very high readings distort the average.`,
-)}
-${kidneyTable(report.kidney)}
-
-${section(
-  "HbA1c, blood pressure and cholesterol all on target",
-  `Each patient's latest results from the 12 months before their last visit. Out of the ${num(ctl.complete.n)} patients (${pctOf(ctl.complete)} of ${num(ctl.population)}) with all three tested. Among patients seen in the last 6 months: ${pctOf(report.latest_control.active_only.among_complete.all_three)} (${nOf(report.latest_control.active_only.among_complete.all_three)}).`,
-)}
-${controlTable(ctl)}
-<p class="def">Over time: patients with all three tested at their first visit and again later.</p>
-${combinedChangeTable(report.combined_control_change)}
-
-${section(
   "Recorded complications",
-  `The share of diabetes patients whose Scribe record lists each complication. These are recorded diagnoses, not screening results, so a low number can mean it was not checked or not written down.`,
+  `Diabetes patients whose record lists each complication. These are recorded diagnoses, not screening results.`,
 )}
-${shareTable("Recorded complications", "Complication", [...report.complications.rows.map((x) => [x.label, x]), ["Any small-vessel complication (kidney, nerve, eye)", report.complications.any_microvascular], ["Any large-vessel complication (heart, stroke, legs)", report.complications.any_macrovascular]])}
+${shareTable("Recorded complications", "Complication", [...report.complications.rows.map((x) => [x.label, x]), ["Any of kidney, nerve or eye", report.complications.any_microvascular], ["Any of heart, stroke or leg arteries", report.complications.any_macrovascular]])}
 
 ${section(
   "Medicines",
-  `<strong>Started at Gini (use this table).</strong> The medicine was first prescribed at least 30 days after the patient's first visit, so we have their HbA1c before and after starting it.`,
+  `HbA1c change for patients who started the medicine at Gini (first prescribed at least 30 days after their first visit). There is no comparison group, so these are not medicine effects.`,
 )}
-${treatmentTable(report.treatments, "new")}
-<p class="def"><strong>Everyone prescribed it.</strong> This also includes patients who were already on the medicine when they joined Gini, so the change mixes the medicine with everything else that changed when they joined. Do not quote this table as a medicine effect.</p>
-${treatmentTable(report.treatments, "all")}
+${medicineTable(report.treatments)}
 
 ${section(
   "Coming back",
-  `Last visit as of ${longDate(m.period.end)}: within 6 months ${num(st.active.n)} (${pctOf(st.active)}); 6–12 months ago ${num(st.overdue.n)} (${pctOf(st.overdue)}); over 12 months ago ${num(st.long_gap.n)} (${pctOf(st.long_gap)}). Scribe does not record deaths or transfers, so these cannot be separated out. "Came back around N months" = any visit in that time range.`,
+  `Last visit as of ${longDate(m.period.end)}: within 6 months ${pctOf(st.active)}, 6–12 months ago ${pctOf(st.overdue)}, over a year ago ${pctOf(st.long_gap)}. Deaths and transfers are not recorded in Scribe.`,
 )}
 ${retentionTable(eng.retention_by_enrollment_year)}
-<p class="def">Patients not seen for over a year: their last HbA1c averaged ${fixed(eng.long_gap_last_known_hba1c.mean)}%, and ${pctOf(eng.long_gap_last_known_hba1c.below7)} were below 7%. This is their old result, not a current one.</p>
+<p class="def">Patients last seen more than a year ago: their last known HbA1c averaged ${fixed(eng.long_gap_last_known_hba1c.mean, 1)}% (${num(eng.long_gap_last_known_hba1c.n)} patients with a result), and ${pctOf(eng.long_gap_last_known_hba1c.below7)} were below 7%. This is an old result, not a current outcome.</p>
 
 ${section(
-  "Who came back for a re-test, and who did not",
-  `At their first visit both groups were alike (age, sex, starting HbA1c). The difference is that re-tested patients came much more often. That is why every statement says "patients who came back".`,
+  "Who was re-tested at 1 year",
+  `Both groups started alike; re-tested patients simply came more often. That is why results say "patients who came back".`,
 )}
-${biasTable(report.hba1c.missing_vs_measured_12m, "1-year")}
-${biasTable(report.hba1c.missing_vs_measured_6m, "6-month")}
+${biasTable(report.hba1c.missing_vs_measured_12m)}
 
-<h2>Limits of this data (say these when asked)</h2>
+<h2>${client ? "Limits of this data" : "Limits of this data (say these when asked)"}</h2>
 <ul class="caveats">
-<li>Scribe's records really start in January 2022; only ${num(yr["2021"] ?? 0)} diabetes patients had a visit in November–December 2021. "First visit" means the first visit recorded in Scribe, which for long-time patients is not their first visit to Gini.</li>
-<li>From April 2024 to February 2025, about 70% fewer visits and far fewer HbA1c tests were recorded in Scribe. This is missing data, not fewer patients, and it lowers the re-test numbers for patients who joined in 2023–2024.</li>
-<li>Most patients had no re-test at a given time (${pctOf(w.m12.missing)} at 1 year). Results describe patients who came back.</li>
-<li>Cleaning: ${num(m.readings_dropped.repeated_copy)} values copied forward from old notes, ${num(m.readings_dropped.placeholder_date)} HbA1c values with only a year as the date, and ${num(m.readings_dropped.carried_forward)} repeated weight records were removed. ${num(m.duplicate_records_merged)} duplicate patient records were merged.</li>
-<li>Diabetes is confirmed by medicines or HbA1c for ${fixed(conf.medicine.pct + conf.hba1c_only.pct, 1)}% of patients. The other ${num(conf.unconfirmed.n)} have a diagnosis only; leaving them out changes nothing.</li>
-<li>Complications are recorded diagnoses (added from notes since February 2026), not screening results.</li>
-<li>Weight is not recorded reliably, so weight results are rough.</li>
-<li>Age is unknown for ${pctOf(report.demographics.age_at_enrollment.unknown)} of patients (no date of birth recorded).</li>
-<li>Deaths and transfers are not recorded. CGM data exist for only about 12 patients, so there are no CGM results.</li>
-<li>This is a snapshot taken on ${longDate(m.generated_at)}. Scribe is live, so later rebuilds give slightly different counts. Quote this version.</li>
+<li>Scribe records start in January 2022. "First visit" means the first visit recorded in Scribe.</li>
+<li>April 2024 – February 2025: far fewer visits and tests were recorded. This is missing data, not fewer patients.</li>
+<li>Results cover patients who came back for a test (${pctOf(w.m12.measured)} at 1 year).</li>
+<li>Copied values from old notes, year-only test dates and ${num(m.duplicate_records_merged)} duplicate records were removed.</li>
+<li>Complications are recorded diagnoses, not screening results. Weight is not recorded reliably.</li>
+<li>Deaths, transfers and CGM data are not available.</li>
+<li>Snapshot of ${longDate(m.generated_at)}; Scribe is live, so later counts differ slightly.</li>
 </ul>
-<footer>Method: docs/DM_OUTCOMES_METHODOLOGY.md · engine server/services/analytics/dmOutcomes.js · rerun: node server/scripts/build-dm-outcomes.mjs</footer>
+${client ? `<footer>Gini Advanced Care Hospital, Mohali · real-world data from routine care · totals only, no patient-level information</footer>` : `<footer>Method: docs/DM_OUTCOMES_METHODOLOGY.md · rerun: node server/scripts/build-dm-outcomes.mjs</footer>`}
 </main></body></html>`;
+  return print ? page.replaceAll('<details class="how">', '<details class="how" open>') : page;
 }

@@ -126,7 +126,7 @@ Patients with a single visit are included.
 - **Values used:** each person's latest HbA1c, BP and LDL in the 12 months before their last visit. For BP, systolic and diastolic come from the same day.
 - **Targets:**
   - HbA1c < 7%.
-  - BP < 130/80, with < 140/90 also shown.
+  - BP < 140/90 is the headline target on the scorecard (common in India); < 130/80 (stricter ADA) is shown beside it. All target cards use the same group: patients with HbA1c, BP and LDL all measured.
   - LDL < 100 mg/dL, with < 70 also shown.
 - **Denominator:** patients with all three measured.
 - Also shown: each target on its own, and the same analysis for patients seen in the last 6 months.
