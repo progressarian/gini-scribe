@@ -42,7 +42,7 @@ import { isClosedDay } from "../../shared/followUp.js";
 import { listSchemes, isKnownScheme } from "../services/patientSchemes.js";
 import { slotDoctorKey, slotStartHour } from "../../shared/slotHour.js";
 import { resolveAppointmentId, opensLead } from "../services/ghmLead.js";
-import { editBlockedFor, patientEditBlockedFor } from "../services/obtAssignments.js";
+import { editBlockedFor } from "../services/obtAssignments.js";
 import {
   missedCte,
   historyCte,
@@ -1762,10 +1762,6 @@ router.post("/ghm-appointments", async (req, res) => {
       actor: blockActor(req),
     });
     if (blockedPatient) return res.status(409).json(blockedResponse(blockedPatient));
-    if (patient_id) {
-      const notYours = await patientEditBlockedFor(req, patient_id);
-      if (notYours) return res.status(403).json({ error: notYours });
-    }
 
     // New patient — create a master record so they're tracked permanently
     if (!patient_id) {

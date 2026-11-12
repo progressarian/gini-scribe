@@ -240,7 +240,7 @@ test.describe("GHM: OBT calls are divided and only the assignee calls", () => {
     ).toBe(true);
   });
 
-  test("10. an OBT member cannot book the next visit for someone else's patient", async () => {
+  test("10. an OBT member can book an incoming call for someone else's patient", async () => {
     await admin.post("/api/obt-assignments/assign", {
       data: { patient_ids: [patients[0].id], assigned_to_id: ONE },
     });
@@ -255,6 +255,6 @@ test.describe("GHM: OBT calls are divided and only the assignee calls", () => {
         visit_type: "Follow Up",
       },
     });
-    expect(res.status()).toBe(403);
+    expect(res.ok()).toBe(true);
   });
 });
