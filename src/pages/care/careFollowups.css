@@ -107,6 +107,10 @@
   color: var(--fam);
   background: var(--faml);
 }
+.cfu-status--pending {
+  color: var(--flv);
+  background: var(--flvl);
+}
 .cfu-status--booked {
   color: var(--fsk);
   background: var(--fskl);

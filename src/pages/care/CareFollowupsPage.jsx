@@ -8,6 +8,7 @@ import { ATTEMPT_OUTCOMES, CALL_STATUSES, callColor } from "../../../shared/call
 import {
   ACTIVE_STATUSES,
   AVAILABILITY_LABEL,
+  BOOKABLE_STATUSES,
   FOLLOWUP_STATUSES,
   FOLLOWUP_STATUS_LABEL,
   SOURCE_LABEL,
@@ -30,7 +31,7 @@ import {
 } from "../../queries/hooks/useCareFollowups";
 import { useGhmDoctors } from "../../queries/hooks/useGhm";
 import { NewAppointmentModal } from "../GHMPage";
-import { OutcomeDialog, ReopenDialog } from "./FollowupDialogs";
+import { OutcomeDialog, PendingDialog, ReopenDialog } from "./FollowupDialogs";
 import OnFloorHolds from "./OnFloorHolds";
 import "../../styles/flow.css";
 import "../billing/billing.css";
@@ -793,7 +794,7 @@ export default function CareFollowupsPage() {
                       </td>
                       <td>
                         <div className="cfu-actions">
-                          {item.status === "open" && (
+                          {BOOKABLE_STATUSES.includes(item.status) && (
                             <button
                               type="button"
                               className="flow-btn flow-btn-primary flow-btn-mini"
@@ -801,6 +802,26 @@ export default function CareFollowupsPage() {
                               onClick={() => setBookingFor(item)}
                             >
                               Book appointment
+                            </button>
+                          )}
+                          {item.status === "open" && (
+                            <button
+                              type="button"
+                              className="flow-btn flow-btn-ghost flow-btn-mini"
+                              aria-label={`Mark the follow-up for ${item.patient.name} pending`}
+                              onClick={() => setDialog({ type: "pending", item })}
+                            >
+                              Pending…
+                            </button>
+                          )}
+                          {item.status === "pending" && (
+                            <button
+                              type="button"
+                              className="flow-btn flow-btn-ghost flow-btn-mini"
+                              aria-label={`Move the follow-up for ${item.patient.name} back to Open`}
+                              onClick={() => setDialog({ type: "reopen", item })}
+                            >
+                              Back to Open…
                             </button>
                           )}
                           {active ? (
@@ -856,6 +877,9 @@ export default function CareFollowupsPage() {
           onClose={() => setDialog(null)}
           onDone={done}
         />
+      )}
+      {dialog?.type === "pending" && (
+        <PendingDialog item={dialog.item} onClose={() => setDialog(null)} onDone={done} />
       )}
       {dialog?.type === "reopen" && (
         <ReopenDialog item={dialog.item} onClose={() => setDialog(null)} onDone={done} />

@@ -1,7 +1,11 @@
 import crypto from "node:crypto";
 import pool from "../../config/db.js";
 import { referralsFromNote } from "../healthray/noteSections.js";
-import { ACTIVE_STATUSES, REFERRAL_KINDS } from "../../../shared/careFollowups.js";
+import {
+  ACTIVE_STATUSES,
+  BOOKABLE_STATUSES,
+  REFERRAL_KINDS,
+} from "../../../shared/careFollowups.js";
 import { loadCatalog, matchReferral, personOf } from "./match.js";
 import { markDeskBookedAtGhm } from "./deskReferral.js";
 
@@ -237,7 +241,7 @@ function decide(item, facts, catalog) {
       return { to: "open", reason: `Didn't come on ${booked.day} — call again` };
     }
   }
-  if (item.status !== "open") return null;
+  if (!BOOKABLE_STATUSES.includes(item.status)) return null;
   const later = facts.appointments
     .filter((a) => a.patient_id === item.patient_id && a.day > ordered)
     .filter((a) => {
@@ -296,7 +300,7 @@ export async function autoProgress(db = pool, catalog = null) {
     `SELECT id, patient_id, kind, status, ordered_on::text AS ordered_on, source, source_key,
             matched_doctor_id, matched_specialty, booked_appointment_id
        FROM care_followups
-      WHERE status IN ('open', 'booked') AND kind = ANY($1)
+      WHERE status IN ('open', 'pending', 'booked') AND kind = ANY($1)
       ORDER BY ordered_on
       LIMIT 1000`,
     [REFERRAL_KINDS],

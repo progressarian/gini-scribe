@@ -1089,6 +1089,8 @@ export const careFollowupBookedSchema = z.object({
 
 export const careFollowupReopenSchema = z.object({ reason: followupReason });
 
+export const careFollowupPendingSchema = z.object({ reason: followupReason });
+
 export const careHoldDoneSchema = z.object({
   decision: z.enum(
     HOLD_DECISIONS.map((d) => d.value),

@@ -76,6 +76,23 @@ export function closeWith(id, { status, reason }, ctx = {}, db = pool) {
   });
 }
 
+export function markPending(id, { reason }, ctx = {}, db = pool) {
+  return withItem(id, ctx, db, async (client, item) => {
+    if (item.status !== "open") throw fail(409, "Only an open follow-up can be marked pending");
+    await client.query(
+      `UPDATE care_followups SET status = 'pending', outcome_reason = $2, updated_at = NOW() WHERE id = $1`,
+      [id, reason],
+    );
+    await event(client, id, ctx, {
+      kind: "status",
+      from: item.status,
+      to: "pending",
+      note: reason,
+    });
+    return { id, status: "pending" };
+  });
+}
+
 export function markBooked(id, { appointment_id }, ctx = {}, db = pool) {
   return withItem(id, ctx, db, async (client, item) => {
     refuseClosed(item);
@@ -107,7 +124,9 @@ export function markBooked(id, { appointment_id }, ctx = {}, db = pool) {
 
 export function reopen(id, { reason }, ctx = {}, db = pool) {
   return withItem(id, ctx, db, async (client, item) => {
-    if (ACTIVE_STATUSES.includes(item.status)) throw fail(409, "This follow-up is already open");
+    if (ACTIVE_STATUSES.includes(item.status) && item.status !== "pending") {
+      throw fail(409, "This follow-up is already open");
+    }
     await client.query(
       `UPDATE care_followups
           SET status = 'open', outcome_reason = NULL, booked_appointment_id = NULL, updated_at = NOW()

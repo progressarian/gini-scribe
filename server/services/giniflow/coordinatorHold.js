@@ -369,9 +369,9 @@ async function withWaitingHold(visitId, db, work) {
 }
 
 const FOLLOWUP_MOVES = {
-  booked_outside: { from: ["open", "booked"], to: "booked_outside" },
-  declined: { from: ["open", "booked", "booked_outside"], to: "declined" },
-  not_available: { from: ["open", "booked", "booked_outside"], to: "not_available" },
+  booked_outside: { from: ["open", "pending", "booked"], to: "booked_outside" },
+  declined: { from: ["open", "pending", "booked", "booked_outside"], to: "declined" },
+  not_available: { from: ["open", "pending", "booked", "booked_outside"], to: "not_available" },
 };
 
 export async function applyDecisionToFollowups(hold, actorId = null, db = pool) {
@@ -381,7 +381,7 @@ export async function applyDecisionToFollowups(hold, actorId = null, db = pool) 
   const { rows: items } = await db.query(
     `SELECT id, status FROM care_followups
       WHERE patient_id = $1 AND ordered_on = $2::date
-        AND status IN ('open', 'booked', 'booked_outside')`,
+        AND status IN ('open', 'pending', 'booked', 'booked_outside')`,
     [hold.patient_id, hold.visit_date],
   );
   for (const item of items) {

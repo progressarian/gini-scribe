@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import {
   CLOSE_OUTCOMES,
   NOT_AVAILABLE_REASONS,
+  PENDING_REASONS,
   REASON_MAX,
   REASON_MIN,
 } from "../../../shared/careFollowups.js";
@@ -18,6 +19,7 @@ import {
 import {
   useCloseFollowup,
   useCompleteHold,
+  usePendingFollowup,
   useReopenFollowup,
   useSkipHold,
 } from "../../queries/hooks/useCareFollowups";
@@ -180,30 +182,88 @@ export function OutcomeDialog({ item, initial = "", onClose, onDone }) {
   );
 }
 
+export function PendingDialog({ item, onClose, onDone }) {
+  const save = usePendingFollowup();
+  const [preset, setPreset] = useState(PENDING_REASONS[0]);
+  const [reason, setReason] = useState("");
+  const [touched, setTouched] = useState(false);
+  const [error, setError] = useState("");
+  const fullReason = [preset, reason.trim()].filter(Boolean).join(" — ");
+  const submit = async () => {
+    setTouched(true);
+    setError("");
+    if (fullReason.length < REASON_MIN || save.isPending) return;
+    try {
+      await save.mutateAsync({ id: item.id, reason: fullReason });
+      onDone(`${item.patient.name}: pending — will book later`);
+    } catch (e) {
+      setError(requestErrorOf(e, "Could not mark the follow-up pending"));
+    }
+  };
+  return (
+    <Shell
+      title={`Mark pending — ${item.patient.name}`}
+      item={item}
+      onClose={onClose}
+      onSubmit={submit}
+      busy={save.isPending}
+      submitLabel="Mark pending"
+      error={error}
+    >
+      <fieldset className="cxl-charge">
+        <legend>What did the patient say?</legend>
+        <div className="cxl-charge__types" role="radiogroup">
+          {PENDING_REASONS.map((r) => (
+            <label key={r} className="cxl-radio">
+              <input
+                type="radio"
+                name="followup-pending"
+                checked={preset === r}
+                onChange={() => setPreset(r)}
+              />
+              {r}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <ReasonField
+        value={reason}
+        onChange={setReason}
+        touched={touched && fullReason.length < REASON_MIN}
+        label="More detail (optional)"
+      />
+      <p className="cxl-confirm">
+        Moves to the Pending list. You can still log calls and book it from there.
+      </p>
+    </Shell>
+  );
+}
+
 export function ReopenDialog({ item, onClose, onDone }) {
   const save = useReopenFollowup();
   const [reason, setReason] = useState("");
   const [touched, setTouched] = useState(false);
   const [error, setError] = useState("");
+  const fromPending = item.status === "pending";
   const submit = async () => {
     setTouched(true);
     setError("");
     if (reason.trim().length < REASON_MIN || save.isPending) return;
     try {
       await save.mutateAsync({ id: item.id, reason: reason.trim() });
-      onDone(`${item.patient.name}: reopened`);
+      onDone(`${item.patient.name}: ${fromPending ? "back to Open" : "reopened"}`);
     } catch (e) {
       setError(requestErrorOf(e, "Could not reopen"));
     }
   };
   return (
     <Shell
-      title={`Reopen follow-up — ${item.patient.name}`}
+      title={`${fromPending ? "Move back to Open" : "Reopen follow-up"} — ${item.patient.name}`}
       item={item}
       onClose={onClose}
       onSubmit={submit}
       busy={save.isPending}
-      submitLabel="Reopen"
+      submitLabel={fromPending ? "Move to Open" : "Reopen"}
       error={error}
     >
       <ReasonField value={reason} onChange={setReason} touched={touched} />

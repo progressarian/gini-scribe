@@ -1,4 +1,4 @@
-import { ACTIVE_STATUSES } from "../../../shared/careFollowups.js";
+import { ACTIVE_STATUSES, BOOKABLE_STATUSES } from "../../../shared/careFollowups.js";
 import {
   DESK_REFERRAL_SELECT,
   deskReferralShape,
@@ -10,7 +10,7 @@ import { DESK_KEY_PREFIX } from "./deskReferral.js";
 import { loadCatalog } from "./match.js";
 
 const MOVES = {
-  booked_outside: { from: ["open", "booked"], to: "booked_outside" },
+  booked_outside: { from: ["open", "pending", "booked"], to: "booked_outside" },
   completed: { from: ACTIVE_STATUSES, to: "done" },
   removed: { from: ACTIVE_STATUSES, to: "closed" },
 };
@@ -38,7 +38,7 @@ async function upsertFromDesk(client, referralId) {
     await insertItems(client, "gf_referral", [row]);
     return itemFor(client, referralId);
   }
-  if (existing.status === "open") {
+  if (BOOKABLE_STATUSES.includes(existing.status)) {
     await client.query(
       `UPDATE care_followups
           SET kind = $2, target = $3, detail = $4, matched_doctor_id = $5, matched_specialty = $6,

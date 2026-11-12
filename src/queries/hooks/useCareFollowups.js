@@ -36,6 +36,7 @@ export const useLogFollowupCall = () => useAction("call");
 export const useCloseFollowup = () => useAction("outcome");
 export const useMarkFollowupBooked = () => useAction("booked");
 export const useReopenFollowup = () => useAction("reopen");
+export const usePendingFollowup = () => useAction("pending");
 
 export function useCollectFollowupDay() {
   const queryClient = useQueryClient();

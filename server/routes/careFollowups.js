@@ -9,12 +9,19 @@ import {
   careFollowupCloseSchema,
   careFollowupDaySchema,
   careFollowupListSchema,
+  careFollowupPendingSchema,
   careFollowupReopenSchema,
   careHoldDoneSchema,
   careHoldSkipSchema,
 } from "../schemas/index.js";
 import { listFollowups, readFollowup } from "../services/careFollowups/list.js";
-import { closeWith, logCall, markBooked, reopen } from "../services/careFollowups/actions.js";
+import {
+  closeWith,
+  logCall,
+  markBooked,
+  markPending,
+  reopen,
+} from "../services/careFollowups/actions.js";
 import { collectDay, collectFollowups } from "../services/careFollowups/collect.js";
 import { completeHold, listOnFloor, skipHold } from "../services/giniflow/coordinatorHold.js";
 
@@ -91,6 +98,13 @@ router.post(
   gate,
   validate(careFollowupCloseSchema),
   route("Follow-up outcome", (req) => closeWith(req.params.id, req.body, ctx(req))),
+);
+
+router.post(
+  "/care-followups/:id/pending",
+  gate,
+  validate(careFollowupPendingSchema),
+  route("Follow-up pending", (req) => markPending(req.params.id, req.body, ctx(req))),
 );
 
 router.post(
