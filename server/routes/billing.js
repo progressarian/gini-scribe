@@ -34,6 +34,7 @@ import {
   billingNewItemRequestSchema,
   billingPaidAtReceptionQuerySchema,
   billingPaymentsTakeSchema,
+  billingPayAndFinaliseSchema,
   billingDepositReceiveSchema,
   billingDepositConsentSchema,
   billingDepositIpdSchema,
@@ -519,11 +520,20 @@ router.post(
 );
 
 router.post(
+  `${BASE}/bills/:billId/pay-and-finalise`,
+  desk,
+  validate(billingPayAndFinaliseSchema, BILLING_DESK_LABELS),
+  run("Take payment and finalise", 201, (req) =>
+    bills.payAndFinalise(req.params.billId, req.body, ctx(req)),
+  ),
+);
+
+router.post(
   `${BASE}/bills/:billId/clear-healthray`,
   desk,
   validate(billingClearHealthraySchema, BILLING_DESK_LABELS),
   run("Mark paid in HealthRay", 201, (req) =>
-    payments.clearInHealthray(req.params.billId, req.body, ctx(req)),
+    bills.clearHealthrayAndFinalise(req.params.billId, req.body, ctx(req)),
   ),
 );
 

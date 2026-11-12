@@ -114,15 +114,6 @@ export default function DiscountPanel({ data }) {
         </h2>
         <ReportLink report="discounts" title="Discounts" filters={data.filters} />
       </div>
-      <div className="fset__cardsub">
-        Everything patients weren't charged on billed visits: {money(block.total.given)} —{" "}
-        {pctText(block.total.pct)} of {money(block.total.charges)} at base prices. Category rate is
-        a lower CGHS or category price than the base price; Written off is the part neither the
-        patient nor a claim pays. The Discounts report tab counts discount rules only.
-        {block.total.credited
-          ? ` ${money(block.total.credited)} of discount was credited back on refunds, so the Discount tile shows the net figure.`
-          : ""}
-      </div>
       <dl className="bdash-methods">
         {methods.map((method) => (
           <div key={method.key}>
@@ -142,12 +133,12 @@ export default function DiscountPanel({ data }) {
           <div className="bdash-chart">
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
-                <CartesianGrid stroke="#e2e8f0" vertical={false} />
+                <CartesianGrid stroke="#cbd5e1" vertical={false} />
                 <XAxis
                   dataKey="label"
                   tick={AXIS}
                   tickLine={false}
-                  axisLine={{ stroke: "#cbd5e1" }}
+                  axisLine={{ stroke: "#64748b" }}
                   minTickGap={12}
                 />
                 <YAxis

@@ -247,6 +247,7 @@ Every file in `server/routes/` is mounted under `/api`, so paths are flat rather
 | Analytics          | `/api/outcomes/*`, `/api/reports/*`, `/api/dashboard/*`                                                 |
 | AI                 | `/api/ai/*`, `/api/extract/*`, `/api/reasoning/*`, `/api/genie-chat/*`, `/api/summary/*`                |
 | Sync               | `/api/sync/*` — HealthRay/Genie sync triggers and backfills                                             |
+| Lab catalogue      | `/api/lab-catalog/*` — a test's result fields, ranges and formulas (`docs/gini-flow/94-*`)              |
 
 Request bodies are validated with Zod schemas from `server/schemas/index.js` via `middleware/validate.js`.
 

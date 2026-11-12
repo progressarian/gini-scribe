@@ -13,10 +13,6 @@ export default function ShiftsTable({ data, back }) {
         </h2>
         <span className="fset__count">{shifts.length}</span>
       </div>
-      <div className="fset__cardsub">
-        Every shift open at any time in these dates. Expected cash is opening cash plus cash taken
-        less cash paid back. Open shifts are listed first.
-      </div>
       {!shifts.length ? (
         <div className="bdash-empty">
           No shift was open in these dates. Staff open a shift from the Shift tab at reception

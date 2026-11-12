@@ -13,10 +13,12 @@ import { toast } from "../../stores/uiStore";
 import { fromPaise, moneyTyped, requestErrorOf } from "../../components/billing/format";
 import { saveBlob } from "../../components/billing/importText";
 import useDialog from "../../components/billing/useDialog";
+import FilterPopover from "../../components/billing/FilterPopover";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
 import "./billing.css";
 import "./billingUi.css";
+import "./billingReports.css";
 import "./cghsRegister.css";
 import BillDialogLayer from "../../components/billing/BillDialogLayer";
 
@@ -50,8 +52,16 @@ const billsText = (count) => (count === 1 ? "1 bill" : `${count} bills`);
 function Filters({ tab, filters, options, onChange }) {
   const set = (key) => (e) => onChange({ ...filters, [key]: e.target.value });
   const id = useId();
+  const active = [
+    "from",
+    "to",
+    "category",
+    "doctor_id",
+    "payer",
+    ...(tab === "cleared" ? ["reference"] : []),
+  ].filter((key) => filters[key]).length;
   return (
-    <div className="cghs-filters" role="group" aria-label="Filters">
+    <FilterPopover active={active} cleared={!active} onClear={() => onChange(NO_FILTERS)}>
       <div className="fset__field">
         <label htmlFor={`${id}-from`}>Bill date from</label>
         <input
@@ -63,7 +73,7 @@ function Filters({ tab, filters, options, onChange }) {
         />
       </div>
       <div className="fset__field">
-        <label htmlFor={`${id}-to`}>to</label>
+        <label htmlFor={`${id}-to`}>Bill date to</label>
         <input
           id={`${id}-to`}
           type="date"
@@ -134,14 +144,7 @@ function Filters({ tab, filters, options, onChange }) {
           />
         </div>
       ) : null}
-      <button
-        type="button"
-        className="flow-btn flow-btn-ghost flow-btn-mini cghs-filters__reset"
-        onClick={() => onChange(NO_FILTERS)}
-      >
-        Clear filters
-      </button>
-    </div>
+    </FilterPopover>
   );
 }
 
@@ -654,36 +657,40 @@ export default function CghsRegisterPage() {
   };
 
   return (
-    <div className="flow-root fset bill-ui cghs-page">
+    <div className="flow-root fset bill-ui cghs-page reg-compact">
       <div className="flow-card bill-stack">
-        <div className="fset__cardhead">
-          <h2 className="flow-sec-title">CGHS register</h2>
+        <div className="fset__cardhead reg-head">
+          <h1 className="flow-sec-title">CGHS register</h1>
+          <div className="cghs-tabs reg-tabs" role="tablist" aria-label="Register">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={tab === t.key}
+                className={`cghs-tab${tab === t.key ? " cghs-tab--on" : ""}`}
+                onClick={() => changeTab(t.key)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <Filters
+            tab={tab}
+            filters={filters}
+            options={register.data?.options}
+            onChange={changeFilters}
+          />
+          <button
+            type="button"
+            className="flow-btn flow-btn-primary flow-btn-mini reg-export"
+            disabled={exporting.isPending}
+            onClick={download}
+          >
+            <Download size={13} aria-hidden="true" />
+            {exporting.isPending ? "Preparing…" : "Excel"}
+          </button>
         </div>
-        <div className="fset__cardsub">
-          Every final bill with an amount claimed from CGHS stays Pending until the payment reaches
-          the bank. Clear one bill or tick several and clear them with one payment — the amount must
-          equal their claims.
-        </div>
-        <div className="cghs-tabs" role="tablist" aria-label="Register">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              role="tab"
-              aria-selected={tab === t.key}
-              className={`cghs-tab${tab === t.key ? " cghs-tab--on" : ""}`}
-              onClick={() => changeTab(t.key)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-        <Filters
-          tab={tab}
-          filters={filters}
-          options={register.data?.options}
-          onChange={changeFilters}
-        />
         <div className="cghs-bar">
           <p className="cghs-totals" aria-live="polite">
             <strong>{billsText(totals.count)}</strong> · <strong>{fromPaise(totals.amount)}</strong>{" "}
@@ -725,15 +732,6 @@ export default function CghsRegisterPage() {
                 </button>
               </>
             ) : null}
-            <button
-              type="button"
-              className="flow-btn flow-btn-ghost flow-btn-mini"
-              disabled={exporting.isPending}
-              onClick={download}
-            >
-              <Download size={14} aria-hidden="true" />
-              {tab === "pending" ? "Export Pending (.xlsx)" : "Export Cleared (.xlsx)"}
-            </button>
           </div>
         </div>
         {register.isLoading ? (

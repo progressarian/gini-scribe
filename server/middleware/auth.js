@@ -85,6 +85,7 @@ const PUBLIC_PATTERNS = [
 ];
 
 const DOCTOR_ONLY_PREFIXES = [
+  "/api/lab-catalog",
   "/api/pharmacy/stock",
   "/api/active-visits",
   "/api/consultations",
@@ -156,6 +157,7 @@ const ROUTE_CAPABILITIES = [
   ["/api/clinic-holidays", CAP.RECEPTION_OPS],
   ["/api/obt-status", CAP.OBT_OPS],
   ["/api/care-followups", CAP.CARE_FOLLOWUPS],
+  ["/api/lab-catalog", [CAP.ADMIN, CAP.LAB_TEST_CATALOG]],
   ["/api/obt-assignments", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
   // Gini Flow. The board is read-only, so one capability covers every route
   // here; the SLA write is separately gated with requireCapability on the route.

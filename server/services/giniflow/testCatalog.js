@@ -67,8 +67,18 @@ export async function listCatalog(db = pool) {
             c.category, c.updated_at, item.id AS service_item_id, item.code AS service_item_code,
             off.code AS off_item_code,
             COALESCE(u.times_ordered, 0)::int AS times_ordered,
-            u.last_ordered::text AS last_ordered
+            u.last_ordered::text AS last_ordered,
+            c.results_as_file, rep.id AS report_id, rep.name AS report_name,
+            COALESCE(fields.n, 0)::int AS field_count
        FROM giniflow_test_catalog c
+       LEFT JOIN lab_report_catalog rep
+         ON rep.id = c.lab_report_id AND COALESCE(rep.is_active, TRUE)
+       LEFT JOIN LATERAL (
+         SELECT count(*) AS n
+           FROM lab_report_tests rt
+           JOIN lab_test_catalog f ON f.id = rt.test_id AND COALESCE(f.is_active, TRUE)
+          WHERE rt.report_id = rep.id
+       ) fields ON TRUE
        LEFT JOIN service_items item ON item.test_catalog_id = c.id AND item.is_active
        LEFT JOIN service_items off ON off.test_catalog_id = c.id AND NOT off.is_active
        LEFT JOIN (
@@ -96,6 +106,12 @@ export async function listCatalog(db = pool) {
     serviceItemCode: r.service_item_code ?? null,
     offItemCode: r.off_item_code ?? null,
     pricedBy: r.service_item_id ? "service_item" : "catalogue",
+    results: {
+      status: r.results_as_file ? "file" : r.field_count ? "fields" : "not_set_up",
+      reportId: r.report_id == null ? null : String(r.report_id),
+      reportName: r.report_name,
+      fieldCount: r.field_count,
+    },
   }));
 }
 

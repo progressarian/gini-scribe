@@ -330,7 +330,9 @@ try {
       `INSERT INTO lab_test_ranges
          (test_id, gender, min_age_days, max_age_days, min_value, max_value, min_critical,
           max_critical, text_range, is_pregnant, healthray_ref_id, source)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'healthray')
+       SELECT $1::bigint, $2::text, $3::int, $4::int, $5::numeric, $6::numeric, $7::numeric,
+              $8::numeric, $9::text, $10::boolean, $11::bigint, 'healthray'
+        WHERE (SELECT edited_at FROM lab_test_catalog WHERE id = $1::bigint) IS NULL
        ON CONFLICT (healthray_ref_id) DO NOTHING`,
       [
         x.testId,

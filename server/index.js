@@ -84,6 +84,7 @@ import outsidePendingRefresh from "./middleware/outsidePendingRefresh.js";
 import testCancelRequestRoutes from "./routes/testCancelRequests.js";
 import approvalRoutes from "./routes/approvals.js";
 import careFollowupRoutes from "./routes/careFollowups.js";
+import labCatalogRoutes from "./routes/labCatalog.js";
 import giniflowTriageRoutes from "./routes/giniflowTriage.js";
 import { startCronJobs } from "./services/cron/index.js";
 import { startSheetsCron } from "./services/cron/sheetsSync.js";
@@ -233,6 +234,7 @@ app.use("/api", giniflowStationRoutes);
 app.use("/api", testCancelRequestRoutes);
 app.use("/api", approvalRoutes);
 app.use("/api", careFollowupRoutes);
+app.use("/api", labCatalogRoutes);
 app.use("/api", giniflowTriageRoutes);
 
 app.use(appDownloadRoutes);

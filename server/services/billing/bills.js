@@ -26,7 +26,9 @@ import {
   orderStatesOn,
   refuseReceptionMoney,
   releaseTestOrders,
+  clearInHealthray,
   settleTestOrders,
+  takePayments,
 } from "./payments.js";
 import { allocate, priceBill } from "./priceBill.js";
 import { priceChangeText, priceChanges, takenAboveText } from "./priceDrift.js";
@@ -2225,6 +2227,34 @@ export async function finaliseBill(billId, input, ctx, db = pool) {
       ...auditFields(ctx),
     });
     return withLines(client, rows[0], { codes: await billCodes(client, bill.id) });
+  }, db);
+}
+
+export async function payAndFinalise(billId, input, ctx, db = pool) {
+  return inTransaction(async (client) => {
+    const paid = await takePayments(
+      billId,
+      { version: input?.version, payments: input?.payments },
+      ctx,
+      client,
+    );
+    const { rows } = await client.query(`SELECT version FROM bills WHERE id = $1`, [paid.bill_id]);
+    return finaliseBill(
+      paid.bill_id,
+      { version: rows[0].version, pay_later: input?.pay_later === true },
+      ctx,
+      client,
+    );
+  }, db);
+}
+
+export async function clearHealthrayAndFinalise(billId, input, ctx, db = pool) {
+  return inTransaction(async (client) => {
+    const paid = await clearInHealthray(billId, { version: input?.version }, ctx, client);
+    if (paid.status !== "draft") return paid;
+    const { rows } = await client.query(`SELECT version FROM bills WHERE id = $1`, [paid.bill_id]);
+    await finaliseBill(paid.bill_id, { version: rows[0].version }, ctx, client);
+    return paid;
   }, db);
 }
 

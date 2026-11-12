@@ -44,10 +44,6 @@ export default function HoursChart({ hours }) {
           Payments by hour of day
         </h2>
       </div>
-      <div className="fset__cardsub">
-        How many payments the counter took in each hour across these dates — useful for planning who
-        sits at the counter when.
-      </div>
       <div className="bdash-chart">
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>

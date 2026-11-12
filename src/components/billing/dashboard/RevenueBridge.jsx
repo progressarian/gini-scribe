@@ -28,9 +28,6 @@ export default function RevenueBridge({ data }) {
           From charges to net revenue
         </h2>
       </div>
-      <div className="fset__cardsub">
-        What the visits cost at base price, what was taken off, and what patients owe.
-      </div>
       {empty ? (
         <div className="bill-allclear">No billed visits in this range.</div>
       ) : (

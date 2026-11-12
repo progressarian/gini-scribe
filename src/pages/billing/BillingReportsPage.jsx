@@ -11,7 +11,9 @@ import { receptionBillHref } from "../../components/billing/counter/billHref";
 import { saveBlob } from "../../components/billing/importText";
 import { toast } from "../../stores/uiStore";
 import Shimmer from "../../components/Shimmer";
-import { DEFAULT_RANGE, QUICK_RANGES, RANGES } from "../../components/billing/reportRanges";
+import { DEFAULT_RANGE, RANGES } from "../../components/billing/reportRanges";
+import FilterPopover from "../../components/billing/FilterPopover";
+import { rangeLabel } from "../../components/billing/dashboard/dashboardText";
 import { Choice, DateField } from "../../components/billing/ReportFields";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
@@ -59,12 +61,15 @@ function ReportSection({ part, onClear, cleared }) {
       <div className="fset__cardhead">
         <h2 className="flow-sec-title">{part.title}</h2>
         <span className="fset__count">{part.row_count}</span>
+        {part.note ? (
+          <span className="brep-info" title={part.note} role="img" aria-label={part.note}>
+            ⓘ
+          </span>
+        ) : null}
       </div>
-      {part.note ? <div className="fset__cardsub">{part.note}</div> : null}
       {part.truncated ? (
         <div className="fset__cardsub">
-          Showing the first {part.rows.length} of {part.row_count} rows — the total covers them all.
-          Narrow the filters, or download the Excel file for every row.
+          Showing {part.rows.length} of {part.row_count} rows — download Excel for all.
         </div>
       ) : null}
       {part.rows.length ? (
@@ -156,123 +161,114 @@ function FilterBar({ catalog, report, filters, setFilter, rangeKey, pickRange, o
   );
   const ranges = RANGES.filter((r) => !r.openOnly || report.open_start);
   const rangeId = useId();
+  const active = report.filters.filter((key) => filters[key]).length;
   return (
-    <div className="bill-form brep-filters">
-      <div className="fset__field brep-field">
-        <label htmlFor={rangeId}>Dates</label>
-        <select
-          id={rangeId}
-          className="jb-assign"
-          value={rangeKey}
-          onChange={(e) => pickRange(e.target.value)}
-        >
-          {ranges.map((r) => (
-            <option key={r.key} value={r.key}>
-              {r.label}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="brep-quick" role="group" aria-label="Quick dates">
-        {QUICK_RANGES.map((r) => (
-          <button
-            key={r.key}
-            type="button"
-            className={`flow-btn flow-btn-mini ${rangeKey === r.key ? "flow-btn-primary" : "flow-btn-ghost"}`}
-            aria-pressed={rangeKey === r.key}
-            onClick={() => pickRange(r.key)}
-          >
+    <div className="brep-bar" role="search" aria-label="Report filters">
+      <label className="sr-only" htmlFor={rangeId}>
+        Dates
+      </label>
+      <select
+        id={rangeId}
+        className="jb-assign brep-range"
+        value={rangeKey}
+        onChange={(e) => pickRange(e.target.value)}
+      >
+        {ranges.map((r) => (
+          <option key={r.key} value={r.key}>
             {r.label}
-          </button>
+          </option>
         ))}
-      </div>
-      <DateField
-        label={labels.from}
-        value={filters.from}
-        onChange={(v) => setFilter("from", v, true)}
-      />
-      <DateField label={labels.to} value={filters.to} onChange={(v) => setFilter("to", v, true)} />
-      {allowed.has("period") ? (
-        <Choice
-          label={labels.period}
-          value={filters.period === report.period ? "" : filters.period}
-          onChange={(v) => setFilter("period", v)}
-          anyLabel={PERIOD_LABELS[report.period]}
-          options={catalog.periods
-            .filter((p) => p !== report.period)
-            .map((p) => ({ value: p, label: PERIOD_LABELS[p] ?? p }))}
+      </select>
+      <span className="brep-dates">
+        {filters.from && filters.to
+          ? rangeLabel(filters.from, filters.to)
+          : filters.to
+            ? `Up to ${rangeLabel(filters.to, filters.to)}`
+            : ""}
+      </span>
+      <FilterPopover active={active} cleared={cleared} onClear={onClear}>
+        <DateField
+          label={labels.from}
+          value={filters.from}
+          onChange={(v) => setFilter("from", v, true)}
         />
-      ) : null}
-      {allowed.has("category") ? (
-        <Choice
-          label={labels.category}
-          value={filters.category}
-          onChange={(v) => {
-            setFilter("category", v);
-            setFilter("sub_category", "");
-          }}
-          anyLabel="All categories"
-          options={parents.map((c) => ({ value: c.code, label: c.label }))}
+        <DateField
+          label={labels.to}
+          value={filters.to}
+          onChange={(v) => setFilter("to", v, true)}
         />
-      ) : null}
-      {allowed.has("sub_category") ? (
-        <Choice
-          label={labels.sub_category}
-          value={filters.sub_category}
-          onChange={(v) => setFilter("sub_category", v)}
-          anyLabel="All sub-categories"
-          options={subs.map((c) => ({ value: c.code, label: c.label }))}
-        />
-      ) : null}
-      {allowed.has("group") ? (
-        <Choice
-          label={labels.group}
-          value={filters.group}
-          onChange={(v) => {
-            setFilter("group", v);
-            setFilter("subgroup", "");
-          }}
-          anyLabel="All groups"
-          options={options.groups.map((g) => ({ value: g.code, label: g.name }))}
-        />
-      ) : null}
-      {allowed.has("subgroup") ? (
-        <Choice
-          label={labels.subgroup}
-          value={filters.subgroup}
-          onChange={(v) => setFilter("subgroup", v)}
-          anyLabel="All subgroups"
-          options={subgroups.map((s) => ({ value: s.code, label: s.name }))}
-        />
-      ) : null}
-      {allowed.has("consultant") ? (
-        <Choice
-          label={labels.consultant}
-          value={filters.consultant}
-          onChange={(v) => setFilter("consultant", v)}
-          anyLabel="All consultants"
-          options={options.consultants.map((d) => ({ value: String(d.id), label: d.name }))}
-        />
-      ) : null}
-      {allowed.has("user") ? (
-        <Choice
-          label={labels.user}
-          value={filters.user}
-          onChange={(v) => setFilter("user", v)}
-          anyLabel="Everyone"
-          options={options.users.map((u) => ({ value: String(u.id), label: u.name }))}
-        />
-      ) : null}
-      <div className="brep-quick">
-        <button
-          type="button"
-          className="flow-btn flow-btn-mini flow-btn-ghost"
-          disabled={cleared}
-          onClick={onClear}
-        >
-          Clear filters
-        </button>
-      </div>
+        {allowed.has("period") ? (
+          <Choice
+            label={labels.period}
+            value={filters.period === report.period ? "" : filters.period}
+            onChange={(v) => setFilter("period", v)}
+            anyLabel={PERIOD_LABELS[report.period]}
+            options={catalog.periods
+              .filter((p) => p !== report.period)
+              .map((p) => ({ value: p, label: PERIOD_LABELS[p] ?? p }))}
+          />
+        ) : null}
+        {allowed.has("category") ? (
+          <Choice
+            label={labels.category}
+            value={filters.category}
+            onChange={(v) => {
+              setFilter("category", v);
+              setFilter("sub_category", "");
+            }}
+            anyLabel="All categories"
+            options={parents.map((c) => ({ value: c.code, label: c.label }))}
+          />
+        ) : null}
+        {allowed.has("sub_category") ? (
+          <Choice
+            label={labels.sub_category}
+            value={filters.sub_category}
+            onChange={(v) => setFilter("sub_category", v)}
+            anyLabel="All sub-categories"
+            options={subs.map((c) => ({ value: c.code, label: c.label }))}
+          />
+        ) : null}
+        {allowed.has("group") ? (
+          <Choice
+            label={labels.group}
+            value={filters.group}
+            onChange={(v) => {
+              setFilter("group", v);
+              setFilter("subgroup", "");
+            }}
+            anyLabel="All groups"
+            options={options.groups.map((g) => ({ value: g.code, label: g.name }))}
+          />
+        ) : null}
+        {allowed.has("subgroup") ? (
+          <Choice
+            label={labels.subgroup}
+            value={filters.subgroup}
+            onChange={(v) => setFilter("subgroup", v)}
+            anyLabel="All subgroups"
+            options={subgroups.map((s) => ({ value: s.code, label: s.name }))}
+          />
+        ) : null}
+        {allowed.has("consultant") ? (
+          <Choice
+            label={labels.consultant}
+            value={filters.consultant}
+            onChange={(v) => setFilter("consultant", v)}
+            anyLabel="All consultants"
+            options={options.consultants.map((d) => ({ value: String(d.id), label: d.name }))}
+          />
+        ) : null}
+        {allowed.has("user") ? (
+          <Choice
+            label={labels.user}
+            value={filters.user}
+            onChange={(v) => setFilter("user", v)}
+            anyLabel="Everyone"
+            options={options.users.map((u) => ({ value: String(u.id), label: u.name }))}
+          />
+        ) : null}
+      </FilterPopover>
     </div>
   );
 }
@@ -418,21 +414,30 @@ export default function BillingReportsPage() {
 
   return (
     <div className="flow-root fset bill-ui brep-page">
-      <div className="flow-card bill-stack">
+      <div className="flow-card brep-head">
         <div className="fset__cardhead">
           <h1 className="flow-sec-title">Billing reports</h1>
+          {report ? (
+            <FilterBar
+              catalog={catalog.data}
+              report={report}
+              filters={filters}
+              setFilter={setFilter}
+              rangeKey={rangeKey}
+              pickRange={pickRange}
+              onClear={clearFilters}
+              cleared={cleared}
+            />
+          ) : null}
           <button
             type="button"
-            className="flow-btn flow-btn-primary brep-export"
+            className="flow-btn flow-btn-mini flow-btn-primary brep-export"
             onClick={exportFile}
             disabled={!ready || download.isPending}
           >
-            <Download size={14} aria-hidden="true" />
-            {download.isPending ? "Preparing…" : "Download Excel"}
+            <Download size={13} aria-hidden="true" />
+            {download.isPending ? "Preparing…" : "Excel"}
           </button>
-        </div>
-        <div className="fset__cardsub">
-          Final bills only; credit notes and refunds are taken off. Days are India dates.
         </div>
         <div className="set__tabs brep-tabs" role="tablist" aria-label="Billing reports">
           {reports.map((r) => (
@@ -450,18 +455,6 @@ export default function BillingReportsPage() {
             </button>
           ))}
         </div>
-        {report ? (
-          <FilterBar
-            catalog={catalog.data}
-            report={report}
-            filters={filters}
-            setFilter={setFilter}
-            rangeKey={rangeKey}
-            pickRange={pickRange}
-            onClear={clearFilters}
-            cleared={cleared}
-          />
-        ) : null}
       </div>
       <div
         id={`${tabsId}-panel`}

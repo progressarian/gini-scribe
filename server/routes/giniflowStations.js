@@ -313,6 +313,8 @@ import {
 import { machineCaseListOnly } from "../../shared/manualFloor.js";
 import {
   suggestedRows,
+  orderPatientValues,
+  casePatientValues,
   searchTestNames,
   getResults,
   getCaseResults,
@@ -573,13 +575,17 @@ router.post(
   },
 );
 
-router.get("/giniflow/test-catalog", requireCapability(CAP.ADMIN), async (req, res) => {
-  try {
-    res.json({ tests: await listCatalog() });
-  } catch (e) {
-    handleError(res, e, "Gini Flow test catalogue");
-  }
-});
+router.get(
+  "/giniflow/test-catalog",
+  requireCapability([CAP.ADMIN, CAP.LAB_TEST_CATALOG]),
+  async (req, res) => {
+    try {
+      res.json({ tests: await listCatalog() });
+    } catch (e) {
+      handleError(res, e, "Gini Flow test catalogue");
+    }
+  },
+);
 
 router.patch(
   "/giniflow/test-catalog/:id",
@@ -1992,11 +1998,12 @@ const assertOwnsOrder = async (req, orderId) => {
 
 router.get("/giniflow/lab/:orderId/results", resultsGate, async (req, res) => {
   try {
-    const [results, suggestions] = await Promise.all([
+    const [results, suggestions, patientValues] = await Promise.all([
       getResults(req.params.orderId),
       suggestedRows(req.params.orderId),
+      orderPatientValues(req.params.orderId),
     ]);
-    res.json({ results, suggestions });
+    res.json({ results, suggestions, patientValues });
   } catch (e) {
     handleError(res, e, "Gini Flow lab results");
   }
@@ -2007,11 +2014,12 @@ router.get("/giniflow/lab/:orderId/results", resultsGate, async (req, res) => {
 // the `/giniflow/lab/:orderId/results` pattern above.
 router.get("/giniflow/lab/case/:caseNo/results", labGate, async (req, res) => {
   try {
-    const [results, suggestions] = await Promise.all([
+    const [results, suggestions, patientValues] = await Promise.all([
       getCaseResults(req.params.caseNo),
       suggestedCaseRows(req.params.caseNo),
+      casePatientValues(req.params.caseNo),
     ]);
-    res.json({ results, suggestions });
+    res.json({ results, suggestions, patientValues });
   } catch (e) {
     handleError(res, e, "Gini Flow lab case results");
   }

@@ -18,6 +18,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const outDir = path.resolve(arg("out", "reports/dm-outcomes"));
 const dm = JSON.parse(await fs.readFile(path.join(outDir, "dm-outcomes.json"), "utf8"));
 const { start, end } = dm.meta.period;
+const asOf = arg("as-of", dm.meta.generated_at);
 const { cronPool } = await import("../config/db.js");
 
 async function readOnly(sql, params) {
@@ -83,7 +84,7 @@ try {
     (
       await chunked(
         "diagnoses",
-        `SELECT DISTINCT patient_id, diagnosis_id FROM diagnoses WHERE patient_id >= $1 AND patient_id < $2 AND is_active`,
+        `SELECT DISTINCT patient_id, diagnosis_id FROM diagnoses WHERE patient_id >= $1 AND patient_id < $2 AND is_active AND created_at <= '${asOf}'`,
         maxId,
       )
     )
@@ -94,7 +95,7 @@ try {
     "hba1c",
     `SELECT patient_id, test_date::text AS d, result::float8 AS v, COALESCE(source, 'unknown') AS s
        FROM lab_results WHERE patient_id >= $1 AND patient_id < $2 AND canonical_name = 'HbA1c'
-        AND result BETWEEN 3 AND 20 AND test_date IS NOT NULL`,
+        AND result BETWEEN 3 AND 20 AND test_date IS NOT NULL AND created_at <= '${asOf}'`,
     maxId,
   );
   const lab = new Set(LAB_CONFIRMED_SOURCES);
@@ -153,6 +154,30 @@ try {
       latest_test: dated.flat().sort().at(-1) ?? null,
     };
   };
+  const highestHba1c = (ids) => {
+    const tests = ids
+      .flatMap((id) => testsById.get(id) || [])
+      .filter((t) => t.d <= end && t.d.slice(5) !== "01-01");
+    if (!tests.length) return "never_tested";
+    const highDates = new Set(tests.filter((t) => t.v >= 6.5).map((t) => t.d)).size;
+    if (highDates >= 2) return "high_repeat_unconfirmed";
+    if (highDates === 1) return "high_once";
+    return Math.max(...tests.map((t) => t.v)) >= 5.7 ? "prediabetes" : "normal";
+  };
+  const nonDiabetes = [...persons.values()].filter((p) => !p.diabetes);
+  const bands = {
+    never_tested: 0,
+    normal: 0,
+    prediabetes: 0,
+    high_once: 0,
+    high_repeat_unconfirmed: 0,
+  };
+  for (const p of nonDiabetes) bands[highestHba1c(p.ids)] += 1;
+  const hasHba1c = (p) =>
+    p.ids
+      .flatMap((id) => testsById.get(id) || [])
+      .some((t) => t.d <= end && t.d.slice(5) !== "01-01");
+  const coverage = (group) => ({ people: group.length, tested: group.filter(hasHba1c).length });
   const dailyValues = (ids) => {
     const rows = ids
       .flatMap((id) => testsById.get(id) || [])
@@ -228,6 +253,7 @@ try {
   };
   const result = {
     period: { start, end },
+    data_as_of: asOf,
     generated_at: new Date().toISOString(),
     patients_in_scribe: patients.length,
     records_seen_in_period: seenRecords,
@@ -237,6 +263,11 @@ try {
     diabetes: dm.funnel.registry,
     diabetes_recount: [...persons.values()].filter((p) => p.diabetes).length,
     first_vs_latest_diabetes: firstVsLatest,
+    non_diabetes: { people: nonDiabetes.length, hba1c_highest: bands },
+    hba1c_coverage: {
+      diabetes: coverage([...persons.values()].filter((p) => p.diabetes)),
+      non_diabetes: coverage(nonDiabetes),
+    },
     hba1c_tests: {
       diabetes: hba1c((p) => p.diabetes),
       all_patients: hba1c(() => true),

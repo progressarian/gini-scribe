@@ -4,6 +4,8 @@ import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../services/api.js";
 import { toast } from "../stores/uiStore.js";
+import useAuthStore from "../stores/authStore";
+import { CAPABILITIES, hasCapability } from "../../shared/permissions.js";
 // Same vocabulary as the other settings panels: .flow-* from flow.css, the
 // .fset__* wrappers from FlowSettings.css, and the .flow-root .fset wrapper
 // they are scoped under.
@@ -13,6 +15,7 @@ import "../styles/flow.css";
 import "./flow/FlowSettings.css";
 import "./billing/billingUi.css";
 import "./TestCatalogPage.css";
+import "./TestDetailPage.css";
 
 // The clinic's test price list. One table behind the consultant's picker, the
 // MO's chips and reception's payment card — so a test the floor added mid-clinic
@@ -96,12 +99,25 @@ const STATIONS = [
   { value: "machine", label: "🫀 Machine" },
 ];
 
-function StationCell({ test, onSave, saving }) {
+function ResultsCell({ results }) {
+  if (results.status === "file")
+    return <span className="tcat__res tcat__res--file">File only</span>;
+  if (results.status === "fields") {
+    return (
+      <span className="tcat__res tcat__res--ok" title={`Result report: ${results.reportName}`}>
+        {results.fieldCount} field{results.fieldCount === 1 ? "" : "s"}
+      </span>
+    );
+  }
+  return <span className="tcat__res tcat__res--missing">Not set up</span>;
+}
+
+function StationCell({ test, onSave, saving, readOnly }) {
   return (
     <select
       className="tcat__station"
       value={test.category || "lab"}
-      disabled={saving}
+      disabled={saving || readOnly}
       aria-label={`Station for ${test.name}`}
       onChange={(e) => onSave(e.target.value)}
     >
@@ -197,12 +213,17 @@ const useAddTest = () => {
 };
 
 export default function TestCatalogPage() {
-  const { data, isLoading } = useCatalog();
+  const { data, isLoading, isError, refetch } = useCatalog();
+  const canEdit = hasCapability(
+    useAuthStore((st) => st.currentDoctor),
+    CAPABILITIES.ADMIN,
+  );
   const update = useUpdateTest();
   const addTest = useAddTest();
   const [adding, setAdding] = useState(false);
   const [q, setQ] = useState("");
   const [showRetired, setShowRetired] = useState(false);
+  const [onlyNotSetUp, setOnlyNotSetUp] = useState(false);
   const [station, setStation] = useState("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -214,6 +235,7 @@ export default function TestCatalogPage() {
       (t) =>
         (showRetired || t.isActive) &&
         (station === "all" || (t.category || "lab") === station) &&
+        (!onlyNotSetUp || t.results?.status === "not_set_up") &&
         (!needle ||
           [t.name, t.gloss, t.serviceItemCode, t.offItemCode]
             .filter(Boolean)
@@ -221,7 +243,7 @@ export default function TestCatalogPage() {
             .toLowerCase()
             .includes(needle)),
     );
-  }, [tests, q, showRetired, station]);
+  }, [tests, q, showRetired, station, onlyNotSetUp]);
 
   const perStation = useMemo(
     () =>
@@ -233,6 +255,7 @@ export default function TestCatalogPage() {
   );
 
   const unbilled = tests.filter((t) => t.isActive && !t.serviceItemCode).length;
+  const notSetUp = tests.filter((t) => t.isActive && t.results?.status === "not_set_up").length;
   const lastPage = Math.max(1, Math.ceil(rows.length / pageSize));
   const current = Math.min(page, lastPage);
   const pageRows = rows.slice((current - 1) * pageSize, current * pageSize);
@@ -265,26 +288,48 @@ export default function TestCatalogPage() {
         <div className="fset__cardhead">
           <h2 className="flow-sec-title">Test catalogue</h2>
           <span className="fset__count">{tests.length}</span>
-          <button
-            type="button"
-            className="flow-btn flow-btn-primary flow-btn-mini bill-tree__headbtn"
-            onClick={() => setAdding(true)}
-          >
-            + Add test
-          </button>
+          {canEdit ? (
+            <button
+              type="button"
+              className="flow-btn flow-btn-primary flow-btn-mini bill-tree__headbtn"
+              onClick={() => setAdding(true)}
+            >
+              + Add test
+            </button>
+          ) : null}
         </div>
         <div className="fset__cardsub">
           What the floor can order. Prices come from each test's billing item in Services — change
           them there.
         </div>
 
-        {unbilled > 0 && (
+        {canEdit && unbilled > 0 && (
           <div className="tcat__warn">
             <strong>
               {unbilled} active test{unbilled === 1 ? " has" : "s have"} no active billing item.
             </strong>{" "}
             Reception charges the old catalogue price until one is created.{" "}
             <Link to="/settings/services">Create them in Services</Link>
+          </div>
+        )}
+
+        {notSetUp > 0 && (
+          <div className="tcat__warn">
+            <strong>
+              {notSetUp} active test{notSetUp === 1 ? " has" : "s have"} no result fields.
+            </strong>{" "}
+            The lab can only upload a file for {notSetUp === 1 ? "it" : "them"} — values cannot be
+            typed, flagged or trended.{" "}
+            <button
+              type="button"
+              className="tcat__warnlink"
+              onClick={() => {
+                filter(setOnlyNotSetUp)(true);
+                setShowRetired(false);
+              }}
+            >
+              Show them
+            </button>
           </div>
         )}
 
@@ -326,6 +371,14 @@ export default function TestCatalogPage() {
             />
             Show retired
           </label>
+          <label className="tcat__toggle">
+            <input
+              type="checkbox"
+              checked={onlyNotSetUp}
+              onChange={(e) => filter(setOnlyNotSetUp)(e.target.checked)}
+            />
+            Not set up only
+          </label>
           <span className="tcat__count">
             {rows.length} of {tests.length}
           </span>
@@ -333,8 +386,19 @@ export default function TestCatalogPage() {
 
         {isLoading ? (
           <div className="tcat__empty">Loading the catalogue…</div>
+        ) : isError ? (
+          <div className="tcat__empty" role="alert">
+            Unable to load the test catalogue.{" "}
+            <button type="button" className="tcat__warnlink" onClick={() => refetch()}>
+              Try again
+            </button>
+          </div>
         ) : !rows.length ? (
-          <div className="tcat__empty">Nothing matches.</div>
+          <div className="tcat__empty">
+            {onlyNotSetUp && !q.trim()
+              ? "Every active test has result fields."
+              : "Nothing matches."}
+          </div>
         ) : (
           <>
             <div className="fset__scroll tcat__scroll">
@@ -343,25 +407,32 @@ export default function TestCatalogPage() {
                   <tr>
                     <th>Test</th>
                     <th>Station</th>
+                    <th>Results</th>
                     <th>Price</th>
                     <th>What it is for</th>
                     <th>Where it came from</th>
-                    <th className="bill-items__actions-head">Action</th>
+                    {canEdit ? <th className="bill-items__actions-head">Action</th> : null}
                   </tr>
                 </thead>
                 <tbody>
                   {pageRows.map((t) => (
                     <tr key={t.id} className={t.isActive ? "" : "tcat__retired"}>
                       <td data-label="Test">
-                        <strong>{t.name}</strong>
+                        <Link to={`/settings/tests/${t.id}`} className="tcat__name">
+                          <strong>{t.name}</strong>
+                        </Link>
                         {t.isActive ? null : <span className="bill-tree__badge">Retired</span>}
                       </td>
                       <td data-label="Station">
                         <StationCell
                           test={t}
                           saving={update.isPending}
+                          readOnly={!canEdit}
                           onSave={(category) => save(t, { category })}
                         />
+                      </td>
+                      <td data-label="Results">
+                        <ResultsCell results={t.results} />
                       </td>
                       <td data-label="Price">
                         <PriceCell test={t} />
@@ -371,31 +442,35 @@ export default function TestCatalogPage() {
                           className="jb-assign tcat__gloss"
                           defaultValue={t.gloss || ""}
                           maxLength={160}
-                          placeholder="Why a doctor orders it"
+                          readOnly={!canEdit}
+                          aria-label={`What ${t.name} is for`}
+                          placeholder={canEdit ? "Why a doctor orders it" : ""}
                           onBlur={(e) => {
                             const gloss = e.target.value.trim();
-                            if (gloss !== (t.gloss || "")) save(t, { gloss });
+                            if (canEdit && gloss !== (t.gloss || "")) save(t, { gloss });
                           }}
                         />
                       </td>
                       <td data-label="Where it came from" className="tcat__src">
                         {SOURCE_LABEL(t.source)}
                       </td>
-                      <td data-label="" className="bill-items__actions">
-                        <button
-                          type="button"
-                          className="flow-btn flow-btn-ghost flow-btn-mini tcat__retire"
-                          disabled={update.isPending}
-                          onClick={() => save(t, { isActive: !t.isActive })}
-                        >
-                          {t.isActive ? (
-                            <Archive size={14} aria-hidden="true" />
-                          ) : (
-                            <ArchiveRestore size={14} aria-hidden="true" />
-                          )}
-                          {t.isActive ? "Retire" : "Restore"}
-                        </button>
-                      </td>
+                      {canEdit ? (
+                        <td data-label="" className="bill-items__actions">
+                          <button
+                            type="button"
+                            className="flow-btn flow-btn-ghost flow-btn-mini tcat__retire"
+                            disabled={update.isPending}
+                            onClick={() => save(t, { isActive: !t.isActive })}
+                          >
+                            {t.isActive ? (
+                              <Archive size={14} aria-hidden="true" />
+                            ) : (
+                              <ArchiveRestore size={14} aria-hidden="true" />
+                            )}
+                            {t.isActive ? "Retire" : "Restore"}
+                          </button>
+                        </td>
+                      ) : null}
                     </tr>
                   ))}
                 </tbody>

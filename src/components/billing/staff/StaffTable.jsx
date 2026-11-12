@@ -59,10 +59,6 @@ export default function StaffTable({ data, onPick, picked }) {
         </h2>
         <span className="fset__count">{people.length}</span>
       </div>
-      <div className="fset__cardsub">
-        What each login took, by how it was paid. Collected = cash + card/UPI/NEFT + marked paid in
-        HealthRay − refunds paid back. Click a name to see only that person.
-      </div>
       <div className="fset__scroll">
         <table
           className="flow-table brep-table bdash-small sd-staff bdash-mis"

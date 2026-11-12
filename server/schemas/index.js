@@ -1862,3 +1862,86 @@ export const newPatientWorkupSaveSchema = z.object({
 export const newPatientWorkupQuerySchema = z.object({
   appointment_id: z.coerce.number().int().positive().optional(),
 });
+
+const labStamp = z.string().min(1, "Reload the page and try again");
+const labReportId = z.coerce.number().int().positive();
+const labDecimals = z.coerce
+  .number()
+  .int()
+  .min(0, "Decimals must be 0–4")
+  .max(4, "Decimals must be 0–4");
+
+export const labLinkReportSchema = z.object({
+  reportId: labReportId,
+  expectedUpdatedAt: labStamp,
+});
+
+export const labUnlinkReportSchema = z.object({ expectedUpdatedAt: labStamp });
+
+export const labCreateReportSchema = z.object({
+  name: z.string().trim().min(2, "Give the report a name").max(120).optional(),
+  expectedUpdatedAt: labStamp,
+});
+
+export const labResultsAsFileSchema = z.object({
+  value: z.boolean(),
+  expectedUpdatedAt: labStamp,
+});
+
+export const labAddFieldSchema = z.object({
+  name: z.string().trim().min(1, "Give the field a name").max(120),
+  unit: z.string().trim().max(40).nullish(),
+  noUnit: z.boolean().optional(),
+  type: z.enum(["numeric", "text", "group", "select"]).optional(),
+  options: z
+    .array(z.string().trim().max(40, "Keep each choice under 40 characters"))
+    .max(20)
+    .nullish(),
+  decimals: labDecimals.nullish(),
+  formula: z.string().trim().max(500, "Keep the formula under 500 characters").nullish(),
+});
+
+export const labUpdateFieldSchema = z.object({
+  expectedUpdatedAt: labStamp,
+  reportId: labReportId.optional(),
+  name: z.string().trim().min(1, "Give the field a name").max(120).optional(),
+  unit: z.string().trim().max(40).nullish(),
+  noUnit: z.boolean().optional(),
+  type: z.enum(["numeric", "text", "group", "select"]).optional(),
+  options: z
+    .array(z.string().trim().max(40, "Keep each choice under 40 characters"))
+    .max(20)
+    .nullish(),
+  decimals: labDecimals.nullish(),
+  active: z.boolean().optional(),
+  required: z.boolean().optional(),
+  formula: z.string().trim().max(500, "Keep the formula under 500 characters").nullish(),
+});
+
+export const labMoveFieldSchema = z.object({
+  fieldId: labReportId,
+  direction: z.enum(["up", "down"]),
+});
+
+export const labReportSearchSchema = z.object({ q: z.string().trim().max(80).optional() });
+
+const labLimit = z.union([z.number(), z.string().trim().max(20), z.null()]).optional();
+
+export const labRangesSchema = z.object({
+  expectedUpdatedAt: labStamp,
+  ranges: z
+    .array(
+      z.object({
+        id: z.union([z.string().regex(/^\d+$/), z.number().int()]).nullish(),
+        gender: z.enum(["Both", "Male", "Female"], { message: "Choose Both, Male or Female" }),
+        minAgeDays: z.coerce.number().int().min(0),
+        maxAgeDays: z.coerce.number().int().max(36500),
+        min: labLimit,
+        max: labLimit,
+        minCritical: labLimit,
+        maxCritical: labLimit,
+        text: z.string().trim().max(120).nullish(),
+      }),
+    )
+    .max(20, "Keep it to 20 ranges or fewer"),
+});

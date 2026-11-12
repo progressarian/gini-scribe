@@ -8,10 +8,12 @@ import { fromPaise, requestErrorOf } from "../../components/billing/format";
 import { saveBlob } from "../../components/billing/importText";
 import { dueAgeText } from "../../components/billing/counter/lineText";
 import { receptionBillHref } from "../../components/billing/counter/billHref";
+import FilterPopover from "../../components/billing/FilterPopover";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
 import "./billing.css";
 import "./billingUi.css";
+import "./billingReports.css";
 import "./cghsRegister.css";
 
 const NO_FILTERS = {
@@ -70,40 +72,47 @@ function Filters({ filters, options, onChange }) {
         {...extra}
       />
     ));
+  const active = Object.keys(NO_FILTERS).filter(
+    (key) => key !== "q" && key !== "sort" && filters[key],
+  ).length;
+  const cleared = !active && !filters.q && filters.sort === NO_FILTERS.sort;
   return (
-    <div className="cghs-filters" role="group" aria-label="Filters">
-      {input("q", "Search", "search", {
-        placeholder: "Name, file no, phone, bill no",
-        maxLength: 100,
-      })}
-      {input("from", "Bill date from", "date")}
-      {input("to", "to", "date")}
-      {select(
-        "age",
-        "Age",
-        DUE_AGES.map((a) => ({ value: a.key, label: a.label })),
-      )}
-      {select("category", "Category", options?.categories ?? [])}
-      {select("sub_category", "Sub-category", subs)}
-      {input("min", "Due at least (₹)", "number", { min: 0, step: "0.01", inputMode: "decimal" })}
-      {input("max", "Due at most (₹)", "number", { min: 0, step: "0.01", inputMode: "decimal" })}
-      {select("pay_later", "Pay later", [
-        { value: "yes", label: "Yes" },
-        { value: "no", label: "No" },
-      ])}
-      {select(
-        "sort",
-        "Sort",
-        DUE_SORTS.map((s) => ({ value: s.key, label: s.label })),
-        null,
-      )}
-      <button
-        type="button"
-        className="flow-btn flow-btn-ghost flow-btn-mini cghs-filters__reset"
-        onClick={() => onChange(NO_FILTERS)}
-      >
-        Clear filters
-      </button>
+    <div className="reg-bar" role="search" aria-label="Dues filters">
+      <label className="cghs-sr" htmlFor={`${id}-q`}>
+        Search
+      </label>
+      <input
+        id={`${id}-q`}
+        type="search"
+        className="jb-assign dues-search"
+        value={filters.q}
+        onChange={set("q")}
+        placeholder="Search name, file no, phone or bill no"
+        maxLength={100}
+      />
+      <FilterPopover active={active} cleared={cleared} onClear={() => onChange(NO_FILTERS)}>
+        {input("from", "Bill date from", "date")}
+        {input("to", "Bill date to", "date")}
+        {select(
+          "age",
+          "Age",
+          DUE_AGES.map((a) => ({ value: a.key, label: a.label })),
+        )}
+        {select("pay_later", "Pay later", [
+          { value: "yes", label: "Yes" },
+          { value: "no", label: "No" },
+        ])}
+        {select("category", "Category", options?.categories ?? [])}
+        {select("sub_category", "Sub-category", subs)}
+        {input("min", "Due at least (₹)", "number", { min: 0, step: "0.01", inputMode: "decimal" })}
+        {input("max", "Due at most (₹)", "number", { min: 0, step: "0.01", inputMode: "decimal" })}
+        {select(
+          "sort",
+          "Sort",
+          DUE_SORTS.map((s) => ({ value: s.key, label: s.label })),
+          null,
+        )}
+      </FilterPopover>
     </div>
   );
 }
@@ -232,32 +241,24 @@ export default function DuesRegisterPage() {
   };
 
   return (
-    <div className="flow-root fset bill-ui cghs-page">
+    <div className="flow-root fset bill-ui cghs-page reg-compact">
       <div className="flow-card bill-stack">
-        <div className="fset__cardhead">
-          <h2 className="flow-sec-title">Dues</h2>
-        </div>
-        <div className="fset__cardsub">
-          Final bills the patient still owes money on, after credit notes and refunds. Amounts
-          claimed from CGHS or an insurer are not dues and never show here.
-        </div>
-        <Filters filters={filters} options={data?.options} onChange={changeFilters} />
-        <div className="cghs-bar">
-          <p className="cghs-totals" aria-live="polite" data-testid="dues-total">
+        <div className="fset__cardhead reg-head">
+          <h1 className="flow-sec-title">Dues</h1>
+          <Filters filters={filters} options={data?.options} onChange={changeFilters} />
+          <p className="cghs-totals reg-total" aria-live="polite" data-testid="dues-total">
             <strong>{billsText(totals.bills)}</strong> ·{" "}
             <strong>{fromPaise(totals.outstanding)}</strong> due
           </p>
-          <div className="cghs-bar__actions">
-            <button
-              type="button"
-              className="flow-btn flow-btn-ghost flow-btn-mini"
-              disabled={exporting.isPending || !totals.bills}
-              onClick={download}
-            >
-              <Download size={14} aria-hidden="true" />
-              Export (.xlsx)
-            </button>
-          </div>
+          <button
+            type="button"
+            className="flow-btn flow-btn-primary flow-btn-mini reg-export"
+            disabled={exporting.isPending || !totals.bills}
+            onClick={download}
+          >
+            <Download size={13} aria-hidden="true" />
+            {exporting.isPending ? "Preparing…" : "Excel"}
+          </button>
         </div>
         {register.isLoading ? (
           <div className="fset__cardsub">Loading…</div>

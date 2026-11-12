@@ -67,15 +67,11 @@ export default function RevenueTrend({ data, onPick }) {
         </h2>
         <ReportLink report="collections" title="Collections" filters={data.filters} />
       </div>
-      <div className="fset__cardsub">
-        Revenue counts on the bill date; collections on the day the money was taken, so a due paid
-        later shows up on the later day.
-      </div>
       {empty ? (
         <div className="bill-allclear">No revenue or collections in this range.</div>
       ) : (
         <div className="bdash-chart">
-          <ResponsiveContainer width="100%" height={280}>
+          <ResponsiveContainer width="100%" height={260}>
             <ComposedChart
               data={rows}
               margin={{ top: 8, right: 12, bottom: 0, left: 8 }}
@@ -84,16 +80,16 @@ export default function RevenueTrend({ data, onPick }) {
             >
               <defs>
                 <linearGradient id="bdash-revenue-fill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={SERIES[0]} stopOpacity={0.22} />
+                  <stop offset="0%" stopColor={SERIES[0]} stopOpacity={0.3} />
                   <stop offset="100%" stopColor={SERIES[0]} stopOpacity={0.02} />
                 </linearGradient>
               </defs>
-              <CartesianGrid stroke="#e2e8f0" vertical={false} />
+              <CartesianGrid stroke="#cbd5e1" vertical={false} />
               <XAxis
                 dataKey="label"
                 tick={AXIS}
                 tickLine={false}
-                axisLine={{ stroke: "#cbd5e1" }}
+                axisLine={{ stroke: "#64748b" }}
                 minTickGap={16}
               />
               <YAxis
@@ -118,7 +114,7 @@ export default function RevenueTrend({ data, onPick }) {
                 dataKey="net_revenue"
                 name={SERIES_OF[0].label}
                 stroke={SERIES_OF[0].color}
-                strokeWidth={2}
+                strokeWidth={3}
                 fill="url(#bdash-revenue-fill)"
                 dot={
                   dots
@@ -133,7 +129,7 @@ export default function RevenueTrend({ data, onPick }) {
                 dataKey="collected"
                 name={SERIES_OF[1].label}
                 stroke={SERIES_OF[1].color}
-                strokeWidth={2}
+                strokeWidth={3}
                 dot={
                   dots
                     ? { r: 3, fill: SERIES_OF[1].color, stroke: "#fff", strokeWidth: 1.5 }

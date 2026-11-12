@@ -4,7 +4,11 @@ import {
   useTestNameSearch,
   useSaveLabResults,
 } from "../../queries/hooks/useGiniflowLab";
-import { computeFormulas, flagFor as flagAgainstRange } from "../../../shared/labFormula";
+import {
+  computeFormulas,
+  flagFor as flagAgainstRange,
+  formulaUsesPatient,
+} from "../../../shared/labFormula";
 
 // Typing the results in, instead of scanning them.
 // docs/gini-flow/32-LAB-TYPED-RESULTS-PLAN.md
@@ -171,6 +175,9 @@ export default function LabResultsForm({ orderId, caseNo, onSaved, onFailed }) {
         refRange: p.refRange || "",
         range: p.range || null,
         formula: p.formula || null,
+        decimals: p.decimals ?? 2,
+        inputType: p.inputType || "numeric",
+        options: p.options || [],
         calculated: !!p.calculated,
         isGroup: !!p.isGroup,
         depth: p.depth || 0,
@@ -192,9 +199,23 @@ export default function LabResultsForm({ orderId, caseNo, onSaved, onFailed }) {
 
   const list = rows || [];
   const calculated = computeFormulas(
-    list.filter((r) => r.testId).map((r) => ({ id: r.testId, formula: r.formula })),
+    list
+      .filter((r) => r.testId)
+      .map((r) => ({ id: r.testId, formula: r.formula, decimals: r.decimals })),
     Object.fromEntries(list.filter((r) => r.testId && !r.formula).map((r) => [r.testId, r.value])),
+    data?.patientValues || {},
   );
+  const patient = data?.patientValues || {};
+  const usesPatient = list.some((r) => formulaUsesPatient(r.formula));
+  const missingPatient = [
+    patient.age == null && list.some((r) => /@age\b/.test(r.formula || "")) ? "age" : null,
+    patient.female == null && list.some((r) => /@female\b/.test(r.formula || ""))
+      ? "sex (male or female)"
+      : null,
+    patient.weight == null && list.some((r) => /@weight\b/.test(r.formula || ""))
+      ? "today's weight"
+      : null,
+  ].filter(Boolean);
   const shown = list.map((r) => (r.formula ? { ...r, value: calculated[r.testId] ?? "" } : r));
   const filled = shown.filter(
     (r) => !r.isGroup && (String(r.value).trim() !== "" || r.valueText.trim() !== ""),
@@ -223,6 +244,15 @@ export default function LabResultsForm({ orderId, caseNo, onSaved, onFailed }) {
 
   return (
     <div className="lr">
+      {usesPatient ? (
+        <p className={missingPatient.length ? "lr-patient lr-patient--missing" : "lr-patient"}>
+          {missingPatient.length
+            ? `Some results are worked out from the patient's details, but ${missingPatient.join(", ")} is not recorded — those stay blank. Record it (weight comes from today's vitals) and reopen this form.`
+            : `Worked out using age ${patient.age}, ${patient.female ? "female" : "male"}${
+                patient.weight != null ? `, weight ${patient.weight} kg (today's vitals)` : ""
+              }.`}
+        </p>
+      ) : null}
       <div className="lr-head">
         <span>Test</span>
         <span>Value</span>
@@ -251,14 +281,31 @@ export default function LabResultsForm({ orderId, caseNo, onSaved, onFailed }) {
               )}
             </span>
             <span className="lr-val">
-              <input
-                className="ar-reason-input"
-                inputMode={row.inputType === "text" ? "text" : "decimal"}
-                placeholder={row.calculated ? "worked out" : "—"}
-                value={row.value}
-                readOnly={row.calculated}
-                onChange={(e) => patch(i, { value: e.target.value })}
-              />
+              {row.inputType === "select" && row.options?.length ? (
+                <select
+                  className="ar-reason-input"
+                  value={row.value}
+                  aria-label={`${row.testName} result`}
+                  onChange={(e) => patch(i, { value: e.target.value })}
+                >
+                  <option value="">—</option>
+                  {row.options.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  className="ar-reason-input"
+                  inputMode={row.inputType === "text" ? "text" : "decimal"}
+                  placeholder={row.calculated ? "worked out" : "—"}
+                  value={row.value}
+                  readOnly={row.calculated}
+                  aria-label={`${row.testName} result`}
+                  onChange={(e) => patch(i, { value: e.target.value })}
+                />
+              )}
               {/* Shown as they type: a value about to go on a patient's record
                   as HIGH should say so before it is saved, not after. */}
               {flag && <span className={`lr-flag lr-${flag.toLowerCase()}`}>{flag}</span>}

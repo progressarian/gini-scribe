@@ -188,3 +188,43 @@
     margin-left: 0;
   }
 }
+
+.fset.bill-ui .tcat__res {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  border-radius: 999px;
+}
+.fset.bill-ui .tcat__res--ok {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+.fset.bill-ui .tcat__res--missing {
+  color: #92400e;
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+.fset.bill-ui .tcat__res--file {
+  color: var(--ui-muted);
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+}
+.fset.bill-ui .tcat__warnlink {
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: #b45309;
+  text-decoration: underline;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.fset.bill-ui .tcat__warnlink:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ui-ring);
+  border-radius: 4px;
+}

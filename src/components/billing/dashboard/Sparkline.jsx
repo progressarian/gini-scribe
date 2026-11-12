@@ -1,7 +1,7 @@
 import { Line, LineChart, ResponsiveContainer, YAxis } from "recharts";
 import { SERIES } from "../../crm/progress/progressText";
 
-const MUTED = "#94a3b8";
+const MUTED = "#475569";
 
 function LastDot({ cx, cy, index, points }) {
   if (index !== points - 1 || cx === undefined) return null;
@@ -13,13 +13,13 @@ export default function Sparkline({ values }) {
   const rows = values.map((value, index) => ({ index, value }));
   return (
     <div className="bdash-spark" aria-hidden="true">
-      <ResponsiveContainer width="100%" height={32}>
+      <ResponsiveContainer width="100%" height={22}>
         <LineChart data={rows} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
           <YAxis hide domain={["dataMin", "dataMax"]} />
           <Line
             dataKey="value"
             stroke={MUTED}
-            strokeWidth={1.5}
+            strokeWidth={2}
             isAnimationActive={false}
             dot={({ key, ...props }) => <LastDot key={key} {...props} points={rows.length} />}
             activeDot={false}

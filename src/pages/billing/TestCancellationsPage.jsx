@@ -147,11 +147,6 @@ export default function TestCancellationsPage({ live = true, filters: shared }) 
             {list.data?.waiting ?? 0} waiting
           </span>
         </div>
-        <div className="fset__cardsub">
-          The lab, machine room and reception ask here when a test whose sample is already collected
-          must be cancelled. While a request waits, that test is on hold. Approving cancels it,
-          keeps a collection charge and sends the rest to the Refunds tab.
-        </div>
 
         <RequestFilters
           filters={filters}

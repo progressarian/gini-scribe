@@ -1,9 +1,12 @@
 # 94 — Manage each test's parameters, ranges and formulas in Settings
 
-Status: **plan, not started — 12 Nov 2026.** Builds the missing S8 of
+Status: **S1–S9 built and tested on the e2e copy (`e2e/lab-catalog/LC01–LC09`), not yet committed or
+deployed — 12 Nov 2026.** On production only two things have run: the S1 migration
+(`2026-12-31_lab_test_parameters_editor.sql`) and the S2 link backfill (37 tests linked; Blood Glucose
+and Malaria Parasite deliberately skipped — rerun the script only with
+`--skip "Blood Glucose" --skip "Malaria Parasite"`). Builds the missing S8 of
 `44-LAB-TEST-CATALOG-PLAN.md` and answers the external spec "Test Parameters & Formulas — Scribe
-Implementation Spec". Nothing here has been checked against the live database; counts are from plan 44
-(Sep 2026).
+Implementation Spec". What changed from this plan while building is in §7.
 
 ---
 
@@ -64,6 +67,16 @@ ALTER TABLE giniflow_test_catalog
 - Unlinked active tests are the "not set up" backlog shown in the UI (D2), except tests marked
   **"Result is a file"** (`results_as_file BOOLEAN NOT NULL DEFAULT FALSE` on `giniflow_test_catalog`):
   ECG, X-ray, Echo, Fundus and other machine reports have no fields and must not count as missing.
+
+Found while building S2 (12 Nov 2026):
+
+- The backfill reuses billing's matcher (`TEST_MATCHES_SQL`: billing aliases, brackets, word order)
+  as well as plain name/alias equality. Production dry run: **39 of 291** tests link to exactly one
+  report, none ambiguous; **249 active tests have no report** (242 lab, 7 machine) — the catalogue only
+  holds reports HealthRay sent detail for. That is the real "Not set up" backlog.
+- `testMatch.js` (billing) does **not** read `lab_report_id` yet: adding a link-based hit can turn a
+  single match into two and leave a bill line unmatched. It moves to a later step with its own billing
+  tests.
 
 ### D2 — Where it lives: the existing Test catalogue
 
@@ -257,3 +270,28 @@ S1–S4 change nothing for the lab bench. S5 is the first visible change on the 
   (`service_item_package_parts`).
 - Spec items not adopted: per-result rich text (never), a `formula_version` column (results already
   store their unit/range/flag at save; the audit table gives the history).
+
+---
+
+## 7. As built (12 Nov 2026)
+
+Where the build differs from §3, or found something the plan did not know:
+
+- **Formula editor (D5):** buttons, not a typed `#` picker — Insert field (this report's active number
+  fields), operators, numbers, brackets, Remove last, Clear. Nothing free-typed, so nothing to mistype.
+  Formulas are still stored as `#id` text.
+- **Formula grammar (D6):** `shared/labFormula.js` now has one parser for evaluating and for checking
+  syntax: `+ − × ÷ ^`, brackets, `min(a, b)`, `max(a, b)`, `@age`, `@female` (1/0), `@weight`. No `eval`.
+  CKD-EPI 2021 and Cockcroft-Gault are ordinary formulas; no eGFR field has been created on production.
+- **Weight (D6):** taken only from `giniflow_vitals` recorded on the visit date (IST); the carried-forward
+  `vitals` table is not used.
+- **Pick lists:** the bench form shows a dropdown and the save refuses any value outside the list,
+  storing the listed spelling as `result_text`.
+- **Ranges (D4):** ages are stored exactly as entered; bands may meet at a boundary (HealthRay's imported
+  bands do), only a real overlap is refused. Ranges are updated in place so HealthRay ids survive.
+- **Bugs fixed on the bench:** an unknown or `Other` sex took any Male/Female range, and an unknown age was
+  treated as 0 (newborn bands). Both now get only `Both` / all-ages ranges.
+- **Import script:** `import-lab-test-catalog.mjs` no longer re-adds ranges to a field edited in Settings.
+- **Decimals:** drive formula rounding on the bench and the server (default 2, as before).
+- **Not built:** adding an existing field to a second report (only new fields); billing's `testMatch.js`
+  still ignores `lab_report_id` (needs its own billing tests); verify-before-release (§5.2, separate plan).

@@ -1,4 +1,4 @@
-const TOKEN = /\s*(\d+(?:\.\d+)?|#\d+|[()+\-*/])/y;
+const TOKEN = /\s*(\d+(?:\.\d+)?|#\d+|@(?:age|female|weight)\b|(?:min|max)(?=\s*\()|[()+\-*/^,])/y;
 
 const tokenise = (formula) => {
   const tokens = [];
@@ -18,64 +18,125 @@ export function formulaInputs(formula) {
   return [...String(formula || "").matchAll(/#(\d+)/g)].map((m) => Number(m[1]));
 }
 
-export function evaluateFormula(formula, valuesById = {}) {
-  const tokens = tokenise(formula);
-  if (!tokens?.length) return null;
+const roundTo = (value, decimals) => {
+  const places = Number.isInteger(decimals) && decimals >= 0 && decimals <= 4 ? decimals : 2;
+  const factor = 10 ** places;
+  return Math.round(value * factor) / factor;
+};
 
+export const PATIENT_VALUES = [
+  { token: "@age", label: "age (years)" },
+  { token: "@female", label: "female (1) / male (0)" },
+  { token: "@weight", label: "weight today (kg)" },
+];
+
+export function formulaPatient({ sex = null, ageYears = null, weightKg = null } = {}) {
+  const number = (v) => (v === null || v === undefined || v === "" ? null : Number(v));
+  return {
+    age: number(ageYears),
+    female: sex === "Female" ? 1 : sex === "Male" ? 0 : null,
+    weight: number(weightKg),
+  };
+}
+
+function walk(tokens, { value, patient, fn }) {
   let at = 0;
-  const peek = () => tokens[at];
-  const take = () => tokens[at++];
-
-  const primary = () => {
-    const token = take();
-    if (token === "(") {
-      const value = expression();
-      if (take() !== ")") return null;
-      return value;
-    }
-    if (token === "-") {
-      const value = primary();
-      return value === null ? null : -value;
-    }
-    if (token?.startsWith("#")) {
-      const raw = valuesById[token.slice(1)];
-      if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
-      const text = String(raw ?? "").trim();
-      if (!text) return null;
-      const value = Number(text);
-      return Number.isFinite(value) ? value : null;
-    }
-    const literal = Number(token);
-    return Number.isFinite(literal) ? literal : null;
+  let problem = null;
+  const fault = (message) => {
+    problem ??= message;
+    return null;
   };
-
-  const term = () => {
-    let left = primary();
-    while (peek() === "*" || peek() === "/") {
-      const op = take();
-      const right = primary();
-      if (left === null || right === null) return null;
-      if (op === "/" && right === 0) return null;
-      left = op === "*" ? left * right : left / right;
-    }
-    return left;
-  };
+  const both = (a, b, f) => (a === null || b === null ? null : f(a, b));
 
   const expression = () => {
     let left = term();
-    while (peek() === "+" || peek() === "-") {
-      const op = take();
+    while (tokens[at] === "+" || tokens[at] === "-") {
+      const op = tokens[at++];
       const right = term();
-      if (left === null || right === null) return null;
-      left = op === "+" ? left + right : left - right;
+      left = both(left, right, (a, b) => (op === "+" ? a + b : a - b));
     }
     return left;
   };
+  const term = () => {
+    let left = unary();
+    while (tokens[at] === "*" || tokens[at] === "/") {
+      const op = tokens[at++];
+      const right = unary();
+      left = both(left, right, (a, b) => (op === "*" ? a * b : b === 0 ? null : a / b));
+    }
+    return left;
+  };
+  const unary = () => {
+    if (tokens[at] === "-") {
+      at += 1;
+      const v = unary();
+      return v === null ? null : -v;
+    }
+    return power();
+  };
+  const power = () => {
+    const base = primary();
+    if (tokens[at] !== "^") return base;
+    at += 1;
+    const exponent = unary();
+    return both(base, exponent, (a, b) => a ** b);
+  };
+  const primary = () => {
+    const token = tokens[at++];
+    if (token === undefined) return fault("The formula ends too early");
+    if (token === "(") {
+      const v = expression();
+      if (tokens[at++] !== ")") return fault("A bracket is not closed");
+      return v;
+    }
+    if (token === "min" || token === "max") {
+      if (tokens[at++] !== "(") return fault(`${token} needs brackets: ${token}(a, b)`);
+      const a = expression();
+      if (tokens[at++] !== ",") return fault(`${token} needs two values separated by a comma`);
+      const b = expression();
+      if (tokens[at++] !== ")") return fault("A bracket is not closed");
+      return both(a, b, (x, y) => fn[token](x, y));
+    }
+    if (token.startsWith("#")) return value(token.slice(1));
+    if (token.startsWith("@")) return patient(token.slice(1));
+    if (/^\d/.test(token)) return Number(token);
+    return fault(`Something is missing before “${token}”`);
+  };
 
-  const value = expression();
-  if (at !== tokens.length || value === null || !Number.isFinite(value)) return null;
-  return Math.round(value * 100) / 100;
+  const result = expression();
+  if (!problem && at < tokens.length) {
+    fault(
+      tokens[at] === ")"
+        ? "A closing bracket has no opening one"
+        : tokens[at] === ","
+          ? "A comma can only be used inside min( , ) or max( , )"
+          : "Two values need a sign between them",
+    );
+  }
+  return { result, problem };
 }
+
+const asNumber = (raw) => {
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+  const text = String(raw ?? "").trim();
+  if (!text) return null;
+  const n = Number(text);
+  return Number.isFinite(n) ? n : null;
+};
+
+export function evaluateFormula(formula, valuesById = {}, decimals = 2, patient = {}) {
+  const tokens = tokenise(String(formula || "").trim());
+  if (!tokens?.length) return null;
+  const { result, problem } = walk(tokens, {
+    value: (id) => asNumber(valuesById[id]),
+    patient: (key) => asNumber(patient[key]),
+    fn: { min: Math.min, max: Math.max },
+  });
+  if (problem || result === null || !Number.isFinite(result)) return null;
+  return roundTo(result, decimals);
+}
+
+export const formulaUsesPatient = (formula) => /@(age|female|weight)\b/.test(String(formula || ""));
 
 export function formulaOrder(tests) {
   const byId = new Map(tests.map((t) => [String(t.id), t]));
@@ -93,10 +154,10 @@ export function formulaOrder(tests) {
   return order;
 }
 
-export function computeFormulas(tests, values = {}) {
+export function computeFormulas(tests, values = {}, patient = {}) {
   const out = { ...values };
   for (const test of formulaOrder(tests.filter((t) => t.formula))) {
-    out[String(test.id)] = evaluateFormula(test.formula, out);
+    out[String(test.id)] = evaluateFormula(test.formula, out, test.decimals ?? 2, patient);
   }
   return out;
 }
@@ -133,4 +194,40 @@ export function flagFor(
   if (max !== null && n > max) return { flag: "H", critical };
   if (min !== null && n < min) return { flag: "L", critical };
   return { flag: null, critical };
+}
+
+const SHOWN_OPERATOR = { "*": "×", "/": "÷", "-": "−", "+": "+", ",": "," };
+const SHOWN_PATIENT = { "@age": "age", "@female": "female", "@weight": "weight" };
+
+export function formulaAsNames(formula, nameOf = () => null) {
+  const tokens = tokenise(formula);
+  if (!tokens) return String(formula || "");
+  return tokens
+    .map((token) => {
+      if (token.startsWith("#"))
+        return nameOf(token.slice(1)) || `[missing field ${token.slice(1)}]`;
+      return SHOWN_PATIENT[token] ?? SHOWN_OPERATOR[token] ?? token;
+    })
+    .join(" ")
+    .replace(/\( /g, "(")
+    .replace(/ \)/g, ")")
+    .replace(/ ,/g, ",")
+    .replace(/(min|max) \(/g, "$1(");
+}
+
+export const formulaTokens = (formula) => tokenise(String(formula || "").trim()) || null;
+
+export function formulaSyntaxError(formula) {
+  const text = String(formula || "").trim();
+  if (!text) return "The formula is empty";
+  const tokens = tokenise(text);
+  if (!tokens) return "The formula has characters it cannot use";
+  const { problem } = walk(tokens, {
+    value: () => 1,
+    patient: () => 1,
+    fn: { min: () => 1, max: () => 1 },
+  });
+  if (problem) return problem;
+  if (!formulaInputs(text).length) return "Use at least one field";
+  return null;
 }

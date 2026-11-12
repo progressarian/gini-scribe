@@ -3,8 +3,9 @@
 Status: **S1–S7 built, not deployed — 15 Sep 2026.** The catalogue holds all 5,503 stored cases:
 41 reports, 214 fields (116 sub-fields, 12 headings), 137 ranges, 27 formulas, 0 unresolved formula
 references. `shared/labFormula.js` (`npm run smoke:lab-formula`), catalogue-first suggestions and the
-server-side recompute (`npm run smoke:lab-catalog`) and the form are in. **S8 — the Flow settings
-editor — not started**, so an alias or a range is still changed only by SQL. Follows
+server-side recompute (`npm run smoke:lab-catalog`) and the form are in. **S8 — the settings editor —
+built under `94-LAB-TEST-PARAMETERS-EDITOR-PLAN.md`** (Settings → Test catalogue → a test's Result
+fields), not in `FlowAdminPage` as §4 D6 first said. Follows
 `38-MANUAL-FLOOR-PLAN.md`, `39-HYBRID-FLOOR-PLAN.md` §15 and the results form in `LabResultsForm.jsx`.
 
 ---

@@ -10,6 +10,7 @@ import useUiStore, { toast } from "../stores/uiStore";
 import useMessagingStore from "../stores/messagingStore";
 import { useApprovalsWaiting } from "../queries/hooks/useApprovals";
 import PageErrorBoundary from "./PageErrorBoundary";
+import NavMenu from "./NavMenu";
 import {
   PAGE_CAPABILITIES,
   navAllowlistForRole,
@@ -31,6 +32,17 @@ const C = PAGE_CAPABILITIES;
 
 const isLabDesk = (role) => role === ROLES.LAB || role === ROLES.TECH;
 const isPharmacyDesk = (role) => role === ROLES.PHARMACY || role === ROLES.PHARMACY_ADMIN;
+
+const NAV_GROUPS = {
+  pharmacy: "💊 Pharmacy",
+  inbox: "💬 Inbox",
+  flow: "🧭 Gini Flow",
+  billing: "💰 Billing",
+  reports: "📊 Reports",
+  ghm: "📞 GHM",
+  crm: "🤝 CRM",
+  admin: "⚙️ Admin",
+};
 
 const NAV_ITEMS = [
   { path: "/", label: "🏠 Home", show: (s) => !homeForRole(s.role) },
@@ -97,30 +109,46 @@ const NAV_ITEMS = [
   { path: "/plan", label: "📄 Plan", cap: C["/plan"], show: () => true },
   { path: "/docs", label: "📎 Docs", cap: C["/docs"], show: (s) => s.hasPatient },
   { path: "/lab-portal", label: "🔬 Upload", cap: C["/lab-portal"], show: () => true },
-  { path: "/refills", label: "💊 Refills", cap: C["/refills"], show: () => true },
+  {
+    path: "/refills",
+    group: "pharmacy",
+    label: "💊 Refills",
+    cap: C["/refills"],
+    show: () => true,
+  },
   {
     path: "/pharmacy/stock",
+    group: "pharmacy",
     label: "📦 Stock",
     cap: C["/pharmacy/stock"],
     show: () => true,
   },
   {
     path: "/dose-change-requests",
+    group: "pharmacy",
     label: "⚕️ Dose Reviews",
     cap: C["/dose-change-requests"],
     show: () => true,
   },
   {
     path: "/lab-requests",
+    group: "inbox",
     label: "🧪 Lab Requests",
     cap: C["/lab-requests"],
     show: () => true,
     count: (s) => s.labRequestCount,
   },
-  { path: "/side-effects", label: "💊 Side FX", cap: C["/side-effects"], show: () => true },
+  {
+    path: "/side-effects",
+    group: "pharmacy",
+    label: "💊 Side FX",
+    cap: C["/side-effects"],
+    show: () => true,
+  },
   // { path: "/messages", label: "💬 Messages", show: () => true, badge: (s) => s.unreadCount > 0 },
   {
     path: "/reception-inbox",
+    group: "inbox",
     label: "🏥 Reception",
     cap: C["/reception-inbox"],
     show: () => true,
@@ -130,40 +158,49 @@ const NAV_ITEMS = [
   { path: "/history", label: "📜 Hx", cap: C["/history"], show: (s) => s.hasPatient },
   { path: "/outcomes", label: "📊", cap: C["/outcomes"], show: (s) => !!s.dbPatientId },
   { path: "/ai", label: "🤖 AI", cap: C["/ai"], show: () => true },
-  { path: "/genie-chats", label: "🧞 Genie Chats", cap: C["/genie-chats"], show: () => true },
-  { path: "/app-patients", label: "📱 App Patients", cap: C["/genie-chats"], show: () => true },
-  { path: "/reports", label: "📊 Reports", cap: C["/reports"], show: () => true },
+  {
+    path: "/genie-chats",
+    group: "inbox",
+    label: "🧞 Genie Chats",
+    cap: C["/genie-chats"],
+    show: () => true,
+  },
+  {
+    path: "/app-patients",
+    group: "inbox",
+    label: "📱 App Patients",
+    cap: C["/genie-chats"],
+    show: () => true,
+  },
+  { path: "/reports", group: "reports", label: "📊 Reports", cap: C["/reports"], show: () => true },
   {
     path: "/analytics",
+    group: "reports",
     label: "📈 Population",
     cap: C["/analytics"],
     show: (s) => canViewAnalytics(s.doctor),
   },
-  { path: "/ci", label: "🧠 CI", cap: C["/ci"], show: () => true },
+  { path: "/ci", group: "reports", label: "🧠 CI", cap: C["/ci"], show: () => true },
   // GHM Operations — single page
   {
     path: "/obt-dashboard",
+    group: "ghm",
     label: "📞 OBT Dashboard",
     cap: C["/obt-dashboard"],
     show: () => true,
   },
   {
     path: "/care-followups",
+    group: "ghm",
     label: "🧭 Follow-ups",
     cap: C["/care-followups"],
     show: () => true,
   },
-  { path: "/ghm", label: "🏥 GHM Ops", cap: C["/ghm"], show: () => true },
-  // Admin: the patient blocklist
-  {
-    path: "/admin/blocklist",
-    label: "🚫 Blocked Patients",
-    cap: C["/admin/blocklist"],
-    show: () => true,
-  },
+  { path: "/ghm", group: "ghm", label: "🏥 GHM Ops", cap: C["/ghm"], show: () => true },
   // Pharmacy: medicine collection tracking
   {
     path: "/medicine-collection",
+    group: "pharmacy",
     label: "💊 Medicine Collection",
     cap: C["/medicine-collection"],
     show: () => true,
@@ -179,6 +216,7 @@ const NAV_ITEMS = [
   // counts. A tab per station duplicates it and grows with each station built.
   {
     path: "/giniflow/stations",
+    group: "flow",
     label: "🧭 GF Stations",
     cap: C["/giniflow/stations"],
     show: (s) => !isPharmacyDesk(s.role),
@@ -191,6 +229,7 @@ const NAV_ITEMS = [
   },
   {
     path: "/desk-requests",
+    group: "inbox",
     label: "📥 Desk requests",
     cap: C["/desk-requests"],
     show: () => true,
@@ -199,62 +238,96 @@ const NAV_ITEMS = [
   },
   {
     path: "/giniflow/manager",
+    group: "flow",
     label: "🕐 Gini Flow",
     cap: C["/giniflow/manager"],
     show: (s) => !isLabDesk(s.role),
   },
   {
     path: "/giniflow/reports",
+    group: "flow",
     label: "📊 Flow Reports",
     cap: C["/giniflow/reports"],
     show: () => true,
   },
   {
     path: "/billing/dashboard",
+    group: "billing",
     label: "📈 Billing Dashboard",
     cap: C["/billing/dashboard"],
     show: () => true,
   },
   {
     path: "/billing/staff",
+    group: "billing",
     label: "👥 Staff & shifts",
     cap: C["/billing/staff"],
     show: () => true,
   },
   {
     path: "/billing/reports",
+    group: "billing",
     label: "💹 Billing Reports",
     cap: C["/billing/reports"],
     show: () => true,
   },
   {
     path: "/reports/monthly",
+    group: "reports",
     label: "📅 Monthly summary",
     cap: C["/reports/monthly"],
     show: () => true,
   },
   {
     path: "/reports/opd-dashboard",
+    group: "reports",
     label: "📈 OPD dashboard",
     cap: C["/reports/opd-dashboard"],
     show: () => true,
   },
   {
     path: "/billing/cghs-register",
+    group: "billing",
     label: "🧾 CGHS register",
     cap: C["/billing/cghs-register"],
     show: () => true,
   },
   {
     path: "/billing/dues",
+    group: "billing",
     label: "💰 Dues",
     cap: C["/billing/dues"],
     show: () => true,
   },
-  { path: "/crm/home", label: "🤝 CRM", cap: C["/crm/home"], show: () => true },
-  { path: "/crm/progress", label: "📈 Progress", cap: C["/crm/progress"], show: () => true },
-  { path: "/crm/import", label: "📥 Import doctors", cap: C["/crm/import"], show: () => true },
-  { path: "/settings", label: "⚙️ Settings", cap: C["/settings"], show: () => true },
+  { path: "/crm/home", group: "crm", label: "🤝 CRM", cap: C["/crm/home"], show: () => true },
+  {
+    path: "/crm/progress",
+    group: "crm",
+    label: "📈 Progress",
+    cap: C["/crm/progress"],
+    show: () => true,
+  },
+  {
+    path: "/crm/import",
+    group: "crm",
+    label: "📥 Import doctors",
+    cap: C["/crm/import"],
+    show: () => true,
+  },
+  // Admin: the patient blocklist
+  {
+    path: "/admin/blocklist",
+    group: "admin",
+    label: "🚫 Blocked Patients",
+    cap: C["/admin/blocklist"],
+    show: () => true,
+  },
+  {
+    path: "/settings",
+    label: "⚙️ Settings",
+    cap: C["/settings"],
+    show: () => true,
+  },
 ];
 
 export default function AppLayout() {
@@ -508,7 +581,32 @@ export default function AppLayout() {
               ? navAllowlist.map((p) => capable.find((t) => t.path === p)).filter(Boolean)
               : capable;
             const rendered = [];
+            const grouped = new Set();
             let lastSection = null;
+            const tabOf = (t) => (
+              <NavLink
+                key={t.path}
+                to={t.path}
+                end={t.path === "/"}
+                className={({ isActive }) => {
+                  const on = t.match ? t.match(location.pathname) : isActive;
+                  return `tab-btn ${on ? (t.path === "/quick" ? "tab-btn--active-quick" : "tab-btn--active") : "tab-btn--inactive"}`;
+                }}
+              >
+                {t.label}
+                {t.count && t.count(navState) > 0 && (
+                  <span
+                    className={`tab-count${t.countLabel ? " tab-count--alert" : ""}`}
+                    aria-label={t.countLabel?.(t.count(navState))}
+                  >
+                    {t.count(navState) > 99 ? "99+" : t.count(navState)}
+                  </span>
+                )}
+                {t.badge && t.badge(navState) && !location.pathname.startsWith(t.path) && (
+                  <span className="tab-badge" />
+                )}
+              </NavLink>
+            );
             for (const t of visible) {
               const sec = t.section || null;
               if (sec && sec !== lastSection) {
@@ -521,29 +619,25 @@ export default function AppLayout() {
               } else if (!sec && lastSection) {
                 lastSection = null;
               }
+              if (!t.group) {
+                rendered.push(tabOf(t));
+                continue;
+              }
+              if (grouped.has(t.group)) continue;
+              grouped.add(t.group);
+              const members = visible.filter((item) => item.group === t.group);
               rendered.push(
-                <NavLink
-                  key={t.path}
-                  to={t.path}
-                  end={t.path === "/"}
-                  className={({ isActive }) => {
-                    const on = t.match ? t.match(location.pathname) : isActive;
-                    return `tab-btn ${on ? (t.path === "/quick" ? "tab-btn--active-quick" : "tab-btn--active") : "tab-btn--inactive"}`;
-                  }}
-                >
-                  {t.label}
-                  {t.count && t.count(navState) > 0 && (
-                    <span
-                      className={`tab-count${t.countLabel ? " tab-count--alert" : ""}`}
-                      aria-label={t.countLabel?.(t.count(navState))}
-                    >
-                      {t.count(navState) > 99 ? "99+" : t.count(navState)}
-                    </span>
-                  )}
-                  {t.badge && t.badge(navState) && !location.pathname.startsWith(t.path) && (
-                    <span className="tab-badge" />
-                  )}
-                </NavLink>,
+                members.length === 1 ? (
+                  tabOf(t)
+                ) : (
+                  <NavMenu
+                    key={`group-${t.group}`}
+                    label={NAV_GROUPS[t.group]}
+                    items={members}
+                    navState={navState}
+                    pathname={location.pathname}
+                  />
+                ),
               );
             }
             return rendered;

@@ -9,7 +9,13 @@ import { getMachines } from "./machineCatalog.js";
 import { opensLabGate } from "../../../shared/labPayment.js";
 import { syncBiomarkersFromLatestLabs } from "../healthray/db.js";
 import { catalogRowsFor, catalogTestsByIds, patientFor } from "./labCatalog.js";
-import { computeFormulas, formulaInputs, rangeText, flagFor } from "../../../shared/labFormula.js";
+import {
+  computeFormulas,
+  formulaInputs,
+  formulaPatient,
+  rangeText,
+  flagFor,
+} from "../../../shared/labFormula.js";
 import { assertNotHeld } from "./cancelHold.js";
 
 const SOURCE = "manual";
@@ -266,11 +272,11 @@ const normalise = (rows, panelName) =>
       (r) => r.testName && (Number.isFinite(r.value) || r.valueText || r.calculatedPlaceholder),
     );
 
-async function applyCatalog(entries, patientId, db) {
+async function applyCatalog(entries, patientId, db, onDate = null) {
   const ids = entries.map((e) => e.testId).filter(Boolean);
   if (!ids.length) return entries;
 
-  const patient = patientId ? await patientFor(patientId, db) : {};
+  const patient = patientId ? await patientFor(patientId, db, onDate) : {};
   const direct = await catalogTestsByIds(ids, patient, db);
   const inputIds = direct.flatMap((t) => formulaInputs(t.formula)).map(String);
   const extra = inputIds.filter((id) => !ids.includes(id));
@@ -279,12 +285,31 @@ async function applyCatalog(entries, patientId, db) {
 
   const typed = {};
   for (const e of entries) if (e.testId) typed[e.testId] = e.value ?? e.valueText;
-  const computed = computeFormulas(catalog, typed);
+  const computed = computeFormulas(catalog, typed, formulaPatient(patient));
 
   return entries
     .map((e) => {
       const test = e.testId ? byId.get(e.testId) : null;
       if (!test) return e;
+      if (test.inputType === "select" && test.options.length) {
+        const chosen = String(e.valueText ?? e.value ?? "")
+          .trim()
+          .toLowerCase();
+        const option = test.options.find((o) => o.toLowerCase() === chosen);
+        if (!option) {
+          throw bad(`${test.name}: choose one of ${test.options.join(", ")}`, 400);
+        }
+        return {
+          ...e,
+          testName: test.name,
+          value: null,
+          valueText: option,
+          unit: null,
+          refRange: rangeText(test.range) || null,
+          flag: null,
+          isCritical: false,
+        };
+      }
       const value = test.formula ? computed[test.id] : e.value;
       if (test.formula && value === null) return null;
       const { flag, critical } = flagFor(value ?? e.valueText, test.range);
@@ -420,7 +445,7 @@ export async function saveResults(
   const { written, skipped } = await writeEntries(
     db,
     { ...order, id: orderId },
-    await applyCatalog(entries, order.patient_id, db),
+    await applyCatalog(entries, order.patient_id, db, order.visit_date),
     "lab_order_id",
   );
   if (order.kind === "machine") {
@@ -452,7 +477,7 @@ export async function saveCaseResults(
   const { written, skipped } = await writeEntries(
     db,
     c,
-    await applyCatalog(entries, c.patient_id, db),
+    await applyCatalog(entries, c.patient_id, db, c.visit_date),
     "lab_case_no",
   );
 
@@ -482,4 +507,19 @@ export async function saveCaseResults(
     markedResultsReady: ready.rowCount > 0,
     results: await getCaseResults(caseNo, db),
   };
+}
+
+const patientValues = async (patientId, onDate, db) => {
+  if (!patientId) return formulaPatient({});
+  return formulaPatient(await patientFor(patientId, db, onDate));
+};
+
+export async function orderPatientValues(orderId, db = pool) {
+  const order = await orderContext(orderId, db);
+  return patientValues(order.patient_id, order.visit_date, db);
+}
+
+export async function casePatientValues(caseNo, db = pool) {
+  const c = await caseContext(caseNo, db);
+  return patientValues(c.patient_id, c.visit_date, db);
 }

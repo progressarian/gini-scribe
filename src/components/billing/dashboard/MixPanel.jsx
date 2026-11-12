@@ -75,7 +75,7 @@ function HorizontalBars({ rows, title, valueLabel }) {
             layout="vertical"
             margin={{ top: 4, right: narrow ? 92 : 120, bottom: 4, left: narrow ? 0 : 8 }}
           >
-            <CartesianGrid stroke="#e2e8f0" horizontal={false} />
+            <CartesianGrid stroke="#cbd5e1" horizontal={false} />
             <XAxis
               hide={narrow}
               type="number"
@@ -89,7 +89,7 @@ function HorizontalBars({ rows, title, valueLabel }) {
               dataKey="label"
               tick={AXIS}
               tickLine={false}
-              axisLine={{ stroke: "#cbd5e1" }}
+              axisLine={{ stroke: "#64748b" }}
               width={narrow ? 104 : 190}
               interval={0}
               tickFormatter={(name) =>
@@ -165,9 +165,6 @@ export function RevenueMix({ data }) {
             </button>
           ))}
         </div>
-      </div>
-      <div className="fset__cardsub">
-        Charges less discounts on billed visits, before tax.{" "}
         <ReportLink report={chosen.report} title={chosen.title} filters={data.filters} />
       </div>
       <HorizontalBars
@@ -202,10 +199,6 @@ export function PaymentModes({ data }) {
         <h2 id="bdash-modes" className="flow-sec-title">
           Collected by payment mode
         </h2>
-      </div>
-      <div className="fset__cardsub">
-        Money taken less refunds paid back. HealthRay payments count under the mode they were paid
-        by, when it was recorded.{" "}
         <ReportLink report="collections" title="Collections" filters={data.filters} />
       </div>
       {!parts.length ? (

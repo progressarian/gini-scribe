@@ -1,11 +1,44 @@
 .fset.bill-ui.brep-page {
   display: grid;
-  gap: 16px;
-  padding: 16px;
+  gap: 10px;
+  padding: 0;
+}
+.fset.bill-ui.brep-page .flow-card {
+  padding: 10px 12px;
 }
 .fset.bill-ui.brep-page .fset__cardhead {
   flex-wrap: wrap;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.fset.bill-ui.brep-page .brep-head {
+  position: relative;
+  z-index: 5;
+}
+.fset.bill-ui.brep-page .brep-head .fset__cardhead {
+  margin-bottom: 0;
+}
+.fset.bill-ui .brep-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.fset.bill-ui.brep-page select.jb-assign.brep-range {
+  width: 150px;
+  max-width: 100%;
+  flex: none;
+}
+.fset.bill-ui .brep-dates {
+  font-size: 12px;
+  color: var(--fink2);
+  white-space: nowrap;
+}
+.fset.bill-ui .brep-info {
+  color: var(--fink3);
+  cursor: help;
+  font-size: 13px;
 }
 .fset.bill-ui .brep-export {
   margin-left: auto;
@@ -14,7 +47,7 @@
   gap: 6px;
 }
 .fset.bill-ui .brep-tabs {
-  margin: 4px 0 12px;
+  margin: 8px 0 0;
 }
 .fset.bill-ui .brep-tab {
   background: none;
@@ -78,4 +111,15 @@
   display: flex;
   align-items: flex-end;
   gap: 6px;
+}
+.brep-page .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

@@ -107,7 +107,7 @@ test.describe.serial("P1-34 test catalogue page stops editing price", () => {
     const tests = (await (await api.get("/api/giniflow/test-catalog")).json()).tests;
     await api.dispose();
     const unbilled = tests.filter((t) => t.isActive && !t.serviceItemCode).length;
-    await expect(page.locator(".tcat__warn")).toContainText(
+    await expect(page.locator(".tcat__warn", { hasText: "billing item" })).toContainText(
       `${unbilled} active test${unbilled === 1 ? " has" : "s have"} no active billing item`,
     );
   });
@@ -210,7 +210,9 @@ test.describe.serial("P1-34 test catalogue page stops editing price", () => {
     await expect(row(page, RETIRED)).toHaveCount(0);
     await page.getByLabel("Show retired").check();
     await expect(row(page, RETIRED)).toContainText("Retired");
-    await expect(row(page, RETIRED).getByRole("link")).toHaveCount(0);
+    await expect(row(page, RETIRED).getByRole("cell", { name: /₹/ }).getByRole("link")).toHaveCount(
+      0,
+    );
   });
 
   test("8. the catalogue refuses a price change even for a test with no item", async () => {

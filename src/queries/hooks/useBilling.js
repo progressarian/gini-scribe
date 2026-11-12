@@ -374,6 +374,22 @@ export function useFinaliseBill() {
   );
 }
 
+export function usePayAndFinalise() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ billId, visitId, ...body }) =>
+      (await api.post(`${DESK}/bills/${billId}/pay-and-finalise`, body)).data,
+    onSettled: (_bill, _error, variables) => {
+      queryClient.invalidateQueries({ queryKey: billingKeys.visitBills(variables?.visitId) });
+      queryClient.invalidateQueries({ queryKey: billingKeys.billPayments(variables?.billId) });
+      queryClient.invalidateQueries({ queryKey: billingKeys.currentShift() });
+      queryClient.invalidateQueries({ queryKey: DUES });
+      queryClient.invalidateQueries({ queryKey: COUNTER_PATIENTS });
+      queryClient.invalidateQueries({ queryKey: ["billing", "deposit"] });
+    },
+  });
+}
+
 export function useCancelBill() {
   return useVisitMutation(
     async ({ billId, reason }) =>

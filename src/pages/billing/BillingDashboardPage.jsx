@@ -12,15 +12,21 @@ import { saveBlob } from "../../components/billing/importText";
 import { errorOf } from "../../components/billing/format";
 import { DAY_MS, dayMs, dayText, RANGES } from "../../components/billing/reportRanges";
 import { Choice, DateField } from "../../components/billing/ReportFields";
+import FilterPopover from "../../components/billing/FilterPopover";
 import KpiTiles from "../../components/billing/dashboard/KpiTiles";
 import RevenueTrend from "../../components/billing/dashboard/RevenueTrend";
 import MisTable from "../../components/billing/dashboard/MisTable";
 import { PaymentModes, RevenueMix } from "../../components/billing/dashboard/MixPanel";
 import DiscountPanel from "../../components/billing/dashboard/DiscountPanel";
 import ChargeDetail from "../../components/billing/dashboard/ChargeDetail";
+import PendingDetail from "../../components/billing/dashboard/PendingDetail";
 import NotFinalPanel from "../../components/billing/dashboard/NotFinalPanel";
 import RevenueBridge from "../../components/billing/dashboard/RevenueBridge";
-import { PERIOD_LABELS, reportHref } from "../../components/billing/dashboard/dashboardText";
+import {
+  PERIOD_LABELS,
+  rangeLabel,
+  reportHref,
+} from "../../components/billing/dashboard/dashboardText";
 import { toast } from "../../stores/uiStore";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
@@ -111,84 +117,79 @@ function Filters({ catalog, filters, update, onClear, cleared }) {
     { key: "week", label: "Week" },
     { key: "month", label: "Month" },
   ];
+  const active = ["category", "sub_category", "consultant"].filter((k) => filters[k]).length;
   return (
-    <div className="bill-form brep-filters" role="search" aria-label="Dashboard filters">
-      <div className="fset__field brep-field">
-        <label htmlFor={rangeId}>Dates</label>
-        <select
-          id={rangeId}
-          className="jb-assign"
-          value={filters.range}
-          onChange={(e) => {
-            const preset = PRESETS.find((p) => p.key === e.target.value);
-            const dates = preset?.range ? preset.range(catalog.today) : {};
-            update({ range: e.target.value, ...dates });
-          }}
-        >
-          {PRESETS.map((p) => (
-            <option key={p.key} value={p.key}>
-              {p.label}
-            </option>
-          ))}
-        </select>
-      </div>
-      <DateField
-        label="From"
-        value={filters.from}
-        onChange={(from) => update({ range: "custom", from })}
-      />
-      <DateField label="To" value={filters.to} onChange={(to) => update({ range: "custom", to })} />
-      <div className="bdash-field-seg">
-        <span id={`${rangeId}-view`}>View by</span>
-        <div className="bdash-seg" role="group" aria-labelledby={`${rangeId}-view`}>
-          {views.map((view) => (
-            <button
-              key={view.key || "auto"}
-              type="button"
-              className={`flow-btn flow-btn-mini ${filters.period === view.key ? "flow-btn-primary" : "flow-btn-ghost"}`}
-              aria-pressed={filters.period === view.key}
-              disabled={view.disabled}
-              title={
-                view.disabled ? `Day by day covers at most ${DAY_BUCKETS_MAX} days` : undefined
-              }
-              onClick={() => update({ period: view.key })}
-            >
-              {view.label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <Choice
-        label="Category"
-        value={filters.category}
-        onChange={(category) => update({ category, sub_category: "" })}
-        anyLabel="All categories"
-        options={parents.map((c) => ({ value: c.code, label: c.label }))}
-      />
-      <Choice
-        label="Sub-category"
-        value={filters.sub_category}
-        onChange={(sub_category) => update({ sub_category })}
-        anyLabel="All sub-categories"
-        options={subs.map((c) => ({ value: c.code, label: c.label }))}
-      />
-      <Choice
-        label="Consultant"
-        value={filters.consultant}
-        onChange={(consultant) => update({ consultant })}
-        anyLabel="All consultants"
-        options={options.consultants.map((d) => ({ value: String(d.id), label: d.name }))}
-      />
-      <div className="brep-quick">
-        <button
-          type="button"
-          className="flow-btn flow-btn-mini flow-btn-ghost"
-          disabled={cleared}
-          onClick={onClear}
-        >
-          Clear filters
-        </button>
-      </div>
+    <div className="bdash-filters" role="search" aria-label="Dashboard filters">
+      <label className="sr-only" htmlFor={rangeId}>
+        Dates
+      </label>
+      <select
+        id={rangeId}
+        className="jb-assign bdash-range"
+        value={filters.range}
+        onChange={(e) => {
+          const preset = PRESETS.find((p) => p.key === e.target.value);
+          const dates = preset?.range ? preset.range(catalog.today) : {};
+          update({ range: e.target.value, ...dates });
+        }}
+      >
+        {PRESETS.map((p) => (
+          <option key={p.key} value={p.key}>
+            {p.label}
+          </option>
+        ))}
+      </select>
+      <span className="bdash-dates">
+        {realDay(filters.from) && realDay(filters.to) ? rangeLabel(filters.from, filters.to) : ""}
+      </span>
+      <label className="sr-only" htmlFor={`${rangeId}-view`}>
+        View by
+      </label>
+      <select
+        id={`${rangeId}-view`}
+        className="jb-assign bdash-view"
+        value={filters.period}
+        onChange={(e) => update({ period: e.target.value })}
+      >
+        {views.map((view) => (
+          <option key={view.key || "auto"} value={view.key} disabled={view.disabled}>
+            {view.key ? `By ${view.label.toLowerCase()}` : view.label}
+          </option>
+        ))}
+      </select>
+      <FilterPopover active={active} cleared={cleared} onClear={onClear}>
+        <DateField
+          label="From"
+          value={filters.from}
+          onChange={(from) => update({ range: "custom", from })}
+        />
+        <DateField
+          label="To"
+          value={filters.to}
+          onChange={(to) => update({ range: "custom", to })}
+        />
+        <Choice
+          label="Category"
+          value={filters.category}
+          onChange={(category) => update({ category, sub_category: "" })}
+          anyLabel="All categories"
+          options={parents.map((c) => ({ value: c.code, label: c.label }))}
+        />
+        <Choice
+          label="Sub-category"
+          value={filters.sub_category}
+          onChange={(sub_category) => update({ sub_category })}
+          anyLabel="All sub-categories"
+          options={subs.map((c) => ({ value: c.code, label: c.label }))}
+        />
+        <Choice
+          label="Consultant"
+          value={filters.consultant}
+          onChange={(consultant) => update({ consultant })}
+          anyLabel="All consultants"
+          options={options.consultants.map((d) => ({ value: String(d.id), label: d.name }))}
+        />
+      </FilterPopover>
     </div>
   );
 }
@@ -252,6 +253,14 @@ export default function BillingDashboardPage() {
 
   const pick = (row) => update({ range: "custom", from: row.start, to: row.end, period: "day" });
 
+  const pendingOpen = params.get("pending") === "1";
+  const togglePending = () =>
+    setParams((current) => {
+      const next = new URLSearchParams(current);
+      if (pendingOpen) next.delete("pending");
+      else next.set("pending", "1");
+      return next;
+    });
   const openGroup = params.get("group") || "";
   const openSubgroup = params.get("subgroup") || "";
   const openCharges = (group, subgroup = "") =>
@@ -314,15 +323,20 @@ export default function BillingDashboardPage() {
   const data = result.data;
   return (
     <div className="flow-root fset bill-ui bdash-page">
-      <div className="flow-card bill-stack">
+      <div className="flow-card bdash-head">
         <div className="fset__cardhead">
           <h1 className="flow-sec-title">Billing dashboard</h1>
+          <Filters
+            catalog={catalog.data}
+            filters={filters}
+            update={update}
+            onClear={clear}
+            cleared={cleared}
+          />
           <div className="bdash-actions">
-            {data ? (
+            {result.isFetching || refresh.isPending ? (
               <span className="bdash-asof" role="status">
-                {result.isFetching || refresh.isPending
-                  ? "Updating…"
-                  : `As of ${IST_TIME.format(new Date(data.generated_at))}`}
+                Updating…
               </span>
             ) : null}
             <button
@@ -330,8 +344,12 @@ export default function BillingDashboardPage() {
               className="flow-btn flow-btn-mini flow-btn-ghost"
               onClick={refreshNow}
               disabled={!data || refresh.isPending || Boolean(problem)}
+              aria-label="Refresh"
+              title={
+                data ? `Refresh — as of ${IST_TIME.format(new Date(data.generated_at))}` : "Refresh"
+              }
             >
-              <RefreshCw size={13} aria-hidden="true" /> Refresh
+              <RefreshCw size={13} aria-hidden="true" />
             </button>
             <Link
               className="flow-btn flow-btn-mini flow-btn-ghost"
@@ -341,29 +359,15 @@ export default function BillingDashboardPage() {
             </Link>
             <button
               type="button"
-              className="flow-btn flow-btn-primary brep-export"
+              className="flow-btn flow-btn-mini flow-btn-primary"
               onClick={downloadNow}
               disabled={!data || download.isPending || Boolean(problem)}
             >
-              <Download size={14} aria-hidden="true" />
-              {download.isPending ? "Preparing…" : "Download Excel"}
+              <Download size={13} aria-hidden="true" />
+              {download.isPending ? "Preparing…" : "Excel"}
             </button>
           </div>
         </div>
-        <div className="fset__cardsub">
-          Counts final bills and drafts already paid in full (not finalised yet); credit notes are
-          taken off. The Billing Reports tabs count final bills only, so they can be lower until
-          those drafts are finalised. Discount here also counts lower category rates (CGHS and other
-          price lists) and amounts written off. Days are India dates. Figures refresh every few
-          minutes — use Refresh for the latest.
-        </div>
-        <Filters
-          catalog={catalog.data}
-          filters={filters}
-          update={update}
-          onClear={clear}
-          cleared={cleared}
-        />
       </div>
 
       {problem ? (
@@ -394,7 +398,8 @@ export default function BillingDashboardPage() {
         </div>
       ) : (
         <>
-          <KpiTiles data={data} />
+          <KpiTiles data={data} pendingOpen={pendingOpen} onTogglePending={togglePending} />
+          {pendingOpen ? <PendingDetail filters={sent} onClose={togglePending} /> : null}
           <NotFinalPanel data={data} />
           <RevenueTrend data={data} onPick={pick} />
           <div className="bdash-grid">

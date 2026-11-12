@@ -178,11 +178,6 @@ export default function ChargeDetail({ filters, period, group, subgroup, onOpen,
       ) : (
         <>
           <Crumbs detail={detail.data} onOpen={onOpen} onClose={onClose} />
-          <div className="fset__cardsub">
-            {detail.data.level === "subgroup"
-              ? "Charges before discount, by subgroup. Open a subgroup to see its items."
-              : "Every item billed in this subgroup over the whole date range, largest first."}
-          </div>
           {detail.data.level === "subgroup" ? (
             <SubgroupTable detail={detail.data} period={period} onOpen={onOpen} />
           ) : (

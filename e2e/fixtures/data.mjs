@@ -19,6 +19,7 @@ export const USERS = {
     short_name: "CareCoord",
     role: "care_coordinator",
   },
+  lab_admin: { id: 9009, name: "E2E Lab Admin", short_name: "LabAdmin", role: "lab_admin" },
 };
 
 export const CONSULTANTS = {

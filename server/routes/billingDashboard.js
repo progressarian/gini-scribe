@@ -13,6 +13,7 @@ import {
 import { billingRoute as run, sendFailure, sendXlsx } from "./billingHttp.js";
 import { billingDashboard } from "../services/billing/dashboard.js";
 import { chargeDetail } from "../services/billing/dashboardCharges.js";
+import { pendingDetail } from "../services/billing/dashboardPending.js";
 import { dashboardWorkbook } from "../services/billing/dashboardExport.js";
 import { staffDashboard, staffShiftDetail } from "../services/billing/staffDashboard.js";
 import { staffWorkbook } from "../services/billing/staffExport.js";
@@ -27,6 +28,13 @@ router.get(
   reports,
   validateQuery(billingDashboardChargesQuerySchema, BILLING_DASHBOARD_CHARGES_LABELS),
   run("Billing dashboard charges", 200, (req) => chargeDetail(req.query)),
+);
+
+router.get(
+  `${BASE}/pending`,
+  reports,
+  dashboardQuery,
+  run("Billing dashboard pending", 200, (req) => pendingDetail(req.query)),
 );
 
 router.get(`${BASE}/export`, reports, dashboardQuery, async (req, res) => {

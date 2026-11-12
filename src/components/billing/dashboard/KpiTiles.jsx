@@ -24,20 +24,38 @@ export function Change({ current, previous, points, against, format = money }) {
   );
 }
 
-function Tile({ label, value, hint, trend, children }) {
+function Tile({ label, value, hint, trend, children, onOpen, open }) {
   return (
-    <div className="bdash-tile" role="group" aria-label={label}>
+    <div
+      className={`bdash-tile${onOpen ? " bdash-tile--open" : ""}${open ? " is-open" : ""}`}
+      role="group"
+      aria-label={label}
+    >
       <div className="bdash-tile__label" title={hint}>
         {label}
       </div>
       <div className="bdash-tile__value">{value}</div>
       {children}
       <Sparkline values={trend} />
+      {onOpen ? (
+        <button
+          type="button"
+          className="bdash-tile__more"
+          aria-expanded={open}
+          aria-controls="bdash-pending-detail"
+          onClick={onOpen}
+        >
+          {open ? "Hide details" : "See details ›"}
+        </button>
+      ) : null}
     </div>
   );
 }
 
-export default function KpiTiles({ data }) {
+const discountParts = (now) =>
+  `Rules ${money(now.rule_discount)} · Category rates ${money(now.category_reduction)} · Written off ${money(now.written_off)}`;
+
+export default function KpiTiles({ data, pendingOpen = false, onTogglePending = null }) {
   const now = data.kpis.current;
   const was = data.kpis.previous;
   const trendOf = (key) => data.rows.map((row) => row[key]);
@@ -72,6 +90,8 @@ export default function KpiTiles({ data }) {
       <Tile
         label="Pending"
         value={money(now.pending)}
+        onOpen={onTogglePending}
+        open={pendingOpen}
         hint="Net revenue − collected. Negative means more came in than was billed: earlier dues paid, or extra kept as deposit."
       >
         <span className="bdash-tile__change">
@@ -87,9 +107,8 @@ export default function KpiTiles({ data }) {
         <span className="bdash-tile__change">
           {now.discount_pct === null ? "No charges" : `${now.discount_pct}% of charges`}
         </span>
-        <span className="bdash-tile__change">
-          Rules {money(now.rule_discount)} · Category rates {money(now.category_reduction)} ·
-          Written off {money(now.written_off)}
+        <span className="bdash-tile__change bdash-tile__oneline" title={discountParts(now)}>
+          {discountParts(now)}
         </span>
         {compare("discount_pct", { points: true })}
       </Tile>

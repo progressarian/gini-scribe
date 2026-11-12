@@ -214,6 +214,7 @@ export const CAPABILITIES = {
   BILLING_DUES: "BILLING_DUES",
   PHARMACY_STOCK_VIEW: "PHARMACY_STOCK_VIEW",
   PHARMACY_STOCK_UPLOAD: "PHARMACY_STOCK_UPLOAD",
+  LAB_TEST_CATALOG: "LAB_TEST_CATALOG",
 };
 
 const C = CAPABILITIES;
@@ -377,6 +378,7 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_STATION_LAB_COLLECT,
     C.GINIFLOW_STATION_LAB_PROCESS,
     C.GINIFLOW_TEST_CANCEL,
+    C.LAB_TEST_CATALOG,
   ],
   // The machine room — ABI, VPT, Fundus, TMT and ECG. Modelled on the lab role,
   // because the shape of the job is the same: one desk, one queue, reports that

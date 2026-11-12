@@ -168,3 +168,60 @@
     break-inside: avoid-page;
   }
 }
+
+.fset.bill-ui.reg-compact {
+  gap: 10px;
+}
+.fset.bill-ui.reg-compact .flow-card {
+  padding: 10px 12px;
+}
+.fset.bill-ui.reg-compact .reg-head {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  position: relative;
+  z-index: 5;
+}
+.fset.bill-ui.reg-compact .reg-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.fset.bill-ui.reg-compact input.jb-assign.dues-search {
+  width: 280px;
+  max-width: 100%;
+  flex: none;
+}
+.fset.bill-ui.reg-compact .reg-total {
+  margin: 0 0 0 auto;
+  font-size: 13px;
+}
+.fset.bill-ui.reg-compact .reg-export {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fset.bill-ui.reg-compact .bfilter__box .fset__field {
+  min-width: 0;
+}
+.fset.bill-ui.reg-compact .bill-import__pager {
+  margin-top: 8px;
+}
+.fset.bill-ui.reg-compact .reg-tabs {
+  margin: 0 8px 0 0;
+  border-bottom: 0;
+}
+.fset.bill-ui.reg-compact .reg-tabs .cghs-tab {
+  padding: 4px 10px;
+}
+.fset.bill-ui.reg-compact .reg-head .reg-export {
+  margin-left: auto;
+}
+.fset.bill-ui.reg-compact .cghs-bar {
+  margin-bottom: 8px;
+}
+.fset.bill-ui.reg-compact .reg-head .reg-total + .reg-export {
+  margin-left: 0;
+}

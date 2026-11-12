@@ -318,11 +318,6 @@ export default function DeskRequestsPage({ live = true, filters: shared }) {
           <h2 className="flow-sec-title">Billing requests</h2>
           {list.data ? <span className="fset__count">{list.data.total}</span> : null}
         </div>
-        <div className="fset__cardsub">
-          The billing desk asks here when an item is missing from the master, when a patient needs
-          an item billed a second time on one visit, or when money should go back on a final bill. A
-          new-item request carries no price — you set the price when you create the item.
-        </div>
         <RequestFilters
           filters={filters}
           statuses={DESK_STATUSES}

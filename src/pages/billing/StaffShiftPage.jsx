@@ -84,24 +84,26 @@ function Toolbar({ query, onQuery, kinds, kind, onKind, placeholder, found, unit
   const searchId = useId();
   const kindId = useId();
   return (
-    <div className="bill-form brep-filters sd-toolbar" role="search">
-      <div className="fset__field brep-field sd-toolbar__search">
-        <label htmlFor={searchId}>Search</label>
-        <input
-          id={searchId}
-          className="jb-assign"
-          type="search"
-          value={query}
-          placeholder={placeholder}
-          onChange={(e) => onQuery(e.target.value)}
-        />
-      </div>
+    <div className="sd-toolbar sd-toolbar--compact" role="search">
+      <label className="sr-only" htmlFor={searchId}>
+        Search
+      </label>
+      <input
+        id={searchId}
+        className="jb-assign sd-toolbar__search"
+        type="search"
+        value={query}
+        placeholder={placeholder}
+        onChange={(e) => onQuery(e.target.value)}
+      />
       {kinds ? (
-        <div className="fset__field brep-field">
-          <label htmlFor={kindId}>Show</label>
+        <>
+          <label className="sr-only" htmlFor={kindId}>
+            Show
+          </label>
           <select
             id={kindId}
-            className="jb-assign"
+            className="jb-assign sd-toolbar__kind"
             value={kind}
             onChange={(e) => onKind(e.target.value)}
           >
@@ -111,7 +113,7 @@ function Toolbar({ query, onQuery, kinds, kind, onKind, placeholder, found, unit
               </option>
             ))}
           </select>
-        </div>
+        </>
       ) : null}
       <p className="sd-found" role="status">
         {count(found)} {unit}
@@ -253,10 +255,6 @@ function ClearedTab({ rows, view }) {
   const page = shown.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
   return (
     <>
-      <p className="bdash-muted sd-tabnote">
-        Tests cleared on the Payments tab and consultant fee changes settled. The money was taken in
-        HealthRay, so it is not in this shift&apos;s drawer.
-      </p>
       <Toolbar
         query={view.query}
         onQuery={view.setQuery}
@@ -461,33 +459,32 @@ export default function StaffShiftPage() {
   };
   return (
     <div className="flow-root fset bill-ui bdash-page">
-      <div className="flow-card bill-stack">
-        <Link className="sd-back" to={back} aria-label="Back to Staff & shifts">
-          <ArrowLeft size={14} aria-hidden="true" /> Staff &amp; shifts
-        </Link>
+      <div className="flow-card sd-head">
         <div className="fset__cardhead">
+          <Link className="sd-back" to={back} aria-label="Back to Staff & shifts">
+            <ArrowLeft size={14} aria-hidden="true" />
+          </Link>
           <h1 className="flow-sec-title">
             {shift.user.name ?? "Desk"} · shift of {clock(shift.opened_at)}{" "}
             <CashBadge shift={shift} withAmount />
           </h1>
+          <span className="bdash-asof sd-facts">
+            {shift.is_open
+              ? `Open for ${hoursOpen(shift)}`
+              : `Closed ${clock(shift.closed_at)} (${hoursOpen(shift)})`}
+            {` · ${count(data.payments.length)} payments`}
+            {outsideCount ? ` (${count(outsideCount)} paid in HealthRay)` : ""}
+            {shift.note ? ` · Note: “${shift.note}”` : ""}
+          </span>
           <div className="bdash-actions">
             <button
               type="button"
               className="flow-btn flow-btn-mini flow-btn-ghost"
               onClick={() => setSlipOpen(true)}
             >
-              <Printer size={13} aria-hidden="true" /> Print handover slip
+              <Printer size={13} aria-hidden="true" /> Print slip
             </button>
           </div>
-        </div>
-        <div className="fset__cardsub">
-          Opened {clock(shift.opened_at)}
-          {shift.is_open
-            ? ` · open for ${hoursOpen(shift)}`
-            : ` · closed ${clock(shift.closed_at)} (${hoursOpen(shift)})`}
-          {` · ${count(data.payments.length)} payments`}
-          {outsideCount ? ` (${count(outsideCount)} of them marked paid in HealthRay)` : ""}
-          {shift.note ? ` · Note: “${shift.note}”` : ""}
         </div>
       </div>
 

@@ -109,11 +109,6 @@ export default function MisTable({ data, onPick, onOpenGroup, openGroup }) {
         <span className="fset__count">{data.rows.length}</span>
         <ReportLink report="revenue_items" title="Revenue by service" filters={data.filters} />
       </div>
-      <div className="fset__cardsub">
-        Same layout as the MIS sheet. Charges are before discount; discounts are shown as minus.
-        Pharmacy is billed in its own system, so it isn't in Scribe.
-        {period !== "day" ? " Open a row to see it day by day." : ""}
-      </div>
       <div className="fset__scroll fset__scroll--wide bdash-mis-scroll">
         <table
           className="flow-table brep-table bdash-mis"

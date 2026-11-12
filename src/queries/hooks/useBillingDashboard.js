@@ -9,6 +9,7 @@ export const billingDashboardKeys = {
   all: ["billing", "dashboard"],
   view: (filters) => ["billing", "dashboard", "view", filters ?? {}],
   charges: (filters) => ["billing", "dashboard", "charges", filters ?? {}],
+  pending: (filters) => ["billing", "dashboard", "pending", filters ?? {}],
 };
 
 const withoutBlanks = (filters = {}) =>
@@ -55,6 +56,18 @@ export function useBillingDashboardExport() {
         fileName: fileNameOf(response.headers, dashboardFileName(resolved)),
       };
     },
+  });
+}
+
+export function usePendingDetail(filters, { enabled = true } = {}) {
+  const params = withoutBlanks(filters);
+  return useQuery({
+    queryKey: billingDashboardKeys.pending(params),
+    queryFn: async () => (await api.get(`${DASHBOARD}/pending`, { params })).data,
+    enabled,
+    placeholderData: (previous) => previous,
+    staleTime: 60_000,
+    retry: retryUnlessRefused,
   });
 }
 

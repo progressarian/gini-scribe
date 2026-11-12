@@ -2934,3 +2934,149 @@ body > [role="dialog"][aria-modal="true"] .bc-cc__warn {
   color: #b45309;
   font-weight: 600;
 }
+
+.gf .rc-desk__tabs {
+  padding: 8px 12px 6px;
+}
+.gf .bc-list__head {
+  gap: 8px;
+  padding: 8px 10px;
+}
+.gf .bc-detail {
+  gap: 8px;
+  padding: 8px 10px 16px;
+}
+@media (min-width: 901px) {
+  .gf .bc-detail {
+    padding: 8px 12px 16px;
+  }
+}
+.gf .bc-bill {
+  gap: 10px;
+}
+.gf .bc-bill__work,
+.gf .bc-bill__summary {
+  gap: 8px;
+}
+.gf .bc-card {
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+.gf .bc-pay__go {
+  height: 40px;
+  margin-top: 10px;
+}
+@container (max-width: 620px) {
+  .gf .bc-stack .bc-itable tbody {
+    gap: 6px;
+  }
+  .gf .bc-stack .bc-itable tr:not(.bc-later) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 16px;
+    padding: 6px 10px;
+    border-radius: 8px;
+  }
+  .gf .bc-stack .bc-itable tr:not(.bc-later) > * {
+    grid-column: span 1;
+  }
+  .gf .bc-stack .bc-itable tr:not(.bc-later) > th,
+  .gf .bc-stack .bc-itable td[data-label="Service / Test"] {
+    grid-column: 1 / -1;
+  }
+  .gf .bc-stack .bc-itable td.bc-cell-actions {
+    padding: 3px 0;
+    border-bottom: 0;
+  }
+  .gf .bc-stack .bc-itable td {
+    padding: 3px 0;
+  }
+  .gf .bc-stack .bc-itable td[data-label="Service / Test"] {
+    padding: 0 0 4px;
+  }
+}
+
+.gf .bc-refunds {
+  gap: 8px;
+}
+.gf .bc-refunds__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+.gf .bc-refunds__bar .bc-refunds__title {
+  margin: 0;
+}
+.gf .bc-refunds__bar > .bc-head__meta {
+  margin: 0;
+}
+.gf .bc-refunds__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.gf .bc-refunds__filters .bc-refunds__search {
+  width: 260px;
+  max-width: 100%;
+}
+.gf .bc-refunds__filters .bc-refunds__date {
+  width: 140px;
+}
+.gf .bc-refunds .bc-card > .bc-card__title {
+  margin-bottom: 0;
+}
+.gf .bc-refunds .bc-card > div[id] {
+  margin-top: 6px;
+}
+
+.gf .bc-card[aria-label="Shift"] {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gf .bc-card[aria-label="Shift"] > .bc-card__title {
+  margin: 0;
+}
+.gf .bc-card[aria-label="Shift"] .bc-pastday {
+  margin: 0;
+  padding: 6px 10px;
+}
+.gf .bc-totals.bc-totals--drawer {
+  width: 100%;
+  max-width: 420px;
+}
+.gf .bc-totals.bc-totals--drawer th,
+.gf .bc-totals.bc-totals--drawer td {
+  padding: 3px 8px;
+  background: none;
+  border-bottom: 1px solid var(--bd);
+}
+.gf .bc-totals.bc-totals--drawer tr:last-child th,
+.gf .bc-totals.bc-totals--drawer tr:last-child td {
+  font-weight: 700;
+  border-bottom: 0;
+}
+.gf .bc-card[aria-label="Shift"] .bc-notes {
+  margin-top: 0;
+}
+.gf .bc-shiftgrid {
+  display: grid;
+  grid-template-columns: minmax(260px, 420px) minmax(0, 1fr);
+  align-items: start;
+  gap: 8px 24px;
+}
+.gf .bc-shiftgrid__money,
+.gf .bc-shiftgrid__close {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+@container (max-width: 760px) {
+  .gf .bc-shiftgrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

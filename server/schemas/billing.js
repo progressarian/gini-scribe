@@ -1181,6 +1181,19 @@ export const billingPaymentsTakeSchema = z.strictObject(
   objectOnly("Send the payment as an object"),
 );
 
+export const billingPayAndFinaliseSchema = z.strictObject(
+  {
+    version: whole,
+    pay_later: flag.optional(),
+    payments: z
+      .array(takenPayment, { error: "must be a list of payments" })
+      .min(1, "list is empty: enter the payment being taken")
+      .max(PAYMENTS_AT_ONCE, `can be at most ${PAYMENTS_AT_ONCE} at once`),
+    ...NO_PRICE,
+  },
+  objectOnly("Send the payment as an object"),
+);
+
 export const billingItemSearchQuerySchema = z.strictObject({
   q: z.string().max(100).optional(),
   limit: count.optional(),

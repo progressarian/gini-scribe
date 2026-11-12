@@ -129,116 +129,129 @@ export default function ShiftPanel() {
               ? ` · ${shift.deposits.count} deposit${shift.deposits.count === 1 ? "" : "s"} taken (₹${shift.deposits.received.toLocaleString("en-IN", { minimumFractionDigits: 2 })}, included above)`
               : ""}
           </div>
-          <table className="ltable bc-totals" aria-label="Drawer">
-            <tbody>
-              {figure("Opening cash", shift.opening_cash, "opening")}
-              {Object.entries(TAKE_MODE_LABEL)
-                .filter(
-                  ([mode]) => Object.hasOwn(PAYMENT_MODE_LABEL, mode) || shift.collected[mode] > 0,
-                )
-                .map(([mode, label]) => figure(`${label} collected`, shift.collected[mode], mode))}
-              {figure("Cash paid back", shift.refunded?.cash ?? 0, "refunded-cash")}
-              {Object.entries(TAKE_MODE_LABEL)
-                .filter(([mode]) => mode !== "cash" && (shift.refunded?.[mode] ?? 0) > 0)
-                .map(([mode, label]) =>
-                  figure(`${label} paid back`, shift.refunded[mode], `refunded-${mode}`),
-                )}
-              {figure("Expected in the drawer", shift.expected_cash, "expected")}
-            </tbody>
-          </table>
-          {shift.healthray?.collected > 0 && (
-            <div className="bc-hint" aria-label="Paid in HealthRay">
-              Paid in HealthRay {rupees(shift.healthray.collected)} (not in the drawer)
+          <div className="bc-shiftgrid">
+            <div className="bc-shiftgrid__money">
+              <table className="ltable bc-totals bc-totals--drawer" aria-label="Drawer">
+                <tbody>
+                  {figure("Opening cash", shift.opening_cash, "opening")}
+                  {Object.entries(TAKE_MODE_LABEL)
+                    .filter(
+                      ([mode]) =>
+                        Object.hasOwn(PAYMENT_MODE_LABEL, mode) || shift.collected[mode] > 0,
+                    )
+                    .map(([mode, label]) =>
+                      figure(`${label} collected`, shift.collected[mode], mode),
+                    )}
+                  {figure("Cash paid back", shift.refunded?.cash ?? 0, "refunded-cash")}
+                  {Object.entries(TAKE_MODE_LABEL)
+                    .filter(([mode]) => mode !== "cash" && (shift.refunded?.[mode] ?? 0) > 0)
+                    .map(([mode, label]) =>
+                      figure(`${label} paid back`, shift.refunded[mode], `refunded-${mode}`),
+                    )}
+                  {figure("Expected in the drawer", shift.expected_cash, "expected")}
+                </tbody>
+              </table>
+              {shift.healthray?.collected > 0 && (
+                <div className="bc-hint" aria-label="Paid in HealthRay">
+                  Paid in HealthRay {rupees(shift.healthray.collected)} (not in the drawer)
+                </div>
+              )}
+              {shift.prepaid?.collected > 0 && (
+                <div className="bc-hint" aria-label="Paid earlier or online">
+                  Paid earlier / online {rupees(shift.prepaid.collected)} (not in the drawer)
+                </div>
+              )}
             </div>
-          )}
-          {shift.prepaid?.collected > 0 && (
-            <div className="bc-hint" aria-label="Paid earlier or online">
-              Paid earlier / online {rupees(shift.prepaid.collected)} (not in the drawer)
-            </div>
-          )}
 
-          <div className="bc-head__row">
-            <label className="bc-field">
-              <span className="bc-field__lbl">Counted cash</span>
-              <input
-                className="bc-field__in"
-                inputMode="decimal"
-                value={byNotes ? countedAmount.toFixed(2) : counted}
-                readOnly={byNotes}
-                aria-describedby={byNotes ? "bc-shift-bynotes" : "bc-shift-countmsg"}
-                aria-invalid={countedError && counted ? true : undefined}
-                onChange={(e) => setCounted(cashTyped(e.target.value))}
-              />
-            </label>
-            <label className="bc-field">
-              <span className="bc-field__lbl">Note</span>
-              <input
-                className="bc-field__in"
-                maxLength={280}
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-              />
-            </label>
-            <span className="bc-hint" aria-label="Difference">
-              Difference {rupees(difference)}
-            </span>
-            {!byNotes && counted && countedError ? (
-              <span className="bc-err" id="bc-shift-countmsg" role="alert">
-                {countedError}
-              </span>
-            ) : countWarning ? (
-              <span className="bc-hint bc-warn" id="bc-shift-countmsg" role="status">
-                {countWarning}
-              </span>
-            ) : null}
-            <button
-              type="button"
-              className="st-btn st-btn-red"
-              disabled={(!byNotes && Boolean(countedError)) || closeShift.isPending}
-              onClick={() => {
-                setError(null);
-                setDone(null);
-                setClosing(true);
-              }}
-            >
-              Close shift
-            </button>
-          </div>
-          <details className="bc-notes" open={byNotes || undefined}>
-            <summary>Count by notes (optional)</summary>
-            <div className="bc-notes__grid" role="group" aria-label="Note count">
-              {NOTES.map((value) => (
-                <label key={value} className="bc-field">
-                  <span className="bc-field__lbl">₹{value} notes</span>
+            <div className="bc-shiftgrid__close">
+              <div className="bc-head__row">
+                <label className="bc-field">
+                  <span className="bc-field__lbl">Counted cash</span>
                   <input
                     className="bc-field__in"
-                    inputMode="numeric"
-                    value={notes[value] ?? ""}
-                    onChange={(e) =>
-                      setNotes({ [value]: e.target.value.replace(/\D/g, "").slice(0, 6) })
-                    }
+                    inputMode="decimal"
+                    value={byNotes ? countedAmount.toFixed(2) : counted}
+                    readOnly={byNotes}
+                    aria-describedby={byNotes ? "bc-shift-bynotes" : "bc-shift-countmsg"}
+                    aria-invalid={countedError && counted ? true : undefined}
+                    onChange={(e) => setCounted(cashTyped(e.target.value))}
                   />
                 </label>
-              ))}
-              <label className="bc-field">
-                <span className="bc-field__lbl">Coins (₹)</span>
-                <input
-                  className="bc-field__in"
-                  inputMode="decimal"
-                  value={notes.coins ?? ""}
-                  onChange={(e) => setNotes({ coins: cashTyped(e.target.value) })}
-                />
-              </label>
-            </div>
-            {byNotes && (
-              <div className="bc-hint" id="bc-shift-bynotes">
-                The counted cash is the note count: {rupees(countedAmount)}.{" "}
-                <button type="button" className="bc-linkbtn" onClick={() => form.set("notes", {})}>
-                  Clear the note count
+                <label className="bc-field">
+                  <span className="bc-field__lbl">Note</span>
+                  <input
+                    className="bc-field__in"
+                    maxLength={280}
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                  />
+                </label>
+                <span className="bc-hint" aria-label="Difference">
+                  Difference {rupees(difference)}
+                </span>
+                {!byNotes && counted && countedError ? (
+                  <span className="bc-err" id="bc-shift-countmsg" role="alert">
+                    {countedError}
+                  </span>
+                ) : countWarning ? (
+                  <span className="bc-hint bc-warn" id="bc-shift-countmsg" role="status">
+                    {countWarning}
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  className="st-btn st-btn-red"
+                  disabled={(!byNotes && Boolean(countedError)) || closeShift.isPending}
+                  onClick={() => {
+                    setError(null);
+                    setDone(null);
+                    setClosing(true);
+                  }}
+                >
+                  Close shift
                 </button>
               </div>
-            )}
-          </details>
+              <details className="bc-notes" open={byNotes || undefined}>
+                <summary>Count by notes (optional)</summary>
+                <div className="bc-notes__grid" role="group" aria-label="Note count">
+                  {NOTES.map((value) => (
+                    <label key={value} className="bc-field">
+                      <span className="bc-field__lbl">₹{value} notes</span>
+                      <input
+                        className="bc-field__in"
+                        inputMode="numeric"
+                        value={notes[value] ?? ""}
+                        onChange={(e) =>
+                          setNotes({ [value]: e.target.value.replace(/\D/g, "").slice(0, 6) })
+                        }
+                      />
+                    </label>
+                  ))}
+                  <label className="bc-field">
+                    <span className="bc-field__lbl">Coins (₹)</span>
+                    <input
+                      className="bc-field__in"
+                      inputMode="decimal"
+                      value={notes.coins ?? ""}
+                      onChange={(e) => setNotes({ coins: cashTyped(e.target.value) })}
+                    />
+                  </label>
+                </div>
+                {byNotes && (
+                  <div className="bc-hint" id="bc-shift-bynotes">
+                    The counted cash is the note count: {rupees(countedAmount)}.{" "}
+                    <button
+                      type="button"
+                      className="bc-linkbtn"
+                      onClick={() => form.set("notes", {})}
+                    >
+                      Clear the note count
+                    </button>
+                  </div>
+                )}
+              </details>
+            </div>
+          </div>
         </>
       )}
 

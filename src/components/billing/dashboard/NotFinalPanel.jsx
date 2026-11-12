@@ -15,9 +15,7 @@ export default function NotFinalPanel({ data }) {
         <span className="fset__count">{count(block.bills.length)}</span>
       </div>
       <div className="fset__cardsub">
-        These bills are paid in full but were never finalised, so they have no bill number and are
-        missing from the Billing Reports tabs ({money(total)}). Open each one at the counter — it
-        opens on the bill&apos;s own date — and press Finalise.
+        {money(total)} paid but not finalised — open each at the counter and press Finalise.
         {block.truncated ? " Only the first 500 are listed; narrow the dates to see the rest." : ""}
       </div>
       <div className="fset__scroll fset__scroll--tall">

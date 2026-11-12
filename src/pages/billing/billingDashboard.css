@@ -1,8 +1,43 @@
 .fset.bill-ui.bdash-page {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
-  padding: 16px;
+  gap: 10px;
+  padding: 0;
+}
+.fset.bill-ui.bdash-page .flow-card {
+  padding: 10px 12px;
+}
+.bdash-page .bdash-head {
+  position: relative;
+  z-index: 5;
+}
+.fset.bill-ui.bdash-page .bdash-head .fset__cardhead {
+  align-items: center;
+  margin-bottom: 0;
+}
+.bdash-page .bdash-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.fset.bill-ui.bdash-page select.jb-assign.bdash-view {
+  width: 120px;
+  max-width: 100%;
+  flex: none;
+}
+.fset.bill-ui.bdash-page select.jb-assign.bdash-range {
+  width: 150px;
+  max-width: 100%;
+  flex: none;
+}
+.bdash-page .bdash-dates {
+  font-size: 12px;
+  color: var(--fink2);
+  white-space: nowrap;
+}
+.bdash-page section.bdash-card:has(.bdash-chart) {
+  border-color: #94a3b8;
 }
 .bdash-page .sr-only {
   position: absolute;
@@ -18,6 +53,7 @@
 .fset.bill-ui.bdash-page .fset__cardhead {
   flex-wrap: wrap;
   gap: 8px;
+  margin-bottom: 6px;
 }
 .bdash-page .bdash-actions {
   margin-left: auto;
@@ -48,13 +84,13 @@
 .bdash-page .bdash-tiles {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: 10px;
 }
 .bdash-page .bdash-tile {
   background: var(--fwhite);
   border: 1px solid var(--fbd);
   border-radius: var(--fr);
-  padding: 12px 16px;
+  padding: 8px 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -80,7 +116,7 @@
 .bdash-page .bdash-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: 10px;
 }
 .bdash-page .bdash-card {
   min-width: 0;
@@ -88,7 +124,7 @@
 .bdash-page .bdash-chart {
   width: 100%;
   min-width: 0;
-  margin-top: 8px;
+  margin-top: 4px;
 }
 .bdash-page .bdash-tip {
   background: var(--fwhite);
@@ -707,4 +743,130 @@
 .sd-drawer .sd-close__check,
 .sd-drawer .sd-close__row > button {
   margin-top: 22px;
+}
+.bdash-page .bdash-tile--open {
+  position: relative;
+  cursor: pointer;
+}
+.bdash-page .bdash-tile--open:hover,
+.bdash-page .bdash-tile--open.is-open {
+  border-color: var(--ftl);
+}
+.bdash-page .bdash-tile__more {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ui-accent);
+  cursor: pointer;
+}
+.bdash-page .bdash-tile__more::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.bdash-page .bdash-tile__more:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.bdash-page .bdash-services {
+  min-width: 220px;
+  max-width: 420px;
+  font-size: 12px;
+  color: var(--fink2);
+}
+.bdash-page .bdash-small th[scope="row"] {
+  white-space: nowrap;
+}
+.bdash-page .bdash-pending {
+  scroll-margin-top: 12px;
+}
+.bdash-page .bdash-pending h2:focus {
+  outline: none;
+}
+.fset.bill-ui.bdash-page .sd-head .fset__cardhead {
+  align-items: center;
+  margin-bottom: 0;
+}
+.fset.bill-ui.bdash-page .sd-head .sd-back {
+  margin: 0;
+}
+.bdash-page .sd-facts {
+  overflow-wrap: anywhere;
+}
+.bdash-page .sd-toolbar--compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+.fset.bill-ui.bdash-page .sd-toolbar--compact .sd-toolbar__search {
+  width: 300px;
+  max-width: 100%;
+  flex: none;
+}
+.fset.bill-ui.bdash-page .sd-toolbar--compact .sd-toolbar__kind {
+  width: auto;
+  max-width: 100%;
+  flex: none;
+}
+.bdash-page .sd-toolbar--compact .sd-found {
+  margin: 0 0 0 auto;
+}
+.bdash-page .brep-tabs + [role="tabpanel"] {
+  margin-top: 0;
+}
+.bdash-page section.sd-drawer .sd-close {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.bdash-page section.sd-drawer .sd-close__row {
+  align-items: flex-end;
+}
+.bdash-page section.sd-drawer .sd-close__check,
+.bdash-page section.sd-drawer .sd-close__row > button {
+  margin-top: 0;
+}
+.bdash-page .bdash-grid:has(#sd-cash) {
+  align-items: start;
+}
+.fset.bill-ui.bdash-page .bdash-tiles {
+  gap: 8px;
+}
+.fset.bill-ui.bdash-page .bdash-tile {
+  padding: 8px 12px;
+  gap: 1px;
+}
+.fset.bill-ui.bdash-page .bdash-tile__value {
+  font-size: 18px;
+  line-height: 1.25;
+}
+.fset.bill-ui.bdash-page .bdash-tile__change {
+  line-height: 1.35;
+}
+.fset.bill-ui.bdash-page .bdash-spark {
+  height: 22px;
+  margin-top: 2px;
+}
+.fset.bill-ui.bdash-page .bdash-tile__oneline {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fset.bill-ui.bdash-page .bdash-tile .bdash-spark {
+  margin-top: auto;
+  padding-top: 4px;
+}
+.bdash-page .bdash-reason {
+  min-width: 180px;
+  max-width: 260px;
+  font-size: 12px;
 }

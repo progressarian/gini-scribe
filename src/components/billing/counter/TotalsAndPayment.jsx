@@ -158,23 +158,9 @@ export default function TotalsAndPayment({
     change(index, needsUpiApp(mode) ? { mode } : { mode, upiApp: "" });
   };
 
-  const finishFrom = async (paidBill) => {
-    const made = await final.makeFinal(paidBill, {
-      payLater: laterChosen,
-      showIfRefused: paidBill === bill ? null : paidBill,
-    });
-    if (made) {
-      setNote(
-        paidBill === bill
-          ? `Bill ${made.bill_no} made final.`
-          : `Payment taken. Bill ${made.bill_no} made final.`,
-      );
-      return;
-    }
-    if (paidBill !== bill) {
-      setNote("Payment taken, but the bill is not final yet.");
-      announcePaid(bill.id);
-    }
+  const finishWithoutPayment = async () => {
+    const made = await final.makeFinal(bill, { payLater: laterChosen });
+    if (made) setNote(`Bill ${made.bill_no} made final.`);
   };
 
   const pay = async () => {
@@ -182,28 +168,33 @@ export default function TotalsAndPayment({
     setNote(null);
     try {
       if (entered <= 0) {
-        await finishFrom(bill);
+        await finishWithoutPayment();
+        return;
+      }
+      const payments = rows
+        .filter((row) => paiseOf(row.amount) > 0)
+        .map((row) => ({
+          mode: row.mode,
+          amount: row.amount.trim(),
+          ...(row.reference.trim() ? { reference: row.reference.trim() } : {}),
+          ...(needsUpiApp(row.mode) ? { upi_app: row.upiApp } : {}),
+        }));
+      if (finishes) {
+        const made = await final.makeFinal(bill, { payLater: laterChosen, payments });
+        if (made) {
+          setCapped(null);
+          announcePaid(bill.id);
+          setNote(`Payment taken. Bill ${made.bill_no} made final.`);
+        }
         return;
       }
       const paidBill = await take.mutateAsync({
         billId: bill.id,
         visitId: bill.visit_id,
         version: bill.version,
-        payments: rows
-          .filter((row) => paiseOf(row.amount) > 0)
-          .map((row) => ({
-            mode: row.mode,
-            amount: row.amount.trim(),
-            ...(row.reference.trim() ? { reference: row.reference.trim() } : {}),
-            ...(needsUpiApp(row.mode) ? { upi_app: row.upiApp } : {}),
-          })),
+        payments,
       });
       setCapped(null);
-      if (finishes) {
-        form.drop("rows");
-        await finishFrom(paidBill);
-        return;
-      }
       onBill(paidBill);
       form.drop("rows", "payLater");
       setNote("Payment taken.");
@@ -236,13 +227,20 @@ export default function TotalsAndPayment({
     setError(null);
     setNote(null);
     try {
-      onBill(
-        await clear.mutateAsync({ billId: bill.id, visitId: bill.visit_id, version: bill.version }),
-      );
+      const cleared = await clear.mutateAsync({
+        billId: bill.id,
+        visitId: bill.visit_id,
+        version: bill.version,
+      });
+      onBill(cleared);
       form.drop("rows", "payLater");
       setCapped(null);
       setConfirming(false);
-      setNote(`Marked ${fromPaise(balance)} as paid in HealthRay.`);
+      setNote(
+        cleared.status === "final" && bill.status === "draft"
+          ? `Marked ${fromPaise(balance)} as paid in HealthRay. Bill ${cleared.bill_no} made final.`
+          : `Marked ${fromPaise(balance)} as paid in HealthRay.`,
+      );
       announcePaid(bill.id);
     } catch (e) {
       if (e?.paymentTaken) {
@@ -624,7 +622,7 @@ export default function TotalsAndPayment({
             </dl>
             <p>
               This clears the bill in Scribe. No money is taken here and it is not added to the cash
-              drawer.
+              drawer.{bill.status === "draft" ? " The bill is also made final." : ""}
             </p>
           </div>
         }

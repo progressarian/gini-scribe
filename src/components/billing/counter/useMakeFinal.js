@@ -1,22 +1,34 @@
 import { useState } from "react";
-import { billPdfHref, useFinaliseBill, useRereadBill } from "../../../queries/hooks/useBilling";
+import {
+  billPdfHref,
+  useFinaliseBill,
+  usePayAndFinalise,
+  useRereadBill,
+} from "../../../queries/hooks/useBilling";
 import { errorOf } from "../format";
 
 export function useMakeFinal({ onBill, onPricesChanged, form }) {
   const finalise = useFinaliseBill();
+  const payAndFinalise = usePayAndFinalise();
   const reread = useRereadBill();
   const [error, setError] = useState(null);
   const [printing, setPrinting] = useState(null);
 
-  const makeFinal = async (bill, { payLater = false, showIfRefused = null } = {}) => {
+  const makeFinal = async (
+    bill,
+    { payLater = false, showIfRefused = null, payments = null } = {},
+  ) => {
     setError(null);
     try {
-      const made = await finalise.mutateAsync({
+      const request = {
         billId: bill.id,
         visitId: bill.visit_id,
         version: bill.version,
         ...(payLater ? { pay_later: true } : {}),
-      });
+      };
+      const made = payments
+        ? await payAndFinalise.mutateAsync({ ...request, payments })
+        : await finalise.mutateAsync(request);
       onBill(made);
       form.clear();
       setPrinting({
@@ -50,7 +62,7 @@ export function useMakeFinal({ onBill, onPricesChanged, form }) {
   return {
     makeFinal,
     error,
-    isPending: finalise.isPending,
+    isPending: finalise.isPending || payAndFinalise.isPending,
     printing,
     closePrinting: () => setPrinting(null),
   };

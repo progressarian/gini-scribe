@@ -379,50 +379,46 @@ export default function RefundsBoard({ onOpen }) {
   return (
     <div className="bc-refunds">
       <section className="bc-card" aria-label="Find refunds">
-        <h3 className="bc-card__title">Refunds</h3>
-        {data && (
-          <p className="bc-head__meta" aria-live="polite" data-testid="refunds-to-pay-total">
-            {counts.to_pay === 1 ? "1 refund" : `${counts.to_pay} refunds`} to pay back ·{" "}
-            {fromPaise(data.to_pay_total)} · {counts.waiting} waiting for admin
-          </p>
-        )}
-        <div className="bc-head__row bc-refunds__filters">
-          <label className="bc-field">
-            <span className="bc-field__lbl">Search</span>
+        <div className="bc-refunds__bar">
+          <h3 className="bc-card__title bc-refunds__title">Refunds</h3>
+          {data && (
+            <p className="bc-head__meta" aria-live="polite" data-testid="refunds-to-pay-total">
+              {counts.to_pay === 1 ? "1 refund" : `${counts.to_pay} refunds`} to pay back ·{" "}
+              {fromPaise(data.to_pay_total)} · {counts.waiting} waiting for admin
+            </p>
+          )}
+          <div className="bc-refunds__filters" role="search" aria-label="Refund filters">
             <input
-              className="bc-field__in"
+              className="bc-field__in bc-refunds__search"
               type="search"
               aria-label="Search refunds"
               value={search}
-              placeholder="Name, file no, bill or CN no…"
+              placeholder="Search name, file no, bill or CN no"
               onChange={(e) => setSearch(e.target.value)}
             />
-          </label>
-          <label className="bc-field">
-            <span className="bc-field__lbl">Rejected / paid back from</span>
             <input
-              className="bc-field__in"
+              className="bc-field__in bc-refunds__date"
               type="date"
+              aria-label="Rejected or paid back from"
+              title="Rejected or paid back from — approved and waiting refunds always show"
               value={from || data?.from || ""}
               max={to || data?.to || undefined}
               onChange={(e) => setFrom(e.target.value)}
             />
-          </label>
-          <label className="bc-field">
-            <span className="bc-field__lbl">to</span>
+            <span className="bc-head__meta" aria-hidden="true">
+              –
+            </span>
             <input
-              className="bc-field__in"
+              className="bc-field__in bc-refunds__date"
               type="date"
+              aria-label="Rejected or paid back to"
+              title="Rejected or paid back to — approved and waiting refunds always show"
               value={to || data?.to || ""}
               min={from || data?.from || undefined}
               onChange={(e) => setTo(e.target.value)}
             />
-          </label>
+          </div>
         </div>
-        <p className="bc-head__meta">
-          The dates pick which rejected and paid-back refunds show; approved and waiting ones always
-          show.
-        </p>
         {isLoading && <div className="empty-note">Loading…</div>}
         {error && <div className="bc-err">{errorOf(error, "The refunds could not be read")}</div>}
       </section>

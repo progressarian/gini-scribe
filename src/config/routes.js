@@ -102,11 +102,11 @@ export const PAGE_CAPABILITIES = {
   "/admin/prescription-footer": CAP.ADMIN,
   // Settings — one section, tab per area. Each tab is listed so a deep link is
   // gated the same as the section itself.
-  "/settings": [CAP.ADMIN, CAP.BILLING_MASTER, CAP.BILLING_SETTINGS],
+  "/settings": [CAP.ADMIN, CAP.BILLING_MASTER, CAP.BILLING_SETTINGS, CAP.LAB_TEST_CATALOG],
   "/settings/flow": CAP.ADMIN,
   "/settings/slots": CAP.ADMIN,
   "/settings/prescription": CAP.ADMIN,
-  "/settings/tests": CAP.ADMIN,
+  "/settings/tests": [CAP.ADMIN, CAP.LAB_TEST_CATALOG],
   "/settings/schemes": CAP.BILLING_MASTER,
   "/settings/services": CAP.BILLING_MASTER,
   "/settings/category-rates": CAP.BILLING_MASTER,

@@ -9672,3 +9672,61 @@
   text-transform: none;
   color: var(--ink);
 }
+.gf .lr-patient {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  color: var(--gf-ink2, #334155);
+  background: #f1f5f9;
+  border-radius: 6px;
+}
+.gf .lr-patient--missing {
+  color: #92400e;
+  background: #fffbeb;
+}
+
+.gf .pay-controls {
+  flex-wrap: wrap;
+}
+.gf .pay-controls .stats--pay {
+  gap: 6px;
+}
+.gf .stats--pay .stat {
+  padding: 4px 10px;
+  align-items: center;
+  gap: 6px;
+}
+.gf .stats--pay .stat .sv {
+  font-size: 15px;
+}
+.gf .pay-controls .sq-search {
+  flex: 1 1 260px;
+  margin-top: 0;
+}
+.gf .pay-cols {
+  gap: 12px;
+}
+.gf .ar-controls--compact {
+  flex-wrap: wrap;
+}
+.gf .ar-controls--compact .sq-search {
+  flex: 0 1 300px;
+  min-width: 220px;
+  margin-top: 0;
+}
+.gf .ar-controls--compact .sq-filters {
+  position: static;
+  padding: 0;
+  background: none;
+}
+.gf .ar-row {
+  padding: 6px 12px;
+  margin-bottom: 4px;
+}
+.gf .ar-row .st-btn {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.gf .workflow-note.is-warn {
+  padding: 6px 10px;
+}

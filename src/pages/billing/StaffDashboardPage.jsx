@@ -9,6 +9,7 @@ import { toast } from "../../stores/uiStore";
 import { errorOf } from "../../components/billing/format";
 import { dayMs, DAY_MS, RANGES } from "../../components/billing/reportRanges";
 import { Choice, DateField } from "../../components/billing/ReportFields";
+import FilterPopover from "../../components/billing/FilterPopover";
 import StaffTiles from "../../components/billing/staff/StaffTiles";
 import StaffTable from "../../components/billing/staff/StaffTable";
 import ShiftsTable from "../../components/billing/staff/ShiftsTable";
@@ -155,57 +156,38 @@ export default function StaffDashboardPage() {
     : null;
   return (
     <div className="flow-root fset bill-ui bdash-page">
-      <div className="flow-card bill-stack">
+      <div className="flow-card bdash-head">
         <div className="fset__cardhead">
           <h1 className="flow-sec-title">Staff &amp; shifts</h1>
-          <div className="bdash-actions">
-            {data ? (
-              <span className="bdash-asof" role="status">
-                {result.isFetching ? "Updating…" : `As of ${IST_TIME.format(new Date())}`}
+          <div className="bdash-filters" role="search" aria-label="Staff dashboard filters">
+            <label className="sr-only" htmlFor="sd-dates">
+              Dates
+            </label>
+            <select
+              id="sd-dates"
+              className="jb-assign bdash-range"
+              value={filters.range}
+              onChange={(e) => {
+                const preset = PRESETS.find((p) => p.key === e.target.value);
+                update({ range: e.target.value, ...(preset?.range ? preset.range(today) : {}) });
+              }}
+            >
+              {PRESETS.map((p) => (
+                <option key={p.key} value={p.key}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+            {data && !problem ? (
+              <span className="bdash-dates" role="status">
+                {shownRange(data.filters)} · {staffName ?? "All staff"}
               </span>
             ) : null}
-            <button
-              type="button"
-              className="flow-btn flow-btn-mini flow-btn-ghost"
-              onClick={() => result.refetch()}
-              disabled={!data || result.isFetching || Boolean(problem)}
+            <FilterPopover
+              active={filters.staff ? 1 : 0}
+              cleared={cleared}
+              onClear={() => setParams(new URLSearchParams())}
             >
-              <RefreshCw size={13} aria-hidden="true" /> Refresh
-            </button>
-            <button
-              type="button"
-              className="flow-btn flow-btn-primary brep-export"
-              onClick={downloadNow}
-              disabled={!data || download.isPending || Boolean(problem)}
-            >
-              <Download size={14} aria-hidden="true" />
-              {download.isPending ? "Preparing…" : "Download Excel"}
-            </button>
-          </div>
-        </div>
-        <div className="fset__cardsub">
-          What each person at the billing counter collected, by payment mode, and every shift&apos;s
-          cash handover. Money counts on the day it was taken.
-        </div>
-        <div className="bill-form brep-filters" role="search" aria-label="Staff dashboard filters">
-          <div className="bdash-field-seg">
-            <span id="sd-dates">Dates</span>
-            <div className="bdash-seg" role="group" aria-labelledby="sd-dates">
-              {PRESETS.map((p) => (
-                <button
-                  key={p.key}
-                  type="button"
-                  className={`flow-btn flow-btn-mini ${filters.range === p.key ? "flow-btn-primary" : "flow-btn-ghost"}`}
-                  aria-pressed={filters.range === p.key}
-                  onClick={() => update({ range: p.key, ...(p.range ? p.range(today) : {}) })}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          {filters.range === "custom" ? (
-            <>
               <DateField
                 label="From"
                 value={filters.from}
@@ -216,33 +198,42 @@ export default function StaffDashboardPage() {
                 value={filters.to}
                 onChange={(to) => update({ range: "custom", to })}
               />
-            </>
-          ) : null}
-          <Choice
-            label="Staff"
-            value={filters.staff}
-            onChange={(staff) => update({ staff })}
-            anyLabel="All staff"
-            options={users.map((u) => ({ value: String(u.id), label: u.name }))}
-          />
-          {!cleared ? (
-            <div className="brep-quick">
-              <button
-                type="button"
-                className="flow-btn flow-btn-mini flow-btn-ghost"
-                onClick={() => setParams(new URLSearchParams())}
-              >
-                Reset to today
-              </button>
-            </div>
-          ) : null}
+              <Choice
+                label="Staff"
+                value={filters.staff}
+                onChange={(staff) => update({ staff })}
+                anyLabel="All staff"
+                options={users.map((u) => ({ value: String(u.id), label: u.name }))}
+              />
+            </FilterPopover>
+          </div>
+          <div className="bdash-actions">
+            {result.isFetching ? (
+              <span className="bdash-asof" role="status">
+                Updating…
+              </span>
+            ) : null}
+            <button
+              type="button"
+              className="flow-btn flow-btn-mini flow-btn-ghost"
+              onClick={() => result.refetch()}
+              disabled={!data || result.isFetching || Boolean(problem)}
+              aria-label="Refresh"
+              title={data ? `Refresh — as of ${IST_TIME.format(new Date())}` : "Refresh"}
+            >
+              <RefreshCw size={13} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="flow-btn flow-btn-mini flow-btn-primary"
+              onClick={downloadNow}
+              disabled={!data || download.isPending || Boolean(problem)}
+            >
+              <Download size={13} aria-hidden="true" />
+              {download.isPending ? "Preparing…" : "Excel"}
+            </button>
+          </div>
         </div>
-        {data && !problem ? (
-          <p className="sd-showing" role="status">
-            Showing <strong>{shownRange(data.filters)}</strong> ·{" "}
-            <strong>{staffName ?? "all staff"}</strong>
-          </p>
-        ) : null}
         {problem ? (
           <div className="brep-error" role="alert">
             {problem}

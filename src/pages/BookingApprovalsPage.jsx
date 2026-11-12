@@ -105,11 +105,6 @@ export default function BookingApprovalsPage() {
 
   return (
     <div className="docmgmt docmgmt-embedded">
-      <p className="docmgmt-hint">
-        Bookings over a slot's patient limit. Approve keeps the booking in its slot; Reject clears
-        the slot so the desk picks another.
-      </p>
-
       <div className="docmgmt-filter docmgmt-viewfilter" role="group" aria-label="Show">
         {[
           ["pending", "Pending"],
@@ -215,6 +210,7 @@ export default function BookingApprovalsPage() {
                         className="docmgmt-primary docmgmt-small"
                         disabled={approve.isPending || reject.isPending}
                         aria-label={`Approve ${a.patient_name} in ${a.slot_label}`}
+                        title="Keeps the booking in its slot"
                         onClick={() => approve.mutate(a)}
                       >
                         {approve.isPending && approve.variables?.id === a.id
@@ -226,6 +222,7 @@ export default function BookingApprovalsPage() {
                         className="docmgmt-del"
                         disabled={approve.isPending || reject.isPending}
                         aria-label={`Reject ${a.patient_name} in ${a.slot_label}`}
+                        title="Clears the slot so the desk picks another"
                         onClick={() => {
                           setReason("");
                           setRejecting(a);

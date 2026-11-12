@@ -1056,6 +1056,7 @@ export function PaymentsTab({
   onClearHealthrayLab = () => {},
   onCancelHealthrayCase = () => {},
   healthrayLabPending = false,
+  counts = null,
 }) {
   const [homeOnly, setHomeOnly] = useState(false);
   const homeWaiting = data?.counts?.homePaymentPending || 0;
@@ -1073,14 +1074,6 @@ export function PaymentsTab({
 
   return (
     <>
-      <div className="workflow-note">
-        <span className="wn-ico">⚡</span>
-        <span>
-          <strong>Workflow:</strong> MO orders tests → appears here with payment pending → you
-          collect payment → triggers lab sample collection task automatically.
-        </span>
-      </div>
-
       {/* Shown only while the catalogue still holds the mockup's figures —
           it disappears by itself once the hospital's tariff is loaded.
           Reception must not collect against a placeholder unknowingly. */}
@@ -1091,10 +1084,27 @@ export function PaymentsTab({
         </div>
       )}
 
-      <div className="ar-controls">
+      <div className="ar-controls pay-controls">
+        {counts ? (
+          <div className="stats stats--pay" aria-label="Payments today">
+            <div className="stat">
+              <div className="sv sv-red">{counts.pending}</div>
+              <div className="sl">Payment pending</div>
+            </div>
+            <div className="stat">
+              <div className="sv sv-tl">{counts.awaitingSample}</div>
+              <div className="sl">Sample pending</div>
+            </div>
+            <div className="stat">
+              <div className="sv sv-grn">{counts.cleared}</div>
+              <div className="sl">Cleared</div>
+            </div>
+          </div>
+        ) : null}
         <div className="sq-search">
           <input
             value={search}
+            aria-label="Search payments"
             placeholder="Search payments — name, file no or phone"
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -2418,16 +2428,7 @@ export function ArrivalsTab({
 
   return (
     <>
-      <div className="workflow-note">
-        <span className="wn-ico">🚪</span>
-        <span>
-          <strong>Arrival marking</strong> is for walk-ins and corrections — HealthRay's own
-          check-ins arrive on their own. Anything marked here stays in Gini Flow until HealthRay
-          catches up; it is not written back.
-        </span>
-      </div>
-
-      <div className="ar-controls">
+      <div className="ar-controls ar-controls--compact">
         <div className="sq-search">
           <input
             value={search}
@@ -2467,8 +2468,7 @@ export function ArrivalsTab({
               {toMarkArrived} {toMarkArrived === 1 ? "patient needs" : "patients need"} “Arrived for
               appointment”
             </strong>{" "}
-            — tests are done and they are booked with a consultant. Mark them when they come back to
-            the desk.
+            — mark them when they come back to the desk.
           </span>
           <button
             type="button"
@@ -3357,61 +3357,26 @@ export default function ReceptionStationPage() {
           <div className="inner">
             {tabs}
 
-            <div className="stats">
-              {tab === TAB.arrivals ? (
-                <>
-                  <div className="stat">
-                    <div className="sv sv-amb">{counts.expected}</div>
-                    <div>
-                      <div className="sl">Expected</div>
-                      <div className="ss">booked, not here yet</div>
-                    </div>
+            {tab === TAB.arrivals ? (
+              <div className="stats stats--pay" aria-label="Arrivals today">
+                <div className="stat" title="Booked, not here yet">
+                  <div className="sv sv-amb">{counts.expected}</div>
+                  <div className="sl">Expected</div>
+                </div>
+                <div className="stat" title="In the building">
+                  <div className="sv sv-grn">{counts.onFloorHere ?? counts.onFloor}</div>
+                  <div className="sl">
+                    On the floor
+                    {counts.onFloorAway > 0 ? ` · ${counts.onFloorAway} on break` : ""}
+                    {counts.onFloorLeft > 0 ? ` · ${counts.onFloorLeft} left today` : ""}
                   </div>
-                  <div className="stat">
-                    <div className="sv sv-grn">{counts.onFloorHere ?? counts.onFloor}</div>
-                    <div>
-                      <div className="sl">On the floor</div>
-                      <div className="ss">
-                        in the building
-                        {counts.onFloorAway > 0 ? ` · ${counts.onFloorAway} on break` : ""}
-                        {counts.onFloorLeft > 0 ? ` · ${counts.onFloorLeft} left today` : ""}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="stat">
-                    <div className="sv sv-ink">{counts.notComing}</div>
-                    <div>
-                      <div className="sl">Not coming</div>
-                      <div className="ss">no-show or cancelled</div>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="stat">
-                    <div className="sv sv-red">{payCounts.pending}</div>
-                    <div>
-                      <div className="sl">Payment pending</div>
-                      <div className="ss">tests ordered today</div>
-                    </div>
-                  </div>
-                  <div className="stat">
-                    <div className="sv sv-tl">{payCounts.awaitingSample}</div>
-                    <div>
-                      <div className="sl">Sample pending</div>
-                      <div className="ss">payment done, lab waiting</div>
-                    </div>
-                  </div>
-                  <div className="stat">
-                    <div className="sv sv-grn">{payCounts.cleared}</div>
-                    <div>
-                      <div className="sl">Cleared</div>
-                      <div className="ss">lab collecting</div>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
+                </div>
+                <div className="stat" title="No-show or cancelled">
+                  <div className="sv sv-ink">{counts.notComing}</div>
+                  <div className="sl">Not coming</div>
+                </div>
+              </div>
+            ) : null}
 
             {tab === TAB.arrivals ? (
               <ArrivalsTab
@@ -3445,6 +3410,7 @@ export default function ReceptionStationPage() {
                 onClearHealthrayLab={onClearHealthrayLab}
                 onCancelHealthrayCase={onCancelHealthrayCase}
                 healthrayLabPending={journeyStep.isPending || cancelCase.isPending}
+                counts={payCounts}
               />
             )}
           </div>
