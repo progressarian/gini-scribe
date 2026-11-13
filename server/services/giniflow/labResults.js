@@ -281,7 +281,7 @@ const normalise = (rows, panelName) =>
         value: numeric,
         valueText: trimmed(r.valueText, 120) || (worded ? worded.slice(0, 120) : null),
         unit: trimmed(r.unit, 40),
-        refRange: trimmed(r.refRange, 60),
+        refRange: trimmed(r.refRange, 500),
         panelName: trimmed(r.panelName, 120) || trimmed(panelName, 120),
       };
     })
@@ -350,6 +350,19 @@ async function applyCatalog(entries, patientId, db, onDate = null) {
       };
     })
     .filter(Boolean);
+}
+
+async function clearEntries(db, column, link, names) {
+  const list = [...new Set((names || []).map((n) => trimmed(n, 120)).filter(Boolean))];
+  if (!list.length) return 0;
+  const { rowCount } = await db.query(
+    `DELETE FROM lab_results
+      WHERE ${column === "lab_case_no" ? "lab_case_no" : "lab_order_id"} = $1
+        AND source = $2
+        AND lower(test_name) = ANY($3::text[])`,
+    [link, SOURCE, list.map((n) => n.toLowerCase())],
+  );
+  return rowCount;
 }
 
 async function writeEntries(db, ctx, entries, column) {
@@ -449,11 +462,13 @@ const syncBiomarkers = async (patientId, appointmentId) => {
 
 export async function saveResults(
   orderId,
-  { rows = [], actorId = null, panelName = null },
+  { rows = [], cleared = [], actorId = null, panelName = null },
   db = pool,
 ) {
   const entries = normalise(rows, panelName);
-  if (!entries.length) throw bad("Nothing to save — every row needs a test and a value");
+  if (!entries.length && !cleared.length) {
+    throw bad("Nothing to save — every row needs a test and a value");
+  }
 
   const order = await orderContext(orderId, db);
   await assertNotHeld(db, { orderId });
@@ -467,6 +482,17 @@ export async function saveResults(
   }
   assertSampleDrawn(order);
 
+  const removed = await clearEntries(db, "lab_order_id", orderId, cleared);
+  if (!entries.length) {
+    if (removed) await syncBiomarkers(order.patient_id, order.appointment_id);
+    return {
+      orderId,
+      saved: 0,
+      cleared: removed,
+      skipped: [],
+      results: await getResults(orderId, db),
+    };
+  }
   const { written, skipped } = await writeEntries(
     db,
     { ...order, id: orderId },
@@ -485,6 +511,7 @@ export async function saveResults(
   return {
     orderId,
     saved: written,
+    cleared: removed,
     skipped,
     results: await getResults(orderId, db),
   };
@@ -492,13 +519,28 @@ export async function saveResults(
 
 export async function saveCaseResults(
   caseNo,
-  { rows = [], actorId = null, actorRole = "lab", panelName = null },
+  { rows = [], cleared = [], actorId = null, actorRole = "lab", panelName = null },
   db = pool,
 ) {
   const entries = normalise(rows, panelName);
-  if (!entries.length) throw bad("Nothing to save — every row needs a test and a value");
+  if (!entries.length && !cleared.length) {
+    throw bad("Nothing to save — every row needs a test and a value");
+  }
 
   const c = await caseContext(caseNo, db);
+  const removed = await clearEntries(db, "lab_case_no", caseNo, cleared);
+  if (!entries.length) {
+    if (removed) await syncBiomarkers(c.patient_id, c.appointment_id);
+    return {
+      caseNo,
+      patientName: c.patientName,
+      saved: 0,
+      cleared: removed,
+      skipped: [],
+      markedResultsReady: false,
+      results: await getCaseResults(caseNo, db),
+    };
+  }
   const { written, skipped } = await writeEntries(
     db,
     c,
@@ -528,6 +570,7 @@ export async function saveCaseResults(
     caseNo,
     patientName: c.patientName,
     saved: written,
+    cleared: removed,
     skipped,
     markedResultsReady: ready.rowCount > 0,
     results: await getCaseResults(caseNo, db),

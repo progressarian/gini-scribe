@@ -69,8 +69,8 @@
   margin-top: 0;
 }
 .fset.bill-ui .fset__scroll {
-  margin: 0 -20px;
-  padding: 0 20px;
+  margin: 0 20px;
+  padding: 0 0px;
 }
 
 .fset.bill-ui .bill-tree__group {

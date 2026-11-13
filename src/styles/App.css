@@ -955,11 +955,6 @@
   color: white;
 }
 
-.tab-btn--active-quick {
-  background: #dc2626;
-  color: white;
-}
-
 .tab-btn--inactive {
   background: white;
   color: #64748b;

@@ -1,4 +1,33 @@
 # CLAUDE.md
+Tech: React.js + Tailwind CSS + express + PostgreSQL + Supabase + Prisma
+Real-time: Socket.io
+
+in this we need to create a web app for the Hospital management system
+
+there are multiple role
+- admin
+and other 
+
+
+need to write code in production grade and i want to flow all the compliance that we need to flow like gdpr, dpdc and etc
+
+
+don't write any comment in the code i want need and clean code without comments
+and use the code as much you can use don't create new code for each requirement first check if that code is already present then do as per that 
+
+
+for the ui don't write any component from the scratch use the existing if not found then create it
+
+
+and use the correct semantics components at it place don't use wrong one like use div instead of button by add onclick event on it please avoide this type of issue and mistakes
+
+
+make the code modular and flow the mvc architecture for the code 
+
+Need to test every task after you done and if found any issue then fix it and move forward and before do any task first breakdown in small small task and do the small task and test it and move forward don't do big task in one go do small task and test it and move toward next task
+
+
+don't commit, push code on git 
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 

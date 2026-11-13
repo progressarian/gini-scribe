@@ -21,7 +21,17 @@ const COLUMNS = [
     key: "coverage",
     label: "Coverage",
     get: (s) => s.visits.coverage_pct ?? -1,
-    show: (s) => pct(s.visits.coverage_pct),
+    show: (s) =>
+      s.visits.assigned ? (
+        <span className="prg__coverage">
+          <span>
+            {s.visits.covered}/{s.visits.assigned}
+          </span>
+          <span className="prg__coverage-pct">{pct(s.visits.coverage_pct)}</span>
+        </span>
+      ) : (
+        "—"
+      ),
   },
   { key: "unavailable", label: "Doctor unavailable", get: (s) => s.visits.doctor_unavailable },
   { key: "followups", label: "Follow-ups set", get: (s) => s.visits.follow_ups },
@@ -118,8 +128,9 @@ export default function StaffTable({ staff, cards, colorOf, onPick }) {
         </table>
       </div>
       <p className="rep__hint">
-        Select a name to see that person's report. The team's working days count field staff with
-        doctors or visits; the Head of Growth counts only when they logged visits.
+        Select a name to see that person's report. Team working days add up every staff member's
+        working days. Coverage is assigned doctors visited in this period out of doctors assigned
+        now.
       </p>
     </section>
   );

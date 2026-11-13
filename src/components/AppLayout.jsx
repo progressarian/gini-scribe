@@ -50,7 +50,6 @@ const NAV_ITEMS = [
   { path: "/opd", label: "🏥 OPD", cap: C["/opd"], show: () => true },
   { path: "/dashboard", label: "📋 Patient", cap: C["/dashboard"], show: (s) => s.hasPatient },
   { path: "/visit", label: "👁 Visit", cap: C["/visit"], show: (s) => s.hasPatient },
-  { path: "/quick", label: "⚡ Quick", cap: C["/quick"], show: (s) => !s.visitActive },
   { path: "/patient", label: "👤", cap: C["/patient"], show: (s) => !s.visitActive },
   // Follow-up visit workflow
   {
@@ -104,9 +103,6 @@ const NAV_ITEMS = [
     show: (s) => s.visitActive && !s.isFollowUp,
   },
   // Documentation
-  { path: "/mo", label: "🎤 MO", cap: C["/mo"], show: (s) => !s.visitActive },
-  { path: "/consultant", label: "👨‍⚕️ Con", cap: C["/consultant"], show: (s) => !s.isFollowUp },
-  { path: "/plan", label: "📄 Plan", cap: C["/plan"], show: () => true },
   { path: "/docs", label: "📎 Docs", cap: C["/docs"], show: (s) => s.hasPatient },
   { path: "/lab-portal", label: "🔬 Upload", cap: C["/lab-portal"], show: () => true },
   {
@@ -157,6 +153,14 @@ const NAV_ITEMS = [
   { path: "/lab-inbox", label: "🔬 Lab Chat", cap: C["/lab-inbox"], show: () => false },
   { path: "/history", label: "📜 Hx", cap: C["/history"], show: (s) => s.hasPatient },
   { path: "/outcomes", label: "📊", cap: C["/outcomes"], show: (s) => !!s.dbPatientId },
+  {
+    path: "/desk-requests",
+    label: "📥 Desk requests",
+    cap: C["/desk-requests"],
+    show: () => true,
+    count: (s) => s.approvalsWaiting,
+    countLabel: (n) => `${n} waiting for you`,
+  },
   { path: "/ai", label: "🤖 AI", cap: C["/ai"], show: () => true },
   {
     path: "/genie-chats",
@@ -226,15 +230,6 @@ const NAV_ITEMS = [
     label: "💊 Pharmacy Station",
     cap: C["/giniflow/station/pharmacy"],
     show: (s) => isPharmacyDesk(s.role),
-  },
-  {
-    path: "/desk-requests",
-    group: "inbox",
-    label: "📥 Desk requests",
-    cap: C["/desk-requests"],
-    show: () => true,
-    count: (s) => s.approvalsWaiting,
-    countLabel: (n) => `${n} waiting for you`,
   },
   {
     path: "/giniflow/manager",
@@ -590,7 +585,7 @@ export default function AppLayout() {
                 end={t.path === "/"}
                 className={({ isActive }) => {
                   const on = t.match ? t.match(location.pathname) : isActive;
-                  return `tab-btn ${on ? (t.path === "/quick" ? "tab-btn--active-quick" : "tab-btn--active") : "tab-btn--inactive"}`;
+                  return `tab-btn ${on ? "tab-btn--active" : "tab-btn--inactive"}`;
                 }}
               >
                 {t.label}

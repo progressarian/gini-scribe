@@ -322,6 +322,7 @@ import {
   suggestedCaseRows,
   saveResults,
 } from "../services/giniflow/labResults.js";
+import { typedCaseReport, typedOrderReport } from "../services/giniflow/labTypedReport.js";
 import {
   GINIFLOW_LAUNCHER_CAPABILITY,
   hasCapability,
@@ -2034,6 +2035,7 @@ router.post(
       res.json(
         await saveCaseResults(req.params.caseNo, {
           rows: req.body.rows,
+          cleared: req.body.cleared,
           panelName: req.body.panelName,
           actorId: req.doctor?.doctor_id ?? null,
           actorRole: req.doctor?.role || "lab",
@@ -2043,6 +2045,31 @@ router.post(
       handleError(res, e, "Gini Flow save lab case results");
     }
   },
+);
+
+const sendReportPdf = (context, make) => async (req, res) => {
+  try {
+    const { pdf, filename } = await make(req);
+    res.set("Content-Type", "application/pdf");
+    res.set("Content-Disposition", `inline; filename="${filename}"`);
+    res.set("Content-Length", String(pdf.length));
+    res.set("Cache-Control", "no-store");
+    res.send(pdf);
+  } catch (e) {
+    handleError(res, e, context);
+  }
+};
+
+router.get(
+  "/giniflow/lab/case/:caseNo/results/report.pdf",
+  labGate,
+  sendReportPdf("Gini Flow lab case report", (req) => typedCaseReport(req.params.caseNo)),
+);
+
+router.get(
+  "/giniflow/lab/:orderId/results/report.pdf",
+  resultsGate,
+  sendReportPdf("Gini Flow lab order report", (req) => typedOrderReport(req.params.orderId)),
 );
 
 router.get("/giniflow/lab/test-names", labGate, async (req, res) => {
@@ -2063,6 +2090,7 @@ router.post(
       res.json(
         await saveResults(req.params.orderId, {
           rows: req.body.rows,
+          cleared: req.body.cleared,
           panelName: req.body.panelName,
           actorId: req.doctor?.doctor_id ?? null,
         }),

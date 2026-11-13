@@ -188,7 +188,12 @@ function TestPane({
 
   return (
     <div className="detail-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="detail-pane" ref={paneRef} role="dialog" aria-label="Machine test">
+      <div
+        className="detail-pane results-pane"
+        ref={paneRef}
+        role="dialog"
+        aria-label="Machine test"
+      >
         <div className="dp-head">
           <div className="dp-name">{order.name}</div>
           <div className="dp-meta">

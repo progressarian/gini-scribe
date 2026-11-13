@@ -21,6 +21,7 @@ import { printRxHref } from "../../queries/hooks/useGiniflowRx";
 import { PdfButton } from "../../components/billing/counter/PdfViewer";
 import { hasCapability, CAPABILITIES } from "../../../shared/permissions";
 import { isPathHiddenForRole } from "../../config/routes";
+import useDismiss from "../../components/giniflow/lab/useDismiss";
 
 // The pharmacy station — gini-stations.html `#s-pharmacy` + `#pharmPane`.
 //
@@ -395,25 +396,6 @@ function QueueCard({ card, now, onOpen, done }) {
       </div>
     </div>
   );
-}
-
-// Escape closes, focus returns, click outside closes — the same contract the
-// board's modal and the lab pane follow.
-function useDismiss(open, onClose, ref) {
-  const opener = useRef(null);
-  useEffect(() => {
-    if (!open) return undefined;
-    opener.current = document.activeElement;
-    const onKey = (e) => e.key === "Escape" && onClose();
-    const onDown = (e) => ref.current && !ref.current.contains(e.target) && onClose();
-    document.addEventListener("keydown", onKey);
-    document.addEventListener("pointerdown", onDown);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("pointerdown", onDown);
-      if (opener.current instanceof HTMLElement) opener.current.focus();
-    };
-  }, [open, onClose, ref]);
 }
 
 function PharmacyPane({ visitId, onClose, onToast }) {

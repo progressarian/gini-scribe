@@ -468,6 +468,29 @@ const TEST_STATUS_LABEL = {
 // only covers a server that has not shipped it yet.
 const caseRowKey = (r) => r.rowKey ?? r.patientId ?? `hr:${r.fileNo || "?"}`;
 
+function CaseSection({ id, title, note, children }) {
+  return (
+    <section className="hr-sub" aria-labelledby={id}>
+      <h3 id={id} className="hr-sub__title">
+        {title}
+        {note && <span className="hr-sub__note">{note}</span>}
+      </h3>
+      {children}
+    </section>
+  );
+}
+
+function PatientIdentity({ name, age, sex, fileNo }) {
+  const ageSex = age ? `${age}${(sex || "")[0] || ""}` : "";
+  return (
+    <div className="dp-ident">
+      <span className="dp-name">{name}</span>
+      {ageSex && <span className="dp-ident-meta">({ageSex})</span>}
+      {fileNo && <span className="dp-ident-meta">· {fileNo}</span>}
+    </div>
+  );
+}
+
 function LabDetailPane({
   order,
   group,
@@ -514,24 +537,28 @@ function LabDetailPane({
 
   return (
     <div className="detail-overlay">
-      <div className="detail-pane" ref={paneRef} role="dialog" aria-label="Lab order">
+      <div className="detail-pane results-pane" ref={paneRef} role="dialog" aria-label="Lab order">
         <div className="dp-head">
-          <div className="dp-name">{order.name}</div>
+          <div className="dp-title-row">
+            <button type="button" className="rbtn" onClick={onClose}>
+              ← Back
+            </button>
+            <PatientIdentity
+              name={order.name}
+              age={order.age}
+              sex={order.sex}
+              fileNo={order.fileNo}
+            />
+            <span className={`sp ${group.pill}`}>{group.pillText}</span>
+          </div>
           <div className="dp-meta">
-            {order.age}
-            {(order.sex || "")[0] || ""} · {order.fileNo} · Tests:{" "}
+            Tests:{" "}
             {order.tests.length ? (
               <TestNames names={orderTestNames(order)} outsourced={orderOutsourced(order)} />
             ) : (
               "none listed"
             )}{" "}
             <HomeCollectionTag row={order} />
-          </div>
-          <div className="dp-acts">
-            <button className="rbtn" onClick={onClose}>
-              ← Back
-            </button>
-            <span className={`sp ${group.pill}`}>{group.pillText}</span>
           </div>
         </div>
 
@@ -729,11 +756,15 @@ function LabDetailPane({
                   </div>
                   <div className="ua-s">PDF · JPG · PNG accepted · Max 5MB</div>
                 </button>
-                <div className="dp-trigger">
-                  <span className="wn-ico">⚡</span>
-                  Uploading this report automatically changes this patient's status to{" "}
-                  <strong>“Results ready”</strong> on the MO and SD dashboards.
-                </div>
+                <p className="dp-trigger">
+                  <span className="wn-ico" aria-hidden="true">
+                    ⚡
+                  </span>
+                  <span>
+                    Uploading this report automatically changes this patient's status to{" "}
+                    <strong>“Results ready”</strong> on the MO and SD dashboards.
+                  </span>
+                </p>
               </div>
             )}
 
@@ -1029,28 +1060,23 @@ function HealthrayCasePane({
   const pill = stationPill(row);
   return (
     <div className="detail-overlay">
-      <div className="detail-pane" ref={paneRef} role="dialog" aria-label="Hospital lab cases">
+      <div
+        className="detail-pane results-pane"
+        ref={paneRef}
+        role="dialog"
+        aria-label="Hospital lab cases"
+      >
         <div className="dp-head">
-          <div className="dp-name">{row.name}</div>
-          <div className="dp-meta">
-            {[
-              row.age && row.sex ? `${row.age}${row.sex[0]}` : row.age && `${row.age}y`,
-              row.fileNo,
-              `${row.cases} ${row.cases === 1 ? "case" : "cases"} today`,
-            ]
-              .filter(Boolean)
-              .join(" · ")}{" "}
-            <HomeCollectionTag row={row} />
-          </div>
-          <div className="dp-acts">
-            <button className="rbtn" onClick={onClose}>
+          <div className="dp-title-row">
+            <button type="button" className="rbtn" onClick={onClose}>
               ← Back
             </button>
+            <PatientIdentity name={row.name} age={row.age} sex={row.sex} fileNo={row.fileNo} />
             <span className={`sp ${pill.cls}`}>{pill.text}</span>
-            {/* The card renders this and the pane did not, so the pane dropped the
-                one line that says a "With Chief Endocrinologist" patient is queued
-                rather than held — the exact contradiction the pill provokes. */}
-            {pill.sub && <span className="dp-pill-sub">{pill.sub}</span>}
+          </div>
+          <div className="dp-meta">
+            {row.cases} {row.cases === 1 ? "case" : "cases"} today <HomeCollectionTag row={row} />
+            {pill.sub && <span className="dp-pill-sub"> · {pill.sub}</span>}
           </div>
         </div>
 
@@ -1124,97 +1150,100 @@ function HealthrayCasePane({
                         nonsense about the case, which has not reached the lab. */}
                     <span className={`sp ${c.stage.pill}`}>{c.stage.label}</span>
                   </div>
-                  {c.tests.map((t) => (
-                    <div className="test-row" key={t}>
-                      <div className="tr-name">
-                        {t}
-                        {(c.outsourcedTests || []).includes(t) && <OutsourcedTag />}
-                      </div>
-                      <div className="tr-status">
-                        <span className="badge b-ink">{c.stage.label}</span>
-                      </div>
-                      {canCancelTest && c.tests.length > 1 && row.patientId && c.canCancel && (
-                        <CancelTestControl
-                          what={t}
-                          busy={busy}
-                          onCancel={(body, done) => onCancelCaseTest(row, c, t, body, done)}
-                        />
-                      )}
-                      {canCancelTest &&
-                        c.tests.length > 1 &&
-                        row.patientId &&
-                        date &&
-                        (c.cancelHeld || c.cancelStage === "request") && (
-                          <UrgentCancelControl
-                            stage={c.cancelStage}
-                            held={c.cancelHeld}
-                            target={{
-                              caseNo: c.caseNo,
-                              patientId: row.patientId,
-                              date,
-                              testName: t,
-                            }}
+                  <CaseSection id={`case-${c.caseNo}-tests`} title="Tests">
+                    {c.tests.map((t) => (
+                      <div className="test-row" key={t}>
+                        <div className="tr-name">
+                          {t}
+                          {(c.outsourcedTests || []).includes(t) && <OutsourcedTag />}
+                        </div>
+                        <div className="tr-status">
+                          <span className="badge b-ink">{c.stage.label}</span>
+                        </div>
+                        {canCancelTest && c.tests.length > 1 && row.patientId && c.canCancel && (
+                          <CancelTestControl
                             what={t}
-                            patient={{ name: row.name, fileNo: row.fileNo }}
+                            busy={busy}
+                            onCancel={(body, done) => onCancelCaseTest(row, c, t, body, done)}
                           />
                         )}
-                    </div>
-                  ))}
-                  {(c.cancelledTests || []).map((x) => (
-                    <div className="test-row lab-case-cancelled" key={`cancelled-${x.name}`}>
-                      <div className="tr-name">
-                        <s>{x.name}</s>
+                        {canCancelTest &&
+                          c.tests.length > 1 &&
+                          row.patientId &&
+                          date &&
+                          (c.cancelHeld || c.cancelStage === "request") && (
+                            <UrgentCancelControl
+                              stage={c.cancelStage}
+                              held={c.cancelHeld}
+                              target={{
+                                caseNo: c.caseNo,
+                                patientId: row.patientId,
+                                date,
+                                testName: t,
+                              }}
+                              what={t}
+                              patient={{ name: row.name, fileNo: row.fileNo }}
+                            />
+                          )}
                       </div>
-                      <div className="tr-status">
-                        <span className="badge b-red">Cancelled</span>
-                        <span className="dp-hint">
-                          {[
-                            testCancelReasonLabel(x.reason),
-                            x.note,
-                            x.by,
-                            x.at ? clock(x.at) : null,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </span>
+                    ))}
+                    {(c.cancelledTests || []).map((x) => (
+                      <div className="test-row lab-case-cancelled" key={`cancelled-${x.name}`}>
+                        <div className="tr-name">
+                          <s>{x.name}</s>
+                        </div>
+                        <div className="tr-status">
+                          <span className="badge b-red">Cancelled</span>
+                          <span className="dp-hint">
+                            {[
+                              testCancelReasonLabel(x.reason),
+                              x.note,
+                              x.by,
+                              x.at ? clock(x.at) : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                  {c.tests.length === 0 && <div className="dp-hint">No tests listed.</div>}
-                  {canCancelTest && c.canCancel && row.patientId && (
-                    <CancelTestControl
-                      what={`case ${c.caseNo}`}
-                      full
-                      busy={busy}
-                      onCancel={(body, done) => onCancelCase(row, c, body, done)}
-                    />
-                  )}
-                  {canCancelTest &&
-                    row.patientId &&
-                    date &&
-                    (c.cancelHeld || c.cancelStage === "request") && (
-                      <UrgentCancelControl
+                    ))}
+                    {c.tests.length === 0 && <div className="dp-hint">No tests listed.</div>}
+                    {canCancelTest && c.canCancel && row.patientId && (
+                      <CancelTestControl
+                        what={`case ${c.caseNo}`}
                         full
-                        stage={c.cancelStage}
-                        held={c.cancelHeld}
-                        target={{ caseNo: c.caseNo, patientId: row.patientId, date }}
-                        what={c.tests.join(", ") || `case ${c.caseNo}`}
-                        patient={{ name: row.name, fileNo: row.fileNo }}
+                        busy={busy}
+                        onCancel={(body, done) => onCancelCase(row, c, body, done)}
                       />
                     )}
-                  {c.orderedBy && (
-                    <div className="dp-hint">
-                      Ordered by <strong>{c.orderedBy}</strong>
-                    </div>
-                  )}
-                  {/* The one thing the stage cannot say: some panels are already
+                    {canCancelTest &&
+                      row.patientId &&
+                      date &&
+                      (c.cancelHeld || c.cancelStage === "request") && (
+                        <UrgentCancelControl
+                          full
+                          stage={c.cancelStage}
+                          held={c.cancelHeld}
+                          target={{ caseNo: c.caseNo, patientId: row.patientId, date }}
+                          what={c.tests.join(", ") || `case ${c.caseNo}`}
+                          patient={{ name: row.name, fileNo: row.fileNo }}
+                        />
+                      )}
+                    {c.orderedBy && (
+                      <div className="dp-hint">
+                        Ordered by <strong>{c.orderedBy}</strong>
+                      </div>
+                    )}
+                  </CaseSection>
+                  <CaseSection id={`case-${c.caseNo}-progress`} title="Progress">
+                    {/* The one thing the stage cannot say: some panels are already
                       back while the lab works through the rest. */}
-                  {c.synced && !c.reported && (
-                    <div className="dp-hint">
-                      Partial — some panels are already back, the lab is still entering the rest.
-                    </div>
-                  )}
-                  {/* One row per rung, built from the ladder — HealthRay's clock
+                    {c.synced && !c.reported && (
+                      <div className="dp-hint">
+                        Partial — some panels are already back, the lab is still entering the rest.
+                      </div>
+                    )}
+                    {/* One row per rung, built from the ladder — HealthRay's clock
                       where it has one, the floor's own record where it does not.
                       Hardcoding HealthRay's four left the two handoff steps off
                       the timeline entirely: a sample the collection room had
@@ -1224,91 +1253,94 @@ function HealthrayCasePane({
                       A rung the case is demonstrably past with no time on it
                       shows ✓ rather than "—": the fact and the time are separate
                       claims, and only one of them is missing. */}
-                  <div className="hr-times">
-                    {LAB_RUNGS.map((r) => {
-                      const press = (c.actions || []).find((a) => a.action === r.action);
-                      const at =
-                        (press && (press.collectedAt || press.at)) ||
-                        (r.key === "pending" && c.registeredAt) ||
-                        (stageIndexOf(c.stage.key) > stageIndexOf(r.key) ? "done" : null);
-                      return (
-                        <div className={`hr-time${at ? "" : " is-pending"}`} key={r.key}>
-                          <span>
-                            {press?.site === "home"
-                              ? "🏠 Collected at home"
-                              : press?.site === "ghm"
-                                ? "🏥 Collected at GHM"
-                                : r.timelineLabel}
-                          </span>
-                          <strong>{at === "done" ? "✓" : at ? clock(at) : "—"}</strong>
-                          {press ? <em className="hr-time__by">{press.by}</em> : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {(c.actions || [])
-                    .filter((x) => !LAB_RUNGS.some((r) => r.action === x.action))
-                    .map((x) => (
-                      <div className="dp-hint" key={x.action}>
-                        {ACTION_LABEL[x.action] || x.action} by <strong>{x.by}</strong> at{" "}
-                        {clock(x.at)}
-                      </div>
-                    ))}
-                  {(c.actions || []).length ? (
-                    <div className="dp-hint">
-                      Names and times are the lab&apos;s own button presses — recorded here, not
-                      sent to HealthRay.
+                    <div className="hr-times">
+                      {LAB_RUNGS.map((r) => {
+                        const press = (c.actions || []).find((a) => a.action === r.action);
+                        const at =
+                          (press && (press.collectedAt || press.at)) ||
+                          (r.key === "pending" && c.registeredAt) ||
+                          (stageIndexOf(c.stage.key) > stageIndexOf(r.key) ? "done" : null);
+                        return (
+                          <div className={`hr-time${at ? "" : " is-pending"}`} key={r.key}>
+                            <span>
+                              {press?.site === "home"
+                                ? "🏠 Collected at home"
+                                : press?.site === "ghm"
+                                  ? "🏥 Collected at GHM"
+                                  : r.timelineLabel}
+                            </span>
+                            <strong>{at === "done" ? "✓" : at ? clock(at) : "—"}</strong>
+                            {press ? <em className="hr-time__by">{press.by}</em> : null}
+                          </div>
+                        );
+                      })}
                     </div>
-                  ) : null}
+                    {(c.actions || [])
+                      .filter((x) => !LAB_RUNGS.some((r) => r.action === x.action))
+                      .map((x) => (
+                        <div className="dp-hint" key={x.action}>
+                          {ACTION_LABEL[x.action] || x.action} by <strong>{x.by}</strong> at{" "}
+                          {clock(x.at)}
+                        </div>
+                      ))}
+                    {(c.actions || []).length ? (
+                      <div className="dp-hint">
+                        Names and times are the lab&apos;s own button presses — recorded here, not
+                        sent to HealthRay.
+                      </div>
+                    ) : null}
+                  </CaseSection>
                   {/* Only says the file is missing once one could exist. Before
                       the sample is drawn there is nothing to have a report of,
                       and "No report file yet" reads as a problem rather than as
                       the obvious. */}
                   {(c.hasReport || (atTheBench && c.canHaveReport)) && (
-                    <div className="dp-hint">
-                      {c.hasReport ? "Report file stored" : "No report file yet"}
-                    </div>
-                  )}
-                  {/* The file is openable from the moment it is stored, in the
+                    <CaseSection id={`case-${c.caseNo}-report`} title="Report file">
+                      <div className="dp-hint">
+                        {c.hasReport ? "Report file stored" : "No report file yet"}
+                      </div>
+                      {/* The file is openable from the moment it is stored, in the
                       viewer the rest of the app uses. Replacing or removing it
                       stops the moment the case is marked done: at that point the
                       report is what the MO and the consultant were told about,
                       and pulling it out from under them is not this screen's
                       to do. Undo "Done" first. */}
-                  {c.hasReport && (
-                    <div className="hr-acts">
-                      <button
-                        type="button"
-                        className="st-btn"
-                        onClick={() => onViewReport(c)}
-                        disabled={!c.reportDocId}
-                      >
-                        📄 View report
-                      </button>
-                      {!caseIsDone(c) && (
-                        <>
+                      {c.hasReport && (
+                        <div className="hr-acts">
                           <button
                             type="button"
                             className="st-btn"
-                            disabled={busy}
-                            onClick={() => {
-                              setUploadFor(c.caseNo);
-                              caseFileRef.current?.click();
-                            }}
+                            onClick={() => onViewReport(c)}
+                            disabled={!c.reportDocId}
                           >
-                            🔁 Replace
+                            📄 View report
                           </button>
-                          <button
-                            type="button"
-                            className="st-btn"
-                            disabled={busy}
-                            onClick={() => onDeleteReport(c.caseNo)}
-                          >
-                            🗑 Remove
-                          </button>
-                        </>
+                          {!caseIsDone(c) && (
+                            <>
+                              <button
+                                type="button"
+                                className="st-btn"
+                                disabled={busy}
+                                onClick={() => {
+                                  setUploadFor(c.caseNo);
+                                  caseFileRef.current?.click();
+                                }}
+                              >
+                                🔁 Replace
+                              </button>
+                              <button
+                                type="button"
+                                className="st-btn"
+                                disabled={busy}
+                                onClick={() => onDeleteReport(c.caseNo)}
+                              >
+                                🗑 Remove
+                              </button>
+                            </>
+                          )}
+                        </div>
                       )}
-                    </div>
+                    </CaseSection>
                   )}
                   {/* 06-PHASE-2-PLAN §0.4: the lab screen confirms and attributes.
                       Nothing here reaches HealthRay, and the buttons say so rather
@@ -1341,8 +1373,7 @@ function HealthrayCasePane({
                           : (row.busyAt && `🔒 ${row.busyAt}`) ||
                             `This patient is in the ${(row.station || "").toLowerCase()} room right now. Collect once they are free.`;
                     return (
-                      <>
-                        <div className="dp-sec-title">Update status</div>
+                      <CaseSection id={`case-${c.caseNo}-status`} title="Update status">
                         {hint && <div className="dp-hint">{hint}</div>}
                         <div className="hr-acts">
                           {done.map((a) => (
@@ -1384,7 +1415,7 @@ function HealthrayCasePane({
                               />
                             )}
                         </div>
-                      </>
+                      </CaseSection>
                     );
                   })()}
                   {/* Typed values, for a hospital case as much as a Gini order
@@ -1396,10 +1427,11 @@ function HealthrayCasePane({
                       the Gini form uses, and available afterwards so a number can
                       be corrected or added late. */}
                   {atTheBench && c.canHaveReport && (
-                    <>
-                      <div className="dp-sec-title">
-                        Enter results — values the doctor can trend
-                      </div>
+                    <CaseSection
+                      id={`case-${c.caseNo}-results`}
+                      title="Enter results"
+                      note="Values the doctor can trend"
+                    >
                       <LabResultsForm
                         // Keyed on the case: the pane is reused when the
                         // technician clicks from one patient to the next, and
@@ -1410,7 +1442,7 @@ function HealthrayCasePane({
                         onSaved={(r) => onResultsSaved?.(row, r)}
                         onFailed={(e) => onResultsFailed?.(e)}
                       />
-                    </>
+                    </CaseSection>
                   )}
                   {/* The reference design's own upload section (gini-stations.html
                       `lp-upload`): a drop zone reading "Tap to upload lab report
@@ -1427,8 +1459,7 @@ function HealthrayCasePane({
                       it, and offering to upload one there is the screen inviting
                       a fiction. */}
                   {canFileReport && atTheBench && !c.hasReport && c.canHaveReport && (
-                    <>
-                      <div className="dp-sec-title">Upload report</div>
+                    <CaseSection id={`case-${c.caseNo}-upload`} title="Upload report">
                       <button
                         type="button"
                         className={`upload-area${dragCase === c.caseNo ? " drag" : ""}`}
@@ -1459,20 +1490,10 @@ function HealthrayCasePane({
                         patient <strong>&ldquo;Results ready&rdquo;</strong> on the MO and
                         consultant queues. It does not change the case at HealthRay.
                       </div>
-                    </>
+                    </CaseSection>
                   )}
                 </div>
               ))}
-            </div>
-
-            <div className="dp-sec">
-              <div className="dp-sec-title">What this pane can and cannot do</div>
-              <div className="dp-hint">
-                These samples were ordered on HealthRay and run by the hospital lab, so they never
-                enter the Gini Flow queue above and nothing here changes their state over there —
-                results arrive on their own through the lab sync. What is recorded here is who did
-                what about a sample, so a tube nobody has collected has a name against it.
-              </div>
             </div>
           </div>
         </div>

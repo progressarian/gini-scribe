@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import {
+  labReportHref,
   useLabResults,
   useTestNameSearch,
   useSaveLabResults,
 } from "../../queries/hooks/useGiniflowLab";
+import { PdfButton } from "../billing/counter/PdfViewer";
 import {
   computeFormulas,
   flagFor as flagAgainstRange,
@@ -53,6 +55,13 @@ const flagFromText = (value, refRange) => {
   if (max != null && n > max) return "HIGH";
   return null;
 };
+
+const nameKey = (name) =>
+  String(name || "")
+    .trim()
+    .toLowerCase();
+
+const savedValue = (r) => (r.value != null ? String(r.value) : r.valueText || "");
 
 const needsNumber = (row) =>
   row.locked && !row.calculated && !row.isGroup && (row.inputType || "numeric") === "numeric";
@@ -191,39 +200,36 @@ export default function LabResultsForm({ orderId, caseNo, onSaved, onFailed }) {
   // nothing on it yet opens on the suggested rows.
   useEffect(() => {
     if (!data || rows !== null) return;
-    const entered = (data.results || []).map((r) => ({
-      testName: r.testName,
-      value: r.value ?? "",
-      valueText: r.valueText || "",
-      unit: r.unit || "",
-      refRange: r.refRange || "",
-      panelName: r.panelName || "",
-    }));
-    if (entered.length) {
-      setRows(entered);
-      return;
-    }
-    const suggested = (data.suggestions || []).flatMap((group) =>
-      group.params.map((p) => ({
-        testId: p.testId || null,
-        testName: p.testName,
-        value: "",
-        valueText: "",
-        unit: p.unit || "",
-        refRange: p.refRange || "",
-        range: p.range || null,
-        formula: p.formula || null,
-        decimals: p.decimals ?? 2,
-        inputType: p.inputType || "numeric",
-        options: p.options || [],
-        calculated: !!p.calculated,
-        isGroup: !!p.isGroup,
-        depth: p.depth || 0,
-        locked: !!p.fromCatalog,
-        required: p.required !== false,
-        panelName: group.test,
-      })),
-    );
+    const saved = new Map((data.results || []).map((r) => [nameKey(r.testName), r]));
+    const withSaved = (row) => {
+      const hit = saved.get(nameKey(row.testName));
+      if (!hit) return row;
+      saved.delete(nameKey(row.testName));
+      return { ...row, value: savedValue(hit), valueText: "" };
+    };
+    const suggested = (data.suggestions || [])
+      .flatMap((group) =>
+        group.params.map((p) => ({
+          testId: p.testId || null,
+          testName: p.testName,
+          value: "",
+          valueText: "",
+          unit: p.unit || "",
+          refRange: p.refRange || "",
+          range: p.range || null,
+          formula: p.formula || null,
+          decimals: p.decimals ?? 2,
+          inputType: p.inputType || "numeric",
+          options: p.options || [],
+          calculated: !!p.calculated,
+          isGroup: !!p.isGroup,
+          depth: p.depth || 0,
+          locked: !!p.fromCatalog,
+          required: p.required !== false,
+          panelName: group.test,
+        })),
+      )
+      .map(withSaved);
     const shownRows = [];
     const extraRows = [];
     for (const test of (data.suggestions || []).map((g) => g.test)) {
@@ -237,8 +243,17 @@ export default function LabResultsForm({ orderId, caseNo, onSaved, onFailed }) {
         extraRows.push(...own.slice(VISIBLE_ROWS));
       }
     }
-    setRows(shownRows);
-    setRest(extraRows);
+    const hasValue = (r) => String(r.value ?? "").trim() !== "";
+    const leftover = [...saved.values()].map((r) => ({
+      testName: r.testName,
+      value: savedValue(r),
+      valueText: "",
+      unit: r.unit || "",
+      refRange: r.refRange || "",
+      panelName: r.panelName || "",
+    }));
+    setRows([...shownRows, ...extraRows.filter(hasValue), ...leftover]);
+    setRest(extraRows.filter((r) => !hasValue(r)));
   }, [data, rows]);
 
   const [open, setOpen] = useState(null);
@@ -268,11 +283,17 @@ export default function LabResultsForm({ orderId, caseNo, onSaved, onFailed }) {
   );
   const patch = (i, next) => setRows(list.map((r, idx) => (idx === i ? { ...r, ...next } : r)));
 
+  const filledKeys = new Set(filled.map((r) => nameKey(r.testName)));
+  const toClear = (data?.results || [])
+    .filter((r) => !filledKeys.has(nameKey(r.testName)))
+    .map((r) => r.testName);
+
   const submit = () =>
     save.mutate(
       {
         orderId,
         caseNo,
+        cleared: toClear,
         rows: filled.map((r) => ({
           testId: r.testId,
           testName: r.testName,
@@ -284,6 +305,21 @@ export default function LabResultsForm({ orderId, caseNo, onSaved, onFailed }) {
         })),
       },
       { onSuccess: (r) => onSaved?.(r), onError: (e) => onFailed?.(e) },
+    );
+
+  const savedResults = data?.results || [];
+  const sameValue = (a, b) => {
+    const x = String(a ?? "").trim();
+    const y = String(b ?? "").trim();
+    return x === y || (x !== "" && y !== "" && Number(x) === Number(y));
+  };
+  const savedByName = new Map(savedResults.map((r) => [nameKey(r.testName), savedValue(r)]));
+  const unsavedChanges =
+    toClear.length > 0 ||
+    filled.some(
+      (r) =>
+        !savedByName.has(nameKey(r.testName)) ||
+        !sameValue(savedByName.get(nameKey(r.testName)), String(r.value).trim() || r.valueText),
     );
 
   const fileTests = (data?.suggestions || []).filter((g) => g.asFile).map((g) => g.test);
@@ -346,6 +382,16 @@ export default function LabResultsForm({ orderId, caseNo, onSaved, onFailed }) {
               }}
             />
           )}
+          {!row.calculated && String(row.value ?? "").trim() !== "" ? (
+            <button
+              type="button"
+              className="lr-clear"
+              aria-label={`Clear ${row.testName} value`}
+              onClick={() => patch(i, { value: "", valueText: "" })}
+            >
+              Clear
+            </button>
+          ) : null}
           {flag && <span className={`lr-flag lr-${flag.toLowerCase()}`}>{flag}</span>}
           {check ? (
             <span className="lr-err lr-err--check" role="status">
@@ -579,18 +625,50 @@ export default function LabResultsForm({ orderId, caseNo, onSaved, onFailed }) {
       <div className="lr-foot">
         <button
           className="st-btn st-btn-grn btn-full"
-          disabled={save.isPending || filled.length === 0 || wrongCount > 0}
+          disabled={save.isPending || !unsavedChanges || wrongCount > 0}
           onClick={submit}
         >
-          {wrongCount
-            ? `Fix ${wrongCount} value${wrongCount === 1 ? "" : "s"} before saving`
-            : filled.length
-              ? `✓ Save ${filled.length} result${filled.length === 1 ? "" : "s"} — notify the MO`
-              : "Type a value to save — or upload the report below"}
+          {save.isPending
+            ? "Saving…"
+            : wrongCount
+              ? `Fix ${wrongCount} value${wrongCount === 1 ? "" : "s"} before saving`
+              : !unsavedChanges
+                ? savedResults.length
+                  ? "✓ All values saved"
+                  : "Type a value to save — or upload the report below"
+                : filled.length
+                  ? `✓ Save ${filled.length} result${filled.length === 1 ? "" : "s"}${
+                      toClear.length ? ` · clear ${toClear.length}` : ""
+                    } — notify the MO`
+                  : `Clear ${toClear.length} saved value${toClear.length === 1 ? "" : "s"}`}
         </button>
+        {toClear.length > 0 && !save.isPending ? (
+          <span className="lr-foot__note lr-foot__note--warn" role="status">
+            Saving removes {toClear.join(", ")} from this patient's results.
+          </span>
+        ) : null}
         <span className="lr-foot__note">
           Empty rows are skipped. Saving values or uploading the report notifies the MO.
         </span>
+        {savedResults.length > 0 && (
+          <div className="lr-report">
+            <PdfButton
+              className="st-btn st-btn-g btn-full"
+              href={labReportHref({ orderId, caseNo })}
+              title="Lab report"
+              fileName="lab-report.pdf"
+              disabled={unsavedChanges}
+            >
+              {unsavedChanges
+                ? "Save the new values first to include them in the report"
+                : "📄 Generate report"}
+            </PdfButton>
+            <span className="lr-foot__note">
+              The report lists only the {savedResults.length} saved value
+              {savedResults.length === 1 ? "" : "s"}. It is marked provisional until verified.
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

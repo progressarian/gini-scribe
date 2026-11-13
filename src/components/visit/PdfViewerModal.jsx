@@ -1,4 +1,20 @@
 import { memo, useEffect, useRef, useState } from "react";
+import {
+  ClipboardList,
+  Download,
+  ExternalLink,
+  FileText,
+  FlaskConical,
+  HeartPulse,
+  Maximize2,
+  Minimize2,
+  Minus,
+  Plus,
+  Printer,
+  Scan,
+  ScanLine,
+  X,
+} from "lucide-react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { fmtDate } from "./helpers";
@@ -9,12 +25,14 @@ import "./PdfViewerModal.css";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 const ICON_MAP = {
-  lab_report: "🧪",
-  prescription: "📄",
-  imaging: "🫀",
-  discharge: "📋",
-  radiology: "🫁",
+  lab_report: FlaskConical,
+  prescription: FileText,
+  imaging: HeartPulse,
+  discharge: ClipboardList,
+  radiology: ScanLine,
 };
+
+const ICON_SIZE = 16;
 
 const PDF_ZOOM_MIN = 0.5;
 const PDF_ZOOM_MAX = 3;
@@ -135,8 +153,9 @@ function PdfFrame({ src }) {
           onClick={zoomOut}
           disabled={zoom <= PDF_ZOOM_MIN + 0.001}
           aria-label="Zoom out"
+          title="Zoom out"
         >
-          −
+          <Minus size={14} />
         </button>
         <input
           className="pdf-zoom-slider"
@@ -153,12 +172,18 @@ function PdfFrame({ src }) {
           onClick={zoomIn}
           disabled={zoom >= PDF_ZOOM_MAX - 0.001}
           aria-label="Zoom in"
+          title="Zoom in"
         >
-          +
+          <Plus size={14} />
         </button>
         <span className="pdf-zoom-pct">{Math.round(zoom * 100)}%</span>
-        <button className="pdf-zoom-btn pdf-zoom-fit" onClick={fit} aria-label="Fit to width">
-          Fit
+        <button
+          className="pdf-zoom-btn"
+          onClick={fit}
+          aria-label="Fit to width"
+          title="Fit to width"
+        >
+          <Scan size={14} />
         </button>
       </div>
     </div>
@@ -208,6 +233,21 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, src, onClose, printab
   const didPanRef = useRef(false);
   const pendingAnchorRef = useRef(null);
   const overlayMouseDownRef = useRef(false);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  const isOpen = !!(doc || src);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      e.stopImmediatePropagation();
+      onCloseRef.current?.();
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [isOpen]);
   const zoomRef = useRef(null);
   const fitScaleRef = useRef(1);
   const printFrameRef = useRef(null);
@@ -470,6 +510,8 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, src, onClose, printab
     source: src?.source,
   };
 
+  const TitleIcon = ICON_MAP[viewDoc.doc_type] || FileText;
+
   const isPdf =
     url?.mimeType === "application/pdf" || (typeof url === "string" && url.includes(".pdf"));
   const isImage = url?.mimeType?.startsWith("image/");
@@ -477,6 +519,7 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, src, onClose, printab
   return (
     <div
       className="pdf-modal-overlay"
+      data-popover-layer=""
       onMouseDown={(e) => {
         overlayMouseDownRef.current = e.target === e.currentTarget;
       }}
@@ -487,10 +530,17 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, src, onClose, printab
         overlayMouseDownRef.current = false;
       }}
     >
-      <div className={`pdf-modal ${isFullscreen ? "fullscreen" : ""}`}>
+      <div
+        className={`pdf-modal ${isFullscreen ? "fullscreen" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={viewDoc.title || viewDoc.file_name || "Document"}
+      >
         <div className="pdf-modal-header">
           <div className="pdf-modal-title">
-            <span className="pdf-modal-icon">{ICON_MAP[viewDoc.doc_type] || "📄"}</span>
+            <span className="pdf-modal-icon" aria-hidden="true">
+              <TitleIcon size={20} />
+            </span>
             <div>
               <div className="pdf-modal-name">
                 {viewDoc.title || viewDoc.file_name || viewDoc.doc_type}
@@ -505,11 +555,13 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, src, onClose, printab
             {url && !loading && (
               <>
                 <button
+                  type="button"
                   className="pdf-btn"
                   onClick={() => setIsFullscreen(!isFullscreen)}
                   title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                  aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
                 >
-                  {isFullscreen ? "⊞" : "⊏"}
+                  {isFullscreen ? <Minimize2 size={ICON_SIZE} /> : <Maximize2 size={ICON_SIZE} />}
                 </button>
                 <a
                   className="pdf-btn"
@@ -517,11 +569,14 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, src, onClose, printab
                   download={viewDoc.file_name || "document"}
                   onClick={(e) => e.stopPropagation()}
                   title="Download"
+                  aria-label="Download"
                 >
-                  ⬇
+                  <Download size={ICON_SIZE} />
                 </a>
                 <button
+                  type="button"
                   className="pdf-btn"
+                  aria-label="Open in new tab"
                   onClick={() =>
                     openInNewTab(
                       typeof url === "string" ? url : url.url,
@@ -530,7 +585,7 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, src, onClose, printab
                   }
                   title="Open in new tab"
                 >
-                  ↗
+                  <ExternalLink size={ICON_SIZE} />
                 </button>
                 {printable && (
                   <button
@@ -545,13 +600,19 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, src, onClose, printab
                     title="Print"
                     aria-label="Print"
                   >
-                    🖨
+                    <Printer size={ICON_SIZE} />
                   </button>
                 )}
               </>
             )}
-            <button className="pdf-btn pdf-btn-close" onClick={onClose}>
-              ✕
+            <button
+              type="button"
+              className="pdf-btn"
+              onClick={onClose}
+              title="Close"
+              aria-label="Close"
+            >
+              <X size={ICON_SIZE} />
             </button>
           </div>
         </div>
@@ -633,9 +694,10 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, src, onClose, printab
               className="pdf-zoom-btn"
               onClick={() => zoomTo(zoom / 1.2)}
               title="Zoom out"
+              aria-label="Zoom out"
               disabled={zoom <= fitScale + 0.001}
             >
-              −
+              <Minus size={14} />
             </button>
             <input
               type="range"
@@ -650,17 +712,19 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, src, onClose, printab
               className="pdf-zoom-btn"
               onClick={() => zoomTo(zoom * 1.2)}
               title="Zoom in"
+              aria-label="Zoom in"
               disabled={zoom >= 4 - 0.001}
             >
-              +
+              <Plus size={14} />
             </button>
             <span className="pdf-zoom-pct">{Math.round(zoom * 100)}%</span>
             <button
-              className="pdf-zoom-btn pdf-zoom-fit"
+              className="pdf-zoom-btn"
               onClick={() => zoomTo(fitScale)}
               title="Fit to screen"
+              aria-label="Fit to screen"
             >
-              Fit
+              <Scan size={14} />
             </button>
           </div>
         )}

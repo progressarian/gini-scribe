@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
+import { Check, Download, ExternalLink, FileText, Minus, Plus, Save, Scan, X } from "lucide-react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "./PdfViewerModal.css";
@@ -126,8 +127,9 @@ function PdfFrame({ src }) {
           onClick={zoomOut}
           disabled={zoom <= ZOOM_MIN + 0.001}
           aria-label="Zoom out"
+          title="Zoom out"
         >
-          −
+          <Minus size={14} />
         </button>
         <input
           className="pdf-zoom-slider"
@@ -144,12 +146,18 @@ function PdfFrame({ src }) {
           onClick={zoomIn}
           disabled={zoom >= ZOOM_MAX - 0.001}
           aria-label="Zoom in"
+          title="Zoom in"
         >
-          +
+          <Plus size={14} />
         </button>
         <span className="pdf-zoom-pct">{pct}%</span>
-        <button className="pdf-zoom-btn pdf-zoom-fit" onClick={fit} aria-label="Fit to width">
-          Fit
+        <button
+          className="pdf-zoom-btn"
+          onClick={fit}
+          aria-label="Fit to width"
+          title="Fit to width"
+        >
+          <Scan size={14} />
         </button>
       </div>
     </div>
@@ -226,76 +234,68 @@ const RxPdfModal = memo(function RxPdfModal({
           overflow: "hidden",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "12px 16px",
-            borderBottom: "1px solid #e2e8f0",
-            background: "#fff",
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>🖨 Prescription</span>
-            {loading && (
-              <span style={{ fontSize: 11, color: "#64748b" }}>{status || "Generating PDF…"}</span>
-            )}
+        <div className="pdf-modal-header">
+          <div className="pdf-modal-title">
+            <span className="pdf-modal-icon" aria-hidden="true">
+              <FileText size={20} />
+            </span>
+            <div>
+              <div className="pdf-modal-name">Prescription</div>
+              {loading && (
+                <div className="pdf-modal-meta" role="status">
+                  {status || "Generating PDF…"}
+                </div>
+              )}
+            </div>
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div className="pdf-modal-actions">
             {blobUrl && !loading && (
               <>
                 <button
-                  className="btn"
+                  type="button"
+                  className="pdf-btn"
                   onClick={handleDownload}
-                  style={{ fontSize: 11, padding: "6px 12px" }}
+                  title="Download"
+                  aria-label="Download"
                 >
-                  ⬇ Download
+                  <Download size={16} />
                 </button>
                 <button
-                  className="btn"
+                  type="button"
+                  className="pdf-btn"
                   onClick={handleOpenNewTab}
-                  style={{ fontSize: 11, padding: "6px 12px" }}
+                  title="Open in new tab"
+                  aria-label="Open in new tab"
                 >
-                  ↗ Open in tab
+                  <ExternalLink size={16} />
                 </button>
                 {onSave && (
                   <button
-                    className="btn"
+                    type="button"
+                    className="pdf-btn pdf-btn--label"
                     onClick={handleSave}
                     disabled={saveState === "saving" || saveState === "saved"}
-                    style={{
-                      fontSize: 11,
-                      padding: "6px 12px",
-                      background:
-                        saveState === "saved"
-                          ? "#15803d"
-                          : saveState === "error"
-                            ? "#dc2626"
-                            : undefined,
-                      color: saveState === "saved" || saveState === "error" ? "#fff" : undefined,
-                      opacity: saveState === "saving" ? 0.7 : 1,
-                    }}
                   >
+                    {saveState === "saved" ? <Check size={16} /> : <Save size={16} />}
                     {saveState === "saving"
                       ? "Saving…"
                       : saveState === "saved"
-                        ? "✓ Saved"
+                        ? "Saved"
                         : saveState === "error"
-                          ? "Save failed"
-                          : "💾 Save to record"}
+                          ? "Save failed — retry"
+                          : "Save to record"}
                   </button>
                 )}
               </>
             )}
             <button
-              className="btn"
+              type="button"
+              className="pdf-btn"
               onClick={onClose}
-              style={{ fontSize: 11, padding: "6px 12px" }}
+              title="Close"
               aria-label="Close"
             >
-              ✕ Close
+              <X size={16} />
             </button>
           </div>
         </div>

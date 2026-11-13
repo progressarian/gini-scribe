@@ -918,38 +918,43 @@ export const giniflowHealthrayBillQuerySchema = z.object({
 // Results the lab types in. A value is a number or a word ("Positive"), and a
 // row with neither is not a result — the service drops those rather than writing
 // an empty line onto a patient's record.
-export const giniflowLabResultsSchema = z.object({
-  panelName: z.string().trim().max(120).optional(),
-  rows: z
-    .array(
-      z.object({
-        testId: z.union([z.string().regex(/^\d{1,18}$/), z.number().int().positive()]).nullish(),
-        testName: z.string().trim().min(1).max(120),
-        // One box on the form, two kinds of result. A number is a number; a
-        // blank is nothing; anything else is a word ("Positive", "Non-reactive")
-        // and belongs in result_text — where it can be read but not trended.
-        // Coercing first would turn both a blank and a word into 0, which is a
-        // real value on a patient's record and would be flagged LOW.
-        value: z
-          .preprocess(
-            (v) => {
-              if (v === null || v === undefined) return null;
-              const raw = String(v).trim();
-              if (raw === "") return null;
-              return Number.isFinite(Number(raw)) ? Number(raw) : raw;
-            },
-            z.union([z.number(), z.string().max(120), z.null()]),
-          )
-          .optional(),
-        valueText: z.string().trim().max(120).nullish(),
-        unit: z.string().trim().max(40).nullish(),
-        refRange: z.string().trim().max(60).nullish(),
-        panelName: z.string().trim().max(120).nullish(),
-      }),
-    )
-    .min(1)
-    .max(120),
-});
+export const giniflowLabResultsSchema = z
+  .object({
+    panelName: z.string().trim().max(120).optional(),
+    rows: z
+      .array(
+        z.object({
+          testId: z.union([z.string().regex(/^\d{1,18}$/), z.number().int().positive()]).nullish(),
+          testName: z.string().trim().min(1).max(120),
+          // One box on the form, two kinds of result. A number is a number; a
+          // blank is nothing; anything else is a word ("Positive", "Non-reactive")
+          // and belongs in result_text — where it can be read but not trended.
+          // Coercing first would turn both a blank and a word into 0, which is a
+          // real value on a patient's record and would be flagged LOW.
+          value: z
+            .preprocess(
+              (v) => {
+                if (v === null || v === undefined) return null;
+                const raw = String(v).trim();
+                if (raw === "") return null;
+                return Number.isFinite(Number(raw)) ? Number(raw) : raw;
+              },
+              z.union([z.number(), z.string().max(120), z.null()]),
+            )
+            .optional(),
+          valueText: z.string().trim().max(120).nullish(),
+          unit: z.string().trim().max(40).nullish(),
+          refRange: z.string().trim().max(500).nullish(),
+          panelName: z.string().trim().max(120).nullish(),
+        }),
+      )
+      .max(120),
+    cleared: z.array(z.string().trim().min(1).max(120)).max(120).optional(),
+  })
+  .refine((b) => b.rows.length > 0 || (b.cleared?.length ?? 0) > 0, {
+    message: "Nothing to save — type a value or clear one",
+    path: ["rows"],
+  });
 
 export const giniflowCheckinSchema = z.object({
   visitTypeId: z.string().trim().max(60).nullish(),

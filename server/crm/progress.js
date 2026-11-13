@@ -557,9 +557,6 @@ export async function progressReport(crmUser, query) {
     const { current, previous, days, previousDays, trendRows, split, added, territories } =
       await reportData(sql, f);
     const names = new Map(f.staffOptions.map((o) => [o.id, o.full_name]));
-    const leads = new Set(
-      f.staffOptions.filter((o) => o.role === "head_of_growth").map((o) => o.id),
-    );
     if (!names.has(crmUser.id)) names.set(crmUser.id, crmUser.full_name);
     const staff =
       f.canPickStaff && f.rep === "all"
@@ -583,14 +580,8 @@ export async function progressReport(crmUser, query) {
       staff_options: f.staffOptions.map(({ id, full_name }) => ({ id, full_name })),
       territories,
       viewer: { id: crmUser.id, full_name: crmUser.full_name },
-      cards: shape(
-        current.get("total") ?? ZERO,
-        fieldDays(days, current, current, f.repIds, leads),
-      ),
-      previous_cards: shape(
-        previous.get("total") ?? ZERO,
-        fieldDays(previousDays, previous, current, f.repIds, leads),
-      ),
+      cards: shape(current.get("total") ?? ZERO, days.total),
+      previous_cards: shape(previous.get("total") ?? ZERO, previousDays.total),
       staff,
       trend: {
         group: f.group,
@@ -706,20 +697,6 @@ export async function progressDoctors(crmUser, query) {
     }
     return { state, rows, page, pages, page_size: PAGE_SIZE, total };
   });
-}
-
-function fieldDays(days, metrics, currentMetrics, repIds, leads) {
-  if (repIds.length === 1) return days.total;
-  const total = { working: 0, off: 0 };
-  for (const id of repIds) {
-    const visited = metrics.get(id)?.visits > 0;
-    const assigned = currentMetrics.get(id)?.assigned > 0;
-    if (!visited && (leads.has(id) || !assigned)) continue;
-    const d = days.byUser.get(id);
-    total.working += d.working;
-    total.off += d.off;
-  }
-  return total;
 }
 
 const offText = (off) =>

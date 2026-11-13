@@ -1315,6 +1315,7 @@ a.dimp__btn {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  margin-top: 12px;
 }
 .asg__link {
   margin-left: 8px;
@@ -1773,6 +1774,18 @@ a.dimp__btn {
 .prg__table--staff tfoot th,
 .prg__table--staff tfoot td {
   background: #f8fafc;
+}
+.prg__coverage {
+  display: inline-flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.prg__coverage-pct {
+  min-width: 4ch;
+  color: #475569;
+}
+.prg__table--staff thead th:nth-child(7) {
+  min-width: 110px;
 }
 .prg__sort {
   background: none;

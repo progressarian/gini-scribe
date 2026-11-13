@@ -100,6 +100,11 @@ const resultsPath = ({ orderId, caseNo } = {}) =>
     ? `/api/giniflow/lab/case/${encodeURIComponent(caseNo)}/results`
     : `/api/giniflow/lab/${orderId}/results`;
 
+export const labReportHref = (target) =>
+  `${API_URL}${resultsPath(target)}/report.pdf?token=${encodeURIComponent(
+    localStorage.getItem("gini_auth_token") || "",
+  )}`;
+
 const resultsKey = ({ orderId, caseNo } = {}) => (caseNo ? `case:${caseNo}` : orderId);
 
 export function useLabResults(target) {
@@ -125,8 +130,8 @@ export function useTestNameSearch(term) {
 export function useSaveLabResults() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ orderId, caseNo, rows, panelName }) =>
-      (await api.post(resultsPath({ orderId, caseNo }), { rows, panelName })).data,
+    mutationFn: async ({ orderId, caseNo, rows, cleared, panelName }) =>
+      (await api.post(resultsPath({ orderId, caseNo }), { rows, cleared, panelName })).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["giniflow", "lab"] });
       queryClient.invalidateQueries({ queryKey: ["giniflow", "board"] });
