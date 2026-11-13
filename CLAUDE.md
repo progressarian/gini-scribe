@@ -44,13 +44,13 @@ Roles: admin, consultant, mo (medical officer), nurse, lab, tech, reception, coo
 ```bash
 npm install && cd server && npm install   # two separate node_modules — client and server/worker
 
-npm run dev          # prettier + Vite (:3000) + API (:3001) together
+npm run dev          # Vite (:3000) + API (:3001) together (no formatting step)
 npm run dev:client   # Vite only
 npm run dev:server   # API only (nodemon, no cron)
 npm run dev:worker   # cron/sync loops only
 
 npm run build          # vite build -> dist/
-npm run format          # prettier --write, run before committing
+npm run format          # prettier --write on the whole tree (commits already format staged files via the husky pre-commit hook + lint-staged)
 npm run format:check
 
 # e2e (Playwright) — runs against a LOCAL Docker Postgres, never production
@@ -70,7 +70,7 @@ npm run analytics:report     # regenerate the outcomes report HTML (--snapshot t
 node migrations/_runOne.mjs migrations/<file>.sql
 ```
 
-There is no linter; Prettier plus the Playwright suite in `e2e/` are the automated checks. `e2e/README.md` covers the test DB: every connection is forced through `e2e/setup/guard.mjs` (only `localhost:5435/gini_scribe_test`), the test API gets blanked credentials from `e2e/.env.e2e`, and outbound network calls are blocked. Fixture users/patients/tests live in `e2e/fixtures/data.mjs` (PIN `4321`). CI (`.github/workflows/crm-guards.yml`) only runs the `server/crm/` guards and RLS/compliance suite.
+There is no linter; Prettier (run on staged files by the husky `pre-commit` hook through lint-staged, so formatting lands in the same commit) plus the Playwright suite in `e2e/` are the automated checks. `e2e/README.md` covers the test DB: every connection is forced through `e2e/setup/guard.mjs` (only `localhost:5435/gini_scribe_test`), the test API gets blanked credentials from `e2e/.env.e2e`, and outbound network calls are blocked. Fixture users/patients/tests live in `e2e/fixtures/data.mjs` (PIN `4321`). CI (`.github/workflows/crm-guards.yml`) only runs the `server/crm/` guards and RLS/compliance suite.
 
 `server/scripts/` holds many ad-hoc diagnostic/backfill/sync scripts; run individually with `node`. Put new one-offs there, not in the repo root.
 

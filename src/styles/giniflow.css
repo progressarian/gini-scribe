@@ -775,11 +775,6 @@
   z-index: 190;
 }
 
-/* Supported devices (GF-17): built for a wall display and a desktop. Below that
-   the eight columns cannot be read, so say so rather than degrade silently. */
-.gf .too-narrow {
-  display: none;
-}
 @media (max-width: 900px) {
   .gf .stats,
   .gf .board-wrap,
@@ -787,19 +782,6 @@
   .gf .bottleneck,
   .gf .filter-bar {
     display: none;
-  }
-  .gf .too-narrow {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    align-items: center;
-    justify-content: center;
-    flex: 1;
-    padding: 30px 20px;
-    text-align: center;
-    color: var(--ink3);
-    font-size: 12px;
-    line-height: 1.6;
   }
 }
 
@@ -1424,4 +1406,64 @@
   padding: 8px 16px 0;
   font-size: 12px;
   color: var(--ink3, #64748b);
+}
+
+@media (max-width: 900px) {
+  .gf.gf--page .rr {
+    margin-left: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .gf.gf--page .rr > * {
+    flex-shrink: 0;
+  }
+  .gf.gf--page .stats {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(124px, 1fr));
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    padding: 8px 10px 2px;
+    scrollbar-width: thin;
+  }
+  .gf.gf--page .stats-tools {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    position: sticky;
+    left: 0;
+    justify-self: start;
+    width: calc(100vw - 28px);
+    max-width: 100%;
+  }
+  .gf.gf--page .stats-tools .rail-search {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+  }
+  .gf.gf--page .filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    margin: 8px 10px 0;
+  }
+  .gf.gf--page .bottleneck {
+    display: flex;
+    margin: 8px 10px 0;
+  }
+  .gf.gf--page .board-wrap {
+    display: flex;
+    min-height: 320px;
+    padding: 8px 10px 0;
+  }
+  .gf.gf--page .board {
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scroll-padding-inline: 10px;
+  }
+  .gf.gf--page .col {
+    scroll-snap-align: start;
+  }
+  .gf.gf--page .perf {
+    display: flex;
+    padding: 4px 10px;
+  }
 }

@@ -1,5 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  Ban,
+  Check,
+  Circle,
+  CircleAlert,
+  CircleCheck,
+  CircleDot,
+  Hourglass,
+  List,
+  Pause,
+  Plus,
+  Scale,
+  Timer,
+  TriangleAlert,
+  X,
+} from "lucide-react";
+import {
   useVitalsQueue,
   useVitalsPatient,
   useSaveVitals,
@@ -22,14 +41,18 @@ import LiveBadge from "../../components/giniflow/LiveBadge";
 import "../../styles/giniflow-station.css";
 import StationNotice from "../../components/giniflow/StationNotice";
 import StabilityChip from "../../components/giniflow/StabilityChip";
+import Ico from "../../components/giniflow/Ico";
+import QueueGroupHead from "../../components/giniflow/QueueGroupHead";
 
 const CATEGORY_BADGE = {
-  worse_out_of_range: { cls: "b-red", label: "🔴 HbA1c: Red" },
-  worse_in_range: { cls: "b-amb", label: "🟠 HbA1c: Amber" },
-  getting_better: { cls: "b-amb", label: "🟡 HbA1c: Getting better" },
-  in_control: { cls: "b-grn", label: "✅ HbA1c: Green" },
-  no_reports: { cls: "b-blu", label: "🔵 HbA1c: No reports" },
+  worse_out_of_range: { cls: "b-red", label: "HbA1c: Red", Icon: Circle },
+  worse_in_range: { cls: "b-amb", label: "HbA1c: Amber", Icon: Circle },
+  getting_better: { cls: "b-amb", label: "HbA1c: Getting better", Icon: Circle },
+  in_control: { cls: "b-grn", label: "HbA1c: Green", Icon: CircleCheck },
+  no_reports: { cls: "b-blu", label: "HbA1c: No reports", Icon: Circle },
 };
+
+const ALLERGY_ICON = { not_known: TriangleAlert, none_known: Check, known: Ban };
 
 // Physiological bounds, matching the server's Zod schema. A typo here becomes a
 // number a doctor may act on, so the field says so before the save is allowed.
@@ -104,8 +127,8 @@ const countdown = (until, now) => {
 };
 
 const PRIORITY_CHIP = {
-  urgent: { cls: "pri-urgent", label: "❗ Urgent" },
-  high: { cls: "pri-high", label: "⬆ High" },
+  urgent: { cls: "pri-urgent", label: "Urgent", Icon: CircleAlert },
+  high: { cls: "pri-high", label: "High", Icon: ArrowUp },
 };
 
 const clock = (iso) =>
@@ -126,54 +149,37 @@ const clock = (iso) =>
 const SECTIONS = [
   {
     key: "atStation",
-    icon: "🟢",
+    icon: CircleDot,
     short: "At station",
     title: "At the station",
     sub: "being seen now",
   },
-  { key: "waiting", icon: "⏳", short: "Waiting", title: "Waiting", sub: "ready to call" },
+  { key: "waiting", icon: Hourglass, short: "Waiting", title: "Waiting", sub: "ready to call" },
   {
     key: "onBreak",
-    icon: "⏸",
+    icon: Pause,
     short: "On break",
     title: "On break",
     sub: "tap when they are back",
   },
-  { key: "held", icon: "🚫", short: "Held", title: "Held", sub: "cannot be called" },
+  { key: "held", icon: Ban, short: "Held", title: "Held", sub: "cannot be called" },
   {
     key: "moved",
-    icon: "➡️",
+    icon: ArrowRight,
     short: "Done",
     title: "Vitals done",
     sub: "still on the floor",
     done: true,
   },
-  { key: "exited", icon: "✅", short: "Exited", title: "Finished and left", sub: "", done: true },
+  {
+    key: "exited",
+    icon: CircleCheck,
+    short: "Exited",
+    title: "Finished and left",
+    sub: "",
+    done: true,
+  },
 ];
-
-// A group heading that opens and closes its own section. A real button inside
-// the heading, so it keeps heading semantics for a screen reader and states
-// whether the section is open.
-function GroupHead({ icon, title, sub, count, open, onToggle, id }) {
-  return (
-    <h2 className="sq-gh">
-      <button
-        type="button"
-        className="sq-toggle"
-        aria-expanded={open}
-        aria-controls={id}
-        onClick={onToggle}
-      >
-        <span className={`sq-chev${open ? " open" : ""}`} aria-hidden="true">
-          ▸
-        </span>
-        <span aria-hidden="true">{icon}</span> {title}
-        {sub && <span className="sq-ghsub">— {sub}</span>}
-        <span className="sq-count">{count}</span>
-      </button>
-    </h2>
-  );
-}
 
 // A patient the station can act on: at the station, or waiting to be called.
 function QueueRow({ q, active, now, onPick }) {
@@ -198,7 +204,11 @@ function QueueRow({ q, active, now, onPick }) {
       <div className="si-slot">{q.slot}</div>
       <div className="si-name">
         {q.name}
-        {chip && <span className={`si-pri ${chip.cls}`}>{chip.label}</span>}
+        {chip && (
+          <span className={`si-pri ${chip.cls}`}>
+            <Ico as={chip.Icon} size={12} /> {chip.label}
+          </span>
+        )}
       </div>
       <div className="si-meta">
         {q.age}
@@ -213,12 +223,17 @@ function QueueRow({ q, active, now, onPick }) {
           <span className="si-tmr si-tmr-rest">Rest {countdown(q.restUntil, now)} left</span>
         ) : (
           <span className={`si-tmr si-tmr-${tone}`}>
-            ⏱ {waited}m {q.status === "with_vitals" ? "at vitals" : "waiting"}
+            <Ico as={Timer} size={12} /> {waited}m{" "}
+            {q.status === "with_vitals" ? "at vitals" : "waiting"}
           </span>
         )}
         {q.checkedInAt && <span className="si-since">in since {clock(q.checkedInAt)}</span>}
       </div>
-      {q.priorityReason && <div className="si-reason">❗ {q.priorityReason}</div>}
+      {q.priorityReason && (
+        <div className="si-reason">
+          <Ico as={CircleAlert} size={12} /> {q.priorityReason}
+        </div>
+      )}
       {q.bios?.length > 0 && (
         <div className="si-bios">
           {q.bios.map((b) => (
@@ -245,7 +260,8 @@ function BreakRow({ b, active, onPick }) {
         {(b.sex || "")[0] || ""} · {b.fileNo}
       </div>
       <div className="si-nowat">
-        ⏸ {pauseReasonLabel(b.pausedReason) || "On break"} · left {clock(b.pausedAt)}
+        <Ico as={Pause} size={12} /> {pauseReasonLabel(b.pausedReason) || "On break"} · left{" "}
+        {clock(b.pausedAt)}
       </div>
     </button>
   );
@@ -303,6 +319,7 @@ export default function VitalsStationPage() {
   // station has always had; picking one shows that group alone, expanded, so a
   // filter never lands the user on a collapsed heading with nothing under it.
   const [filter, setFilter] = useState("all");
+  const [mobileView, setMobileView] = useState("list");
   const toastTimer = useRef(null);
 
   const toggleGroup = (key) =>
@@ -434,7 +451,7 @@ export default function VitalsStationPage() {
     if (!w || !last?.weight) return null;
     const d = w - Number(last.weight);
     if (Math.abs(d) < 0.05) return "same as last visit";
-    return `${d > 0 ? "↑" : "↓"} ${Math.abs(d).toFixed(1)} kg from last visit`;
+    return `${d > 0 ? "+" : "−"}${Math.abs(d).toFixed(1)} kg since last visit`;
   }, [form.weight, last]);
 
   const selectedId = activeVisitId;
@@ -466,13 +483,17 @@ export default function VitalsStationPage() {
   const pick = (visitId) => {
     if (!queue.some((q) => q.visitId === visitId)) {
       setSelected(visitId);
+      setMobileView("detail");
       return;
     }
     // Selection follows the claim rather than leading it: when the station is
     // already holding someone the claim is refused, and the panel must stay on
     // the patient in the chair instead of opening a form for one who is not.
     startVitals.mutate(visitId, {
-      onSuccess: () => setSelected(visitId),
+      onSuccess: () => {
+        setSelected(visitId);
+        setMobileView("detail");
+      },
       onError: (e) => showToast(e?.response?.data?.error || "Could not start this patient"),
     });
   };
@@ -482,6 +503,7 @@ export default function VitalsStationPage() {
     releaseVitals.mutate(selectedId, {
       onSuccess: () => {
         setSelected(null);
+        setMobileView("list");
         showToast(`${name} sent back to the queue`);
       },
       onError: (e) => showToast(e?.response?.data?.error || "Could not send them back"),
@@ -545,12 +567,13 @@ export default function VitalsStationPage() {
           const who = patient?.name?.split(" ")[0] || "Patient";
           showToast(
             saved?.movedTo === "ready_for_doctor"
-              ? `✓ ${who} moved to the consultant's queue — no Chief Endocrinologist step in their plan`
-              : `✓ ${who} moved to the Chief Endocrinologist queue`,
+              ? `${who} moved to the consultant's queue — no Chief Endocrinologist step in their plan`
+              : `${who} moved to the Chief Endocrinologist queue`,
           );
           // Auto-advance to the next patient, as the prototype does.
           const next = queue.find((q) => q.visitId !== selectedId);
           setSelected(next ? next.visitId : null);
+          setMobileView("list");
         },
         onError: (e) =>
           showToast(e?.response?.data?.error || "Could not save — nothing was recorded"),
@@ -568,11 +591,12 @@ export default function VitalsStationPage() {
         onSuccess: (res) => {
           showToast(
             res?.movedTo === "ready_for_doctor"
-              ? `✓ ${who} closed with vitals NA — moved to the consultant's queue`
-              : `✓ ${who} closed with vitals NA — moved to the Chief Endocrinologist queue`,
+              ? `${who} closed with vitals NA — moved to the consultant's queue`
+              : `${who} closed with vitals NA — moved to the Chief Endocrinologist queue`,
           );
           const next = queue.find((q) => q.visitId !== selectedId);
           setSelected(next ? next.visitId : null);
+          setMobileView("list");
         },
         onError: (e) =>
           showToast(e?.response?.data?.error || "Could not close — nothing was changed"),
@@ -585,10 +609,10 @@ export default function VitalsStationPage() {
   return (
     <div className="gf">
       <StationNotice station="vitals" />
-      <div className="top-rail">
+      <div className="top-rail station-rail">
         <div className="tr-logo">Gini Flow</div>
         <div className="tr-role" style={{ background: "var(--blu-l)", color: "var(--blu)" }}>
-          ⚖️ Vitals Station
+          <Ico as={Scale} /> Vitals Station
         </div>
         <div className="rail-right">
           <span className="badge b-blu">{queue.length} in queue</span>
@@ -598,12 +622,12 @@ export default function VitalsStationPage() {
               router dependency. */}
           <LiveBadge live={live} className="tr-live" />
           <a className="tr-back" href="/giniflow/stations">
-            ← Stations
+            <Ico as={ArrowLeft} /> Stations
           </a>
         </div>
       </div>
 
-      <div className="station-layout">
+      <div className={`station-layout ld-layout${mobileView === "detail" ? " is-detail" : ""}`}>
         <div className="squeue">
           <div className="sq-header">
             <div className="sq-title">Vitals queue</div>
@@ -675,7 +699,7 @@ export default function VitalsStationPage() {
             const id = `sq-group-${g.key}`;
             return (
               <div className="sq-sect" key={g.key}>
-                <GroupHead
+                <QueueGroupHead
                   icon={g.icon}
                   title={g.title}
                   sub={g.sub}
@@ -693,7 +717,9 @@ export default function VitalsStationPage() {
                             {h.age}
                             {(h.sex || "")[0] || ""} · {h.fileNo}
                           </div>
-                          <div className="si-reason">🚫 {h.blockedReason || "On hold"}</div>
+                          <div className="si-reason">
+                            <Ico as={Ban} size={12} /> {h.blockedReason || "On hold"}
+                          </div>
                         </div>
                       ))
                     : g.key === "onBreak"
@@ -730,6 +756,11 @@ export default function VitalsStationPage() {
         </div>
 
         <div className="station-detail">
+          <div className="sd-mobile-bar">
+            <button type="button" className="sd-mobile-back" onClick={() => setMobileView("list")}>
+              <Ico as={List} /> Patient list
+            </button>
+          </div>
           {!patient && <div className="sd-empty">Select a patient from the queue.</div>}
           {restingNow && (
             <div className="sd-empty" role="status">
@@ -760,7 +791,11 @@ export default function VitalsStationPage() {
                 </div>
                 <div className="sdh-acts">
                   <StabilityChip stability={patient.stability} detail />
-                  {badge && <span className={`badge ${badge.cls}`}>{badge.label}</span>}
+                  {badge && (
+                    <span className={`badge ${badge.cls}`}>
+                      <Ico as={badge.Icon} size={11} /> {badge.label}
+                    </span>
+                  )}
                   {/* The chair holds one patient, so there has to be a way to
                       give it up without recording a reading — the patient who
                       got up, or the wrong row tapped. Only for the patient
@@ -774,7 +809,13 @@ export default function VitalsStationPage() {
                       onClick={sendBackToQueue}
                       disabled={releaseVitals.isPending}
                     >
-                      {releaseVitals.isPending ? "Sending…" : "← Back to queue"}
+                      {releaseVitals.isPending ? (
+                        "Sending…"
+                      ) : (
+                        <>
+                          <Ico as={ArrowLeft} /> Back to queue
+                        </>
+                      )}
                     </button>
                   )}
                   {!correcting && (
@@ -872,14 +913,23 @@ export default function VitalsStationPage() {
                         (voice.live ? "Listening…" : "Recording — press Stop when done")}
                     </span>
                     {!voice.listening && (
-                      <button className="cap-clear" onClick={voice.clear} aria-label="Clear">
-                        ✕
+                      <button
+                        type="button"
+                        className="cap-clear"
+                        onClick={voice.clear}
+                        aria-label="Clear"
+                      >
+                        <X size={14} aria-hidden="true" />
                       </button>
                     )}
                   </div>
                 )}
 
-                {voice.error && <div className="voice-note voice-err">⚠ {voice.error}</div>}
+                {voice.error && (
+                  <div className="voice-note voice-err">
+                    <Ico as={TriangleAlert} /> {voice.error}
+                  </div>
+                )}
 
                 {voice.result && (
                   <div className="voice-note">
@@ -948,12 +998,12 @@ export default function VitalsStationPage() {
                         >
                           <span className="ao-head">
                             <span className="ao-ico" aria-hidden="true">
-                              {o.icon}
+                              <Ico as={ALLERGY_ICON[o.value] || CircleAlert} />
                             </span>
                             {o.label}
                             {on && (
                               <span className="ao-tick" aria-hidden="true">
-                                ✓
+                                <Check size={14} />
                               </span>
                             )}
                           </span>
@@ -990,7 +1040,7 @@ export default function VitalsStationPage() {
                           disabled={!allergy.draft.trim()}
                           onClick={addAllergy}
                         >
-                          + Add
+                          <Ico as={Plus} /> Add
                         </button>
                       </div>
                       {allergy.list.length > 0 && (
@@ -1008,7 +1058,7 @@ export default function VitalsStationPage() {
                                   }))
                                 }
                               >
-                                ×
+                                <X size={12} aria-hidden="true" />
                               </button>
                             </span>
                           ))}
@@ -1173,7 +1223,8 @@ export default function VitalsStationPage() {
                   <div className={`recheck${rechecked ? " done" : ""}`}>
                     <div className="rc-body">
                       <div className="rc-title">
-                        ⚠ Large change — recheck {nameList(changeFlags.map((f) => f.field))}
+                        <Ico as={TriangleAlert} /> Large change — recheck{" "}
+                        {nameList(changeFlags.map((f) => f.field))}
                       </div>
                       <div className="rc-detail">
                         {changeFlags.map((f) => (
@@ -1197,7 +1248,13 @@ export default function VitalsStationPage() {
                       onClick={() => setRechecked((r) => !r)}
                       aria-pressed={rechecked}
                     >
-                      {rechecked ? "✓ Rechecked" : "I rechecked it"}
+                      {rechecked ? (
+                        <>
+                          <Ico as={Check} /> Rechecked
+                        </>
+                      ) : (
+                        "I rechecked it"
+                      )}
                     </button>
                   </div>
                 )}
@@ -1208,13 +1265,13 @@ export default function VitalsStationPage() {
                       {notCalled
                         ? "Call the patient to the station first"
                         : invalid.length
-                          ? "⚠ Check the highlighted readings"
+                          ? "Check the highlighted readings"
                           : needsRecheck
-                            ? "⚠ Recheck before saving"
+                            ? "Recheck before saving"
                             : anyEntered
                               ? correcting
                                 ? "Correcting a recorded reading"
-                                : "✓ Vitals done"
+                                : "Vitals done"
                               : "Enter the readings"}
                     </div>
                     <div className="db-sub">
@@ -1238,11 +1295,25 @@ export default function VitalsStationPage() {
                       disabled={startVitals.isPending}
                       onClick={() => pick(selectedId)}
                     >
-                      {startVitals.isPending ? "Calling…" : "Call to station →"}
+                      {startVitals.isPending ? (
+                        "Calling…"
+                      ) : (
+                        <>
+                          Call to station <Ico as={ArrowRight} />
+                        </>
+                      )}
                     </button>
                   ) : (
                     <button type="button" className="db-btn" disabled={!canSave} onClick={submit}>
-                      {saveVitals.isPending ? "Saving…" : correcting ? "Save correction" : "Done →"}
+                      {saveVitals.isPending ? (
+                        "Saving…"
+                      ) : correcting ? (
+                        "Save correction"
+                      ) : (
+                        <>
+                          Done <Ico as={ArrowRight} />
+                        </>
+                      )}
                     </button>
                   )}
                 </div>

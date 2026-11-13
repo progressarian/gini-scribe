@@ -39,7 +39,7 @@
      standard app-shell chrome bar. Inner horizontal padding re-aligns the
      header content with the page content below. */
   margin: calc(-1 * var(--pad-y)) calc(-1 * var(--pad-x)) 4px;
-  padding: 10px var(--gutter-x);
+  padding: 5px var(--gutter-x);
   background: #ffffff;
   border-bottom: 1px solid #e8edf3;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
@@ -59,22 +59,22 @@
 }
 
 .header__logo {
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   background: linear-gradient(135deg, #0f172a, #334155);
-  border-radius: 10px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
   font-weight: 900;
-  font-size: 15px;
+  font-size: 13px;
   flex-shrink: 0;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.22);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.2);
 }
 
 .header__title {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 800;
   color: #0f172a;
   line-height: 1.15;
@@ -82,10 +82,10 @@
 }
 
 .header__doctor {
-  font-size: 10.5px;
+  font-size: 10px;
   color: #64748b;
   font-weight: 500;
-  margin-top: 1px;
+  margin-top: 0;
 }
 
 .header__spacer {
@@ -132,10 +132,10 @@
 .header__save-btn,
 .header__new-btn,
 .header__logout-btn {
-  height: 34px;
-  padding: 0 14px;
-  border-radius: 8px;
-  font-size: 12.5px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 12px;
   font-weight: 700;
   cursor: pointer;
   display: inline-flex;
@@ -1164,8 +1164,8 @@
   .header__save-btn,
   .header__new-btn,
   .header__logout-btn {
-    height: 32px;
-    padding: 0 12px;
+    height: 28px;
+    padding: 0 11px;
     font-size: 12px;
   }
   .patient-bar--inline {
@@ -1199,7 +1199,7 @@
   .header__save-btn,
   .header__new-btn,
   .header__logout-btn {
-    height: 32px;
+    height: 28px;
     padding: 0 10px;
     font-size: 12px;
   }
@@ -1218,8 +1218,8 @@
     gap: 5px;
   }
   .header__logo {
-    width: 28px;
-    height: 28px;
+    width: 26px;
+    height: 26px;
     font-size: 12px;
   }
   .header__doctor {
@@ -1245,7 +1245,7 @@
   .header__save-btn,
   .header__new-btn,
   .header__logout-btn {
-    height: 30px;
+    height: 28px;
     padding: 0 9px;
     font-size: 11px;
   }
@@ -1276,7 +1276,7 @@
   .header__save-btn,
   .header__new-btn,
   .header__logout-btn {
-    height: 28px;
+    height: 26px;
     padding: 0 8px;
     font-size: 10px;
   }

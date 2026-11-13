@@ -2187,14 +2187,6 @@ export default function FlowManagerPage() {
         </div>
       )}
 
-      <div className="too-narrow">
-        <strong>The floor board needs a wider screen.</strong>
-        <span>
-          A board of live timers do not survive a phone. Open Gini Flow on the floor display or a
-          desktop (900px or wider).
-        </span>
-      </div>
-
       <div className="board-wrap">
         <div className={`board${drag ? " dragging" : ""}`}>
           {shownColumns.map((column) => (

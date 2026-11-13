@@ -49,7 +49,12 @@ export default function RxFollowupAllDialog({ rows, labelOf, onClose, onDone }) 
 
   return (
     <BillDialogLayer>
-      <div className="flow-dialog-backdrop" onClick={onClose} role="presentation">
+      <div
+        className="flow-dialog-backdrop"
+        onClick={onClose}
+        role="presentation"
+        data-popover-layer=""
+      >
         <form
           ref={ref}
           className="flow-card bill-dialog cxl-dialog"

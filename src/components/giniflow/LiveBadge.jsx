@@ -1,26 +1,34 @@
-// Whether this screen is being told about changes, or is still asking.
-//
-// A coordinator watching a board that has quietly stopped updating is worse off
-// than one who knows it is on a fifteen-second delay, so the state is never
-// implied — it is named, in words, next to the dot.
+const STATUS = {
+  stale: {
+    label: "Reconnecting…",
+    hint: "Connection lost — trying again. What you see may be a little out of date.",
+  },
+  live: {
+    label: "Up to date",
+    hint: "Changes appear on this screen straight away.",
+  },
+  connecting: {
+    label: "Connecting…",
+    hint: "Getting the latest information.",
+  },
+  polling: {
+    label: "Refreshes every 15 sec",
+    hint: "This screen updates itself every 15 seconds. No need to reload.",
+  },
+};
+
 export default function LiveBadge({ live, stale = false, className = "rail-live" }) {
-  const label = stale
-    ? "Reconnecting…"
+  const status = stale
+    ? STATUS.stale
     : live
-      ? "Live"
+      ? STATUS.live
       : live === null
-        ? "Connecting…"
-        : "Polling · 15s";
+        ? STATUS.connecting
+        : STATUS.polling;
   return (
-    <span
-      className={`${className}${stale ? " is-stale" : ""}`}
-      title={
-        live
-          ? "Changes on the floor reach this screen within a second"
-          : "Live updates are not connected — this screen re-asks every 15 seconds"
-      }
-    >
-      <span className={`live-dot${live && !stale ? "" : " dead"}`} /> {label}
+    <span className={`${className}${stale ? " is-stale" : ""}`} title={status.hint}>
+      <span className={`live-dot${live && !stale ? "" : " dead"}`} aria-hidden="true" />{" "}
+      {status.label}
     </span>
   );
 }

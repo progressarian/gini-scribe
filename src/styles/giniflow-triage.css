@@ -1178,57 +1178,47 @@
   line-height: 1.5;
 }
 
-/* ── RESPONSIVE ──────────────────────────────────────────────────────────────
-   Unlike the floor board, this screen is worked at a desk and on a tablet the
-   coordinator carries — so it stacks rather than refusing to render. Below
-   1000px the kanban becomes a vertical list of full-width category sections,
-   each scrolling the page rather than itself, which is the only shape that
-   reads on a narrow screen. */
 @media (max-width: 1000px) {
   .gf-triage .tri-board {
-    flex-direction: column;
-    overflow-x: hidden;
-    overflow-y: auto;
-    gap: 10px;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scroll-padding-inline: 14px;
   }
   .gf-triage .tcol {
-    flex: 0 0 auto;
-    width: 100%;
-  }
-  .gf-triage .tc-body {
-    overflow-y: visible;
-    max-height: none;
+    scroll-snap-align: start;
   }
   .gf-triage .pipeline {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
   }
   .gf-triage .ps {
-    border-bottom: 1px solid var(--bd);
+    flex: 0 0 auto;
+    min-width: 96px;
+    max-width: 150px;
+    padding: 5px 10px;
+    scroll-snap-align: start;
   }
-  .gf-triage .ps:nth-child(4n) {
-    border-right: none;
+  .gf-triage .ps-lbl {
+    white-space: nowrap;
   }
-  .gf-triage .ps:nth-last-child(-n + 4) {
-    border-bottom: none;
+  .gf-triage .ps-val {
+    font-size: 15px;
+  }
+  .gf-triage .ps-sub {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 
 @media (max-width: 640px) {
-  .gf-triage .pipeline {
-    grid-template-columns: repeat(2, 1fr);
+  .gf-triage .ps {
+    min-width: 84px;
   }
-  .gf-triage .ps:nth-child(4n) {
-    border-right: 1px solid var(--bd);
-  }
-  .gf-triage .ps:nth-child(2n) {
-    border-right: none;
-  }
-  .gf-triage .ps:nth-last-child(-n + 4) {
-    border-bottom: 1px solid var(--bd);
-  }
-  .gf-triage .ps:nth-last-child(-n + 2) {
-    border-bottom: none;
+  .gf-triage .ps-sub {
+    display: none;
   }
   .gf-triage .th-actions {
     margin-left: 0;
@@ -1239,6 +1229,11 @@
   }
   .gf-triage .tri-board {
     padding: 10px;
+    scroll-padding-inline: 10px;
+  }
+  .gf-triage .tcol {
+    flex-basis: min(288px, 86vw);
+    width: min(288px, 86vw);
   }
   .gf-triage .pipeline {
     margin: 0 10px 10px;
@@ -1298,5 +1293,17 @@
   .gf-triage .rxmo-chip {
     padding: 8px 12px;
     font-size: 12px;
+  }
+}
+
+@media (max-width: 1000px) {
+  .gf-triage .tri-filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+  }
+  .gf-triage .tri-filters > * {
+    flex-shrink: 0;
   }
 }

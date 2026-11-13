@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   useRxQueue,
   useHandOverEchoReport,
@@ -15,6 +15,7 @@ import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import useAuthStore from "../../stores/authStore";
 import { CAPABILITIES as CAP, hasCapability } from "../../../shared/permissions.js";
 import LiveBadge from "../../components/giniflow/LiveBadge";
+import useDismiss from "../../components/giniflow/lab/useDismiss";
 import StationNotice from "../../components/giniflow/StationNotice";
 import PdfViewerModal, { printPdf } from "../../components/visit/PdfViewerModal";
 import RxFollowupDialog from "../../components/giniflow/RxFollowupDialog";
@@ -218,6 +219,8 @@ function Pane({
   busy,
 }) {
   const { data, isLoading } = useRxPatient(visitId);
+  const paneRef = useRef(null);
+  useDismiss(!!visitId, onClose, paneRef);
   const heldByCoordinator = !!data?.coordinator?.blocking;
   const followupPatient = data && {
     visitId,
@@ -232,7 +235,12 @@ function Pane({
 
   return (
     <div className="detail-overlay">
-      <div className="detail-pane" role="dialog" aria-label="Explain the prescription">
+      <div
+        className="detail-pane"
+        ref={paneRef}
+        role="dialog"
+        aria-label="Explain the prescription"
+      >
         <div className="dp-head">
           <div className="dp-title-row">
             <button type="button" className="rbtn" onClick={onClose}>
@@ -499,6 +507,7 @@ function Pane({
 export default function RxStationPage() {
   const [openId, setOpenId] = useState(null);
   const [openReadOnly, setOpenReadOnly] = useState(false);
+  const closePane = useCallback(() => setOpenId(null), []);
   const [printing, setPrinting] = useState(null);
   const printFrame = useRef(null);
   const printUrl = useRef(null);
@@ -717,8 +726,8 @@ export default function RxStationPage() {
         </div>
       </div>
 
-      <div className="scroll">
-        <div className="inner">
+      <div className="scroll scroll--fill">
+        <div className="inner inner--full">
           <div className="workflow-note lab-note">
             <span className="wn-ico">⚡</span>
             <span>
@@ -954,7 +963,7 @@ export default function RxStationPage() {
       <Pane
         visitId={openId}
         readOnly={openReadOnly}
-        onClose={() => setOpenId(null)}
+        onClose={closePane}
         onReturn={onReturn}
         onExplained={onExplained}
         canEndVisit={canEndVisit}
