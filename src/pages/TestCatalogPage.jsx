@@ -94,6 +94,13 @@ function PriceCell({ test }) {
 // Which station a test belongs to. Changing it moves where the NEXT order lands;
 // orders already raised keep the station they were raised in, so a sample the lab
 // has drawn cannot vanish off their queue because somebody re-filed the test.
+const RESULT_FILTERS = [
+  { value: "all", label: "All results" },
+  { value: "fields", label: "Fields set up", empty: "No test has result fields yet." },
+  { value: "not_set_up", label: "Not set up", empty: "Every active test has result fields." },
+  { value: "file", label: "Results as file", empty: "No test is set to results as a file." },
+];
+
 const STATIONS = [
   { value: "lab", label: "🩸 Lab" },
   { value: "machine", label: "🫀 Machine" },
@@ -223,7 +230,7 @@ export default function TestCatalogPage() {
   const [adding, setAdding] = useState(false);
   const [q, setQ] = useState("");
   const [showRetired, setShowRetired] = useState(false);
-  const [onlyNotSetUp, setOnlyNotSetUp] = useState(false);
+  const [results, setResults] = useState("all");
   const [station, setStation] = useState("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -235,7 +242,7 @@ export default function TestCatalogPage() {
       (t) =>
         (showRetired || t.isActive) &&
         (station === "all" || (t.category || "lab") === station) &&
-        (!onlyNotSetUp || t.results?.status === "not_set_up") &&
+        (results === "all" || t.results?.status === results) &&
         (!needle ||
           [t.name, t.gloss, t.serviceItemCode, t.offItemCode]
             .filter(Boolean)
@@ -243,7 +250,7 @@ export default function TestCatalogPage() {
             .toLowerCase()
             .includes(needle)),
     );
-  }, [tests, q, showRetired, station, onlyNotSetUp]);
+  }, [tests, q, showRetired, station, results]);
 
   const perStation = useMemo(
     () =>
@@ -324,7 +331,7 @@ export default function TestCatalogPage() {
               type="button"
               className="tcat__warnlink"
               onClick={() => {
-                filter(setOnlyNotSetUp)(true);
+                filter(setResults)("not_set_up");
                 setShowRetired(false);
               }}
             >
@@ -371,14 +378,18 @@ export default function TestCatalogPage() {
             />
             Show retired
           </label>
-          <label className="tcat__toggle">
-            <input
-              type="checkbox"
-              checked={onlyNotSetUp}
-              onChange={(e) => filter(setOnlyNotSetUp)(e.target.checked)}
-            />
-            Not set up only
-          </label>
+          <select
+            className="jb-assign tcat__results"
+            value={results}
+            aria-label="Filter by result fields"
+            onChange={(e) => filter(setResults)(e.target.value)}
+          >
+            {RESULT_FILTERS.map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </select>
           <span className="tcat__count">
             {rows.length} of {tests.length}
           </span>
@@ -395,8 +406,8 @@ export default function TestCatalogPage() {
           </div>
         ) : !rows.length ? (
           <div className="tcat__empty">
-            {onlyNotSetUp && !q.trim()
-              ? "Every active test has result fields."
+            {results !== "all" && !q.trim()
+              ? (RESULT_FILTERS.find((f) => f.value === results)?.empty ?? "Nothing matches.")
               : "Nothing matches."}
           </div>
         ) : (

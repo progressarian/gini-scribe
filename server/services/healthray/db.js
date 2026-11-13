@@ -1298,12 +1298,13 @@ const DIAGNOSIS_ID_RENAMES = {
 };
 
 export async function syncDiagnoses(patientId, healthrayId, diagnoses, options = {}) {
-  const { sweepStale = false } = options;
+  const { sweepStale = false, apptDate = null } = options;
   if (!patientId || !diagnoses || diagnoses.length === 0) return;
+  const olderVisit = await newerHealthrayVisitExists(patientId, healthrayId, apptDate);
 
   // Deactivate stale duplicate rows for known renamed IDs before upserting
   const oldIds = Object.keys(DIAGNOSIS_ID_RENAMES);
-  if (oldIds.length) {
+  if (oldIds.length && !olderVisit) {
     const placeholders = oldIds.map((_, i) => `$${i + 2}`).join(",");
     await pool
       .query(
@@ -1332,12 +1333,16 @@ export async function syncDiagnoses(patientId, healthrayId, diagnoses, options =
       .query(
         `INSERT INTO diagnoses (patient_id, diagnosis_id, label, status, notes)
          VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (patient_id, diagnosis_id) DO UPDATE SET
+         ON CONFLICT (patient_id, diagnosis_id) ${
+           olderVisit
+             ? "DO NOTHING"
+             : `DO UPDATE SET
            label = EXCLUDED.label,
            status = COALESCE(EXCLUDED.status, diagnoses.status),
            notes = COALESCE(EXCLUDED.notes, diagnoses.notes),
            is_active = true,
-           updated_at = NOW()`,
+           updated_at = NOW()`
+         }`,
         [
           patientId,
           diagId,
@@ -1353,7 +1358,7 @@ export async function syncDiagnoses(patientId, healthrayId, diagnoses, options =
         ),
       );
   }
-  if (sweepStale && keptIds.length > 0) {
+  if (sweepStale && !olderVisit && keptIds.length > 0) {
     await pool
       .query(
         `UPDATE diagnoses

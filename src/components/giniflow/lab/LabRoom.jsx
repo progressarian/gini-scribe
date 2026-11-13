@@ -499,10 +499,7 @@ function LabDetailPane({
   const canUpload =
     (atTheBench && atLeast(order.sampleStatus, "results") && order.paid) ||
     (order.outsourced && order.paid && OUTSIDE_UPLOADABLE.includes(order.sampleStatus));
-  // Values can be typed once the sample is in the lab's hands, and afterwards —
-  // an order finished by an upload can still have its numbers added, and one
-  // finished by numbers can be corrected.
-  const canEnterResults = atTheBench && atLeast(order.sampleStatus, "results") && order.paid;
+  const canEnterResults = atTheBench && atLeast(order.sampleStatus, "processing") && order.paid;
 
   // Refuse an oversized file here rather than spending a minute base64-encoding
   // it only for the service to reject it. The limit is the one the zone states.
@@ -1229,18 +1226,40 @@ function HealthrayCasePane({
                       claims, and only one of them is missing. */}
                   <div className="hr-times">
                     {LAB_RUNGS.map((r) => {
+                      const press = (c.actions || []).find((a) => a.action === r.action);
                       const at =
-                        (r.healthrayAt && c[r.healthrayAt]) ||
-                        (c.actions || []).find((a) => a.action === r.action)?.at ||
+                        (press && (press.collectedAt || press.at)) ||
+                        (r.key === "pending" && c.registeredAt) ||
                         (stageIndexOf(c.stage.key) > stageIndexOf(r.key) ? "done" : null);
                       return (
                         <div className={`hr-time${at ? "" : " is-pending"}`} key={r.key}>
-                          <span>{r.timelineLabel}</span>
+                          <span>
+                            {press?.site === "home"
+                              ? "🏠 Collected at home"
+                              : press?.site === "ghm"
+                                ? "🏥 Collected at GHM"
+                                : r.timelineLabel}
+                          </span>
                           <strong>{at === "done" ? "✓" : at ? clock(at) : "—"}</strong>
+                          {press ? <em className="hr-time__by">{press.by}</em> : null}
                         </div>
                       );
                     })}
                   </div>
+                  {(c.actions || [])
+                    .filter((x) => !LAB_RUNGS.some((r) => r.action === x.action))
+                    .map((x) => (
+                      <div className="dp-hint" key={x.action}>
+                        {ACTION_LABEL[x.action] || x.action} by <strong>{x.by}</strong> at{" "}
+                        {clock(x.at)}
+                      </div>
+                    ))}
+                  {(c.actions || []).length ? (
+                    <div className="dp-hint">
+                      Names and times are the lab&apos;s own button presses — recorded here, not
+                      sent to HealthRay.
+                    </div>
+                  ) : null}
                   {/* Only says the file is missing once one could exist. Before
                       the sample is drawn there is nothing to have a report of,
                       and "No report file yet" reads as a problem rather than as
@@ -1442,18 +1461,6 @@ function HealthrayCasePane({
                       </div>
                     </>
                   )}
-                  {(c.actions || []).map((x) => (
-                    <div className="dp-hint" key={x.action}>
-                      {x.site === "home"
-                        ? "🏠 Sample collected at home"
-                        : x.site === "ghm"
-                          ? "🏥 Sample collected at GHM"
-                          : ACTION_LABEL[x.action]}{" "}
-                      by <strong>{x.by}</strong> at {clock(x.collectedAt || x.at)}
-                      {x.site === "home" ? ` (marked ${clock(x.at)})` : ""} — recorded here only,
-                      not sent to HealthRay.
-                    </div>
-                  ))}
                 </div>
               ))}
             </div>

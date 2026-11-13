@@ -277,7 +277,7 @@ S1–S4 change nothing for the lab bench. S5 is the first visible change on the 
 
 Where the build differs from §3, or found something the plan did not know:
 
-- **Formula editor (D5):** buttons, not a typed `#` picker — Insert field (this report's active number
+- **Formula editor (D5):** buttons, not a typed `#` picker — picking a field adds it at once (this report's active number
   fields), operators, numbers, brackets, Remove last, Clear. Nothing free-typed, so nothing to mistype.
   Formulas are still stored as `#id` text.
 - **Formula grammar (D6):** `shared/labFormula.js` now has one parser for evaluating and for checking
@@ -295,3 +295,15 @@ Where the build differs from §3, or found something the plan did not know:
 - **Decimals:** drive formula rounding on the bench and the server (default 2, as before).
 - **Not built:** adding an existing field to a second report (only new fields); billing's `testMatch.js`
   still ignores `lab_report_id` (needs its own billing tests); verify-before-release (§5.2, separate plan).
+
+Added 13 Nov 2026 after first use:
+
+- **Formula builder only offers what can come next:** after a value only signs, `)` and `,` (inside
+  `min(`/`max(` before its second value); after a sign or bracket only values. A broken sequence can no
+  longer be built; the server check is unchanged.
+- **Formula from words:** `POST /api/lab-catalog/reports/:reportId/formula-from-text` sends the
+  description and this report's active number fields (ids, names, units — no patient data) to Claude
+  (`claude-opus-5-5`, structured output). The answer goes through the same `checkFormula` as a hand-built
+  one and is only placed in the builder; nothing is saved until the person clicks Save. No key → 503.
+- **File-only tests on the bench:** a test marked "Results come as a file" gets no typing rows; an
+  all-file order shows only the upload note.

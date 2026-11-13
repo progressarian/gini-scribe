@@ -8,6 +8,7 @@ import {
   computeFormulas,
   flagFor as flagAgainstRange,
   formulaUsesPatient,
+  notANumber,
 } from "../../../shared/labFormula";
 
 // Typing the results in, instead of scanning them.
@@ -52,6 +53,43 @@ const flagFromText = (value, refRange) => {
   if (max != null && n > max) return "HIGH";
   return null;
 };
+
+const needsNumber = (row) =>
+  row.locked && !row.calculated && !row.isGroup && (row.inputType || "numeric") === "numeric";
+
+const wrongValue = (row) => needsNumber(row) && notANumber(row.value);
+
+const NUMBER_SO_FAR = /^(?:[<>]=?\s*)?-?\d*(?:\.\d*)?$/;
+const MAX_NUMBER_CHARS = 10;
+
+const RANGE_CHARS = /^[\d.\s<>=\-–]*$/;
+const RANGE_FULL = /^(?:[<>]=?\s*-?\d+(?:\.\d+)?|-?\d+(?:\.\d+)?\s*[-–]\s*-?\d+(?:\.\d+)?)$/;
+const MAX_RANGE_CHARS = 21;
+
+const wrongRange = (row) => {
+  const raw = String(row.refRange ?? "").trim();
+  return !row.locked && raw !== "" && RANGE_CHARS.test(raw) && !RANGE_FULL.test(raw);
+};
+
+const typedNumberOk = (row, text) => {
+  const raw = text.trim();
+  if (!NUMBER_SO_FAR.test(raw) || raw.length > MAX_NUMBER_CHARS) return false;
+  const places = (raw.split(".")[1] || "").length;
+  if (places > (row.decimals ?? 2)) return false;
+  return !farOff({ ...row, value: raw });
+};
+
+function farOff(row) {
+  if (!needsNumber(row) || !row.range) return false;
+  const raw = String(row.value ?? "").trim();
+  const digits = raw.replace(/^[<>]=?\s*/, "");
+  const max = row.range.maxValue == null ? null : Number(row.range.maxValue);
+  const min = row.range.minValue == null ? null : Number(row.range.minValue);
+  if (min != null && min >= 0 && digits.startsWith("-")) return true;
+  const n = Number(digits);
+  if (digits === "" || !Number.isFinite(n)) return false;
+  return max != null && max > 0 && n > max * 10;
+}
 
 function AddRow({ onAdd }) {
   const [term, setTerm] = useState("");
@@ -186,16 +224,24 @@ export default function LabResultsForm({ orderId, caseNo, onSaved, onFailed }) {
         panelName: group.test,
       })),
     );
-    const fromCatalog = suggested.filter((r) => r.locked);
-    if (fromCatalog.length) {
-      const [required, optional] = splitCatalogRows(fromCatalog);
-      setRows(required);
-      setRest(optional);
-      return;
+    const shownRows = [];
+    const extraRows = [];
+    for (const test of (data.suggestions || []).map((g) => g.test)) {
+      const own = suggested.filter((r) => r.panelName === test);
+      if (own.some((r) => r.locked)) {
+        const [required, optional] = splitCatalogRows(own.filter((r) => r.locked));
+        shownRows.push(...required);
+        extraRows.push(...optional);
+      } else {
+        shownRows.push(...own.slice(0, VISIBLE_ROWS));
+        extraRows.push(...own.slice(VISIBLE_ROWS));
+      }
     }
-    setRows(suggested.slice(0, VISIBLE_ROWS));
-    setRest(suggested.slice(VISIBLE_ROWS));
+    setRows(shownRows);
+    setRest(extraRows);
   }, [data, rows]);
+
+  const [open, setOpen] = useState(null);
 
   const list = rows || [];
   const calculated = computeFormulas(
@@ -240,10 +286,205 @@ export default function LabResultsForm({ orderId, caseNo, onSaved, onFailed }) {
       { onSuccess: (r) => onSaved?.(r), onError: (e) => onFailed?.(e) },
     );
 
+  const fileTests = (data?.suggestions || []).filter((g) => g.asFile).map((g) => g.test);
+  const onlyFiles =
+    fileTests.length > 0 &&
+    fileTests.length === (data?.suggestions || []).length &&
+    !(data?.results || []).length;
+
+  const renderRow = (row, i) => {
+    const wrong = wrongValue(row);
+    const flag = wrong ? null : flagOf(row);
+    const check = !wrong && farOff(row);
+    const errorId = `lr-err-${i}`;
+    if (row.isGroup) {
+      return (
+        <div className="lr-group" key={`${row.testName}-${i}`}>
+          {row.testName}
+        </div>
+      );
+    }
+    return (
+      <div className="lr-row" key={`${row.testName}-${i}`}>
+        <span className="lr-name" style={row.depth ? { paddingLeft: 12 } : undefined}>
+          {row.testName}
+          {row.calculated && (
+            <span className="lr-calc" title={row.formula}>
+              auto
+            </span>
+          )}
+        </span>
+        <span className="lr-val">
+          {row.inputType === "select" && row.options?.length ? (
+            <select
+              className="ar-reason-input"
+              value={row.value}
+              aria-label={`${row.testName} result`}
+              onChange={(e) => patch(i, { value: e.target.value })}
+            >
+              <option value="">—</option>
+              {row.options.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              className={`ar-reason-input${wrong ? " lr-invalid" : ""}`}
+              inputMode={row.inputType === "text" ? "text" : "decimal"}
+              placeholder={row.calculated ? "worked out" : "—"}
+              value={row.value}
+              readOnly={row.calculated}
+              aria-label={`${row.testName} result`}
+              aria-invalid={wrong || undefined}
+              aria-describedby={wrong ? errorId : undefined}
+              onChange={(e) => {
+                const next = e.target.value;
+                if (needsNumber(row) && !typedNumberOk(row, next)) return;
+                patch(i, { value: next });
+              }}
+            />
+          )}
+          {flag && <span className={`lr-flag lr-${flag.toLowerCase()}`}>{flag}</span>}
+          {check ? (
+            <span className="lr-err lr-err--check" role="status">
+              Check this value — far outside the usual range
+            </span>
+          ) : null}
+          {wrong ? (
+            <span className="lr-err" id={errorId} role="alert">
+              Enter a number, e.g. 12.5 or &lt;0.1
+            </span>
+          ) : null}
+        </span>
+        {row.locked ? (
+          <span className="lr-unit lr-fixed">{row.unit || "—"}</span>
+        ) : (
+          <input
+            className="ar-reason-input lr-unit"
+            placeholder="unit"
+            value={row.unit}
+            onChange={(e) => patch(i, { unit: e.target.value })}
+          />
+        )}
+        {row.locked ? (
+          <span className="lr-ref lr-fixed">{row.refRange || "no range"}</span>
+        ) : (
+          <span className="lr-refbox">
+            <input
+              className={`ar-reason-input lr-ref${wrongRange(row) ? " lr-invalid" : ""}`}
+              placeholder="e.g. 0.7 - 1.3"
+              value={row.refRange}
+              aria-label={`${row.testName} reference range`}
+              aria-invalid={wrongRange(row) || undefined}
+              onChange={(e) => {
+                const next = e.target.value;
+                if (!RANGE_CHARS.test(next) || next.length > MAX_RANGE_CHARS) return;
+                patch(i, { refRange: next });
+              }}
+            />
+            {wrongRange(row) ? (
+              <span className="lr-err" role="alert">
+                Like 0.7 - 1.3, &lt;5 or &gt;40
+              </span>
+            ) : null}
+          </span>
+        )}
+        <button
+          type="button"
+          className="jb-remove"
+          title="Remove this test"
+          aria-label={`Remove ${row.testName}`}
+          onClick={() => {
+            setRows(list.filter((_, idx) => idx !== i));
+            if (row.panelName && !rest.some((r) => r.testName === row.testName)) {
+              setRest([...rest, { ...row, value: "", valueText: "" }]);
+            }
+          }}
+        >
+          ✕
+        </button>
+      </div>
+    );
+  };
+
+  const orderedTests = (data?.suggestions || []).map((g) => g.test);
+  const sectionKeys = [
+    ...orderedTests,
+    ...[...new Set(list.map((r) => r.panelName || ""))].filter((k) => !orderedTests.includes(k)),
+  ];
+  const sections = sectionKeys
+    .map((key) => {
+      const indexes = shown
+        .map((r, i) => ((r.panelName || "") === key ? i : -1))
+        .filter((i) => i >= 0);
+      const valueRows = indexes.map((i) => shown[i]).filter((r) => !r.isGroup);
+      return {
+        key: key || "other",
+        title: key || "Other values",
+        asFile: fileTests.includes(key),
+        indexes,
+        rest: rest.filter((r) => (r.panelName || "") === key),
+        total: valueRows.length,
+        filled: valueRows.filter(
+          (r) => String(r.value).trim() !== "" || (r.valueText || "").trim() !== "",
+        ).length,
+        flags: valueRows.filter((r) => !wrongValue(r) && flagOf(r)).length,
+        wrong: valueRows.filter((r) => wrongValue(r) || wrongRange(r)).length,
+        check: valueRows.filter(farOff).length,
+      };
+    })
+    .filter(
+      (sec) =>
+        sec.asFile || sec.indexes.length || sec.rest.length || orderedTests.includes(sec.title),
+    );
+  const wrongCount = sections.reduce((n, sec) => n + sec.wrong, 0);
+  const firstOpen = sections.find((sec) => !sec.asFile && sec.filled < sec.total) || sections[0];
+  const openSet = open ?? new Set(firstOpen ? [firstOpen.key] : []);
+  const firstOpenKey = firstOpen?.key ?? null;
+  useEffect(() => {
+    if (open === null && rows !== null && firstOpenKey) setOpen(new Set([firstOpenKey]));
+  }, [open, rows, firstOpenKey]);
+  const toggleSection = (key) => {
+    const next = new Set(openSet);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setOpen(next);
+  };
+
   if (isLoading) return <div className="empty-note">Loading the results form…</div>;
+
+  if (onlyFiles)
+    return (
+      <p className="lr-asfile">
+        {fileTests.join(", ")}: the result comes as a report file — upload it below. No values to
+        type.
+      </p>
+    );
 
   return (
     <div className="lr">
+      {sections.length > 1 ? (
+        <div className="lr-secbar">
+          <span>
+            {sections.length} tests · {filled.length} value{filled.length === 1 ? "" : "s"} typed
+          </span>
+          <button
+            type="button"
+            className="lr-secbar__btn"
+            onClick={() =>
+              setOpen(
+                openSet.size === sections.length
+                  ? new Set()
+                  : new Set(sections.map((sec) => sec.key)),
+              )
+            }
+          >
+            {openSet.size === sections.length ? "Close all" : "Open all"}
+          </button>
+        </div>
+      ) : null}
       {usesPatient ? (
         <p className={missingPatient.length ? "lr-patient lr-patient--missing" : "lr-patient"}>
           {missingPatient.length
@@ -253,140 +494,102 @@ export default function LabResultsForm({ orderId, caseNo, onSaved, onFailed }) {
               }.`}
         </p>
       ) : null}
-      <div className="lr-head">
-        <span>Test</span>
-        <span>Value</span>
-        <span>Unit</span>
-        <span>Reference</span>
-        <span />
-      </div>
-
-      {shown.map((row, i) => {
-        const flag = flagOf(row);
-        if (row.isGroup) {
-          return (
-            <div className="lr-group" key={`${row.testName}-${i}`}>
-              {row.testName}
-            </div>
-          );
-        }
+      {sections.map((section) => {
+        const isOpen = openSet.has(section.key);
+        const panelId = `lr-sec-${section.key.replace(/[^a-z0-9]/gi, "-")}`;
         return (
-          <div className="lr-row" key={`${row.testName}-${i}`}>
-            <span className="lr-name" style={row.depth ? { paddingLeft: 12 } : undefined}>
-              {row.testName}
-              {row.calculated && (
-                <span className="lr-calc" title={row.formula}>
-                  auto
-                </span>
-              )}
-            </span>
-            <span className="lr-val">
-              {row.inputType === "select" && row.options?.length ? (
-                <select
-                  className="ar-reason-input"
-                  value={row.value}
-                  aria-label={`${row.testName} result`}
-                  onChange={(e) => patch(i, { value: e.target.value })}
-                >
-                  <option value="">—</option>
-                  {row.options.map((o) => (
-                    <option key={o} value={o}>
-                      {o}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  className="ar-reason-input"
-                  inputMode={row.inputType === "text" ? "text" : "decimal"}
-                  placeholder={row.calculated ? "worked out" : "—"}
-                  value={row.value}
-                  readOnly={row.calculated}
-                  aria-label={`${row.testName} result`}
-                  onChange={(e) => patch(i, { value: e.target.value })}
-                />
-              )}
-              {/* Shown as they type: a value about to go on a patient's record
-                  as HIGH should say so before it is saved, not after. */}
-              {flag && <span className={`lr-flag lr-${flag.toLowerCase()}`}>{flag}</span>}
-            </span>
-            {row.locked ? (
-              <span className="lr-unit lr-fixed">{row.unit || "—"}</span>
-            ) : (
-              <input
-                className="ar-reason-input lr-unit"
-                placeholder="unit"
-                value={row.unit}
-                onChange={(e) => patch(i, { unit: e.target.value })}
-              />
-            )}
-            {row.locked ? (
-              <span className="lr-ref lr-fixed">{row.refRange || "no range"}</span>
-            ) : (
-              <input
-                className="ar-reason-input lr-ref"
-                placeholder="range"
-                value={row.refRange}
-                onChange={(e) => patch(i, { refRange: e.target.value })}
-              />
-            )}
+          <section className="lr-sec" key={section.key}>
             <button
               type="button"
-              className="jb-remove"
-              title="Remove this test"
-              onClick={() => {
-                setRows(list.filter((_, idx) => idx !== i));
-                // Back into the picker rather than gone: removing a row the desk
-                // has no value for should not mean retyping its name and range
-                // if the analyser prints it after all.
-                if (row.panelName && !rest.some((r) => r.testName === row.testName)) {
-                  setRest([...rest, { ...row, value: "", valueText: "" }]);
-                }
-              }}
+              className="lr-sec__head"
+              aria-expanded={isOpen}
+              aria-controls={panelId}
+              onClick={() => toggleSection(section.key)}
             >
-              ✕
+              <span className="lr-sec__chev" aria-hidden="true">
+                {isOpen ? "▾" : "▸"}
+              </span>
+              <span className="lr-sec__name">{section.title}</span>
+              <span className="lr-sec__meta">
+                {section.asFile
+                  ? "report file"
+                  : section.total
+                    ? `${section.filled} of ${section.total} filled`
+                    : "no fields"}
+              </span>
+              {section.wrong ? <span className="lr-sec__wrong">{section.wrong} to fix</span> : null}
+              {section.check ? (
+                <span className="lr-sec__check">{section.check} to check</span>
+              ) : null}
+              {section.flags ? (
+                <span className="lr-sec__flags">{section.flags} abnormal</span>
+              ) : null}
             </button>
-          </div>
+            {isOpen ? (
+              <div id={panelId} className="lr-sec__body">
+                {section.asFile ? (
+                  <p className="lr-asfile">The result comes as a report file — upload it below.</p>
+                ) : null}
+                {section.indexes.length ? (
+                  <div className="lr-head">
+                    <span>Test</span>
+                    <span>Value</span>
+                    <span>Unit</span>
+                    <span>Reference</span>
+                    <span />
+                  </div>
+                ) : !section.asFile ? (
+                  <p className="lr-sec__empty">
+                    No result fields for this test yet — add a value with “Add a test” below, or
+                    upload the report.
+                  </p>
+                ) : null}
+                {section.indexes.map((i) => renderRow(shown[i], i))}
+                {section.rest.length > 0 && (
+                  <select
+                    className="jb-add"
+                    value=""
+                    aria-label={`More fields from ${section.title}`}
+                    onChange={(e) => {
+                      const picked = section.rest.find((r) => r.testName === e.target.value);
+                      if (!picked) return;
+                      setRows([...list, picked]);
+                      setRest(rest.filter((r) => r !== picked));
+                    }}
+                  >
+                    <option value="">
+                      + More from {section.title} ({section.rest.length})
+                    </option>
+                    {section.rest.map((r) => (
+                      <option key={r.testName} value={r.testName}>
+                        {r.testName}
+                        {r.unit ? ` (${r.unit})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            ) : null}
+          </section>
         );
       })}
-
-      {rest.length > 0 && (
-        <select
-          className="jb-add"
-          value=""
-          onChange={(e) => {
-            const picked = rest.find((r) => r.testName === e.target.value);
-            if (!picked) return;
-            setRows([...list, picked]);
-            setRest(rest.filter((r) => r.testName !== picked.testName));
-          }}
-        >
-          <option value="">+ More from this order ({rest.length})</option>
-          {rest.map((r) => (
-            <option key={r.testName} value={r.testName}>
-              {r.panelName ? `${r.panelName} · ` : ""}
-              {r.testName}
-              {r.unit ? ` (${r.unit})` : ""}
-            </option>
-          ))}
-        </select>
-      )}
 
       <AddRow onAdd={(row) => setRows([...list, { ...row, valueText: "", panelName: "" }])} />
 
       <div className="lr-foot">
         <button
           className="st-btn st-btn-grn btn-full"
-          disabled={save.isPending || filled.length === 0}
+          disabled={save.isPending || filled.length === 0 || wrongCount > 0}
           onClick={submit}
         >
-          {filled.length
-            ? `✓ Save ${filled.length} result${filled.length === 1 ? "" : "s"} — notify the MO`
-            : "Type a value to save — or upload the report below"}
+          {wrongCount
+            ? `Fix ${wrongCount} value${wrongCount === 1 ? "" : "s"} before saving`
+            : filled.length
+              ? `✓ Save ${filled.length} result${filled.length === 1 ? "" : "s"} — notify the MO`
+              : "Type a value to save — or upload the report below"}
         </button>
-        <span className="dp-hint">
-          Empty rows are ignored. Typing values and attaching the report are two ways to finish the
-          same sample, and either one notifies the MO — a case can carry both.
+        <span className="lr-foot__note">
+          Empty rows are skipped. Saving values or uploading the report notifies the MO.
         </span>
       </div>
     </div>

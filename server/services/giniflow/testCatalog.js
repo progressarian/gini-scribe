@@ -74,10 +74,18 @@ export async function listCatalog(db = pool) {
        LEFT JOIN lab_report_catalog rep
          ON rep.id = c.lab_report_id AND COALESCE(rep.is_active, TRUE)
        LEFT JOIN LATERAL (
-         SELECT count(*) AS n
-           FROM lab_report_tests rt
-           JOIN lab_test_catalog f ON f.id = rt.test_id AND COALESCE(f.is_active, TRUE)
-          WHERE rt.report_id = rep.id
+         WITH RECURSIVE tree AS (
+           SELECT f.id, f.input_type, 0 AS depth
+             FROM lab_report_tests rt
+             JOIN lab_test_catalog f ON f.id = rt.test_id AND COALESCE(f.is_active, TRUE)
+            WHERE rt.report_id = rep.id
+           UNION ALL
+           SELECT c.id, c.input_type, tree.depth + 1
+             FROM tree
+             JOIN lab_test_catalog c ON c.parent_test_id = tree.id AND COALESCE(c.is_active, TRUE)
+            WHERE tree.depth < 4
+         )
+         SELECT count(DISTINCT id) AS n FROM tree WHERE input_type IS DISTINCT FROM 'group'
        ) fields ON TRUE
        LEFT JOIN service_items item ON item.test_catalog_id = c.id AND item.is_active
        LEFT JOIN service_items off ON off.test_catalog_id = c.id AND NOT off.is_active

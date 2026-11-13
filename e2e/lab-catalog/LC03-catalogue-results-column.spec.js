@@ -44,6 +44,31 @@ test.describe.serial("LC03 test catalogue shows which tests have result fields",
     expect(byName.get("ABI")).toMatchObject({ status: "not_set_up", reportId: null });
   });
 
+  test("1b. fields under a heading count, the heading itself does not", async () => {
+    const hba1c = LAB_REPORTS[1];
+    await query(
+      `INSERT INTO lab_test_catalog (id, name, input_type, source)
+       VALUES (990290, 'LC03 HEADING', 'group', 'manual')`,
+    );
+    await query(
+      `INSERT INTO lab_test_catalog (id, name, unit, input_type, parent_test_id, sequence, source)
+       VALUES (990291, 'LC03 Under heading A', '%', 'numeric', 990290, 1, 'manual'),
+              (990292, 'LC03 Under heading B', '%', 'numeric', 990290, 2, 'manual')`,
+    );
+    await query(
+      `INSERT INTO lab_report_tests (report_id, test_id, sequence) VALUES ($1, 990290, 2)`,
+      [hba1c.id],
+    );
+    try {
+      const byName = new Map((await catalogue("admin")).body.tests.map((t) => [t.name, t.results]));
+      expect(byName.get("HbA1c").fieldCount).toBe(3);
+    } finally {
+      await query(`DELETE FROM lab_report_tests WHERE test_id = 990290`);
+      await query(`DELETE FROM lab_test_catalog WHERE id IN (990291, 990292)`);
+      await query(`DELETE FROM lab_test_catalog WHERE id = 990290`);
+    }
+  });
+
   test("2. a switched-off report or field no longer counts", async () => {
     await query(`UPDATE lab_test_catalog SET is_active = FALSE WHERE id = 990105`);
     await query(`UPDATE lab_report_catalog SET is_active = FALSE WHERE id = $1`, [
@@ -77,17 +102,21 @@ test.describe.serial("LC03 test catalogue shows which tests have result fields",
     await search(page).fill("VPT");
     await expect(row(page, "VPT")).toContainText("File only");
     await search(page).fill("");
-    await page.getByLabel("Not set up only").check();
+    await page.getByLabel("Filter by result fields").selectOption("not_set_up");
     await search(page).fill("ABI");
     await expect(row(page, "ABI")).toContainText("Not set up");
     await search(page).fill("Lipid Profile");
+    await expect(page.getByText("Nothing matches.")).toBeVisible();
+    await page.getByLabel("Filter by result fields").selectOption("fields");
+    await expect(row(page, "Lipid Profile")).toContainText("8 fields");
+    await search(page).fill("ABI");
     await expect(page.getByText("Nothing matches.")).toBeVisible();
   });
 
   test("4. Show them in the warning turns the filter on", async ({ page }) => {
     await openCatalogue(page, "admin");
     await page.getByRole("button", { name: "Show them" }).click();
-    await expect(page.getByLabel("Not set up only")).toBeChecked();
+    await expect(page.getByLabel("Filter by result fields")).toHaveValue("not_set_up");
     await expect(table(page).getByText("8 fields")).toHaveCount(0);
   });
 

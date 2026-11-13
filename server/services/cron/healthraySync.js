@@ -836,7 +836,7 @@ async function syncAppointment(appt, localDoctorName, opts = {}) {
   if (clinical.healthrayMedications.length > 0) {
     await stopStaleHealthrayMeds(patientId, healthrayId, apptDate, clinical.healthrayMedications);
   }
-  await syncDiagnoses(patientId, healthrayId, clinical.healthrayDiagnoses);
+  await syncDiagnoses(patientId, healthrayId, clinical.healthrayDiagnoses, { apptDate });
   await syncSymptoms(patientId, localApptId, clinical.parsedClinical?.symptoms);
   await syncAppointmentDocs(healthrayId, patientId, apptDate);
 

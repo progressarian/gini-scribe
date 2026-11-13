@@ -170,25 +170,54 @@ export async function readHistory(catalogId, db = pool) {
   const test = await catalogTest(db, catalogId);
   const reportId = test.lab_report_id ? String(test.lab_report_id) : null;
   const { rows } = await db.query(
-    `SELECT a.id, a.entity, a.entity_id, a.action, a.before, a.after, a.at, d.name AS actor
+    `WITH RECURSIVE tree AS (
+       SELECT rt.test_id AS id, 0 AS depth FROM lab_report_tests rt WHERE rt.report_id = $2::bigint
+       UNION ALL
+       SELECT c.id, tree.depth + 1 FROM tree JOIN lab_test_catalog c ON c.parent_test_id = tree.id
+        WHERE tree.depth < 4
+     ),
+     fields AS (
+       SELECT id::text AS id FROM tree
+       UNION
+       SELECT entity_id FROM lab_catalog_audit
+        WHERE entity = 'field' AND $2::text IS NOT NULL
+          AND (after->>'report_id' = $2::text OR before->>'report_id' = $2::text)
+     )
+     SELECT a.id, a.entity, a.entity_id, a.action, a.before, a.after, a.at, d.name AS actor
        FROM lab_catalog_audit a
        LEFT JOIN doctors d ON d.id = a.actor_id
-      WHERE (a.entity = 'link' AND a.entity_id = $1)
-         OR ($2::text IS NOT NULL AND a.entity IN ('report', 'order') AND a.entity_id = $2)
-         OR ($2::text IS NOT NULL AND a.entity IN ('field', 'ranges') AND a.entity_id IN (
-               SELECT rt.test_id::text FROM lab_report_tests rt WHERE rt.report_id = $2::bigint))
+      WHERE (a.entity = 'link' AND a.entity_id = $1::text)
+         OR ($2::text IS NOT NULL AND a.entity IN ('report', 'order') AND a.entity_id = $2::text)
+         OR ($2::text IS NOT NULL AND a.entity IN ('field', 'ranges')
+             AND a.entity_id IN (SELECT id FROM fields))
       ORDER BY a.at DESC, a.id DESC
       LIMIT 200`,
     [test.id, reportId],
   );
+  const mentioned = new Set();
+  for (const r of rows) {
+    if (r.entity === "field" || r.entity === "ranges") mentioned.add(String(r.entity_id));
+    for (const side of [r.before, r.after]) {
+      for (const id of side?.order || []) mentioned.add(String(id));
+      for (const id of formulaInputs(side?.formula)) mentioned.add(String(id));
+    }
+  }
+  const ids = [...mentioned].filter((id) => /^\d+$/.test(id));
+  const { rows: named } = ids.length
+    ? await db.query(`SELECT id, name FROM lab_test_catalog WHERE id = ANY($1::bigint[])`, [ids])
+    : { rows: [] };
+  const names = Object.fromEntries(named.map((n) => [String(n.id), n.name]));
   return rows.map((r) => ({
     id: String(r.id),
     entity: r.entity,
     entityId: r.entity_id,
+    subject:
+      r.entity === "field" || r.entity === "ranges" ? names[String(r.entity_id)] || null : null,
     action: r.action,
     before: r.before,
     after: r.after,
     at: r.at,
     actor: r.actor,
+    names,
   }));
 }

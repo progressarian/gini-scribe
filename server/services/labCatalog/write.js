@@ -246,6 +246,9 @@ async function checkFormula(client, { reportId, fieldId = null, formula, previou
   const syntax = formulaSyntaxError(formula);
   if (syntax) throw fail(400, `Formula: ${syntax}`);
   if (!reportId) throw fail(400, "Reload the page and try again");
+  if (/\/\s*@female\b/.test(formula)) {
+    throw fail(400, "Formula: dividing by female divides by zero for every man");
+  }
   const inputs = [...new Set(formulaInputs(formula).map(String))];
   if (fieldId && inputs.includes(String(fieldId))) {
     throw fail(400, "Formula: a field cannot use itself");
@@ -273,6 +276,20 @@ async function checkFormula(client, { reportId, fieldId = null, formula, previou
     const loop = await loopFrom(client, fieldId, formula);
     if (loop) throw fail(400, `Formula: it would go round in a loop (${loop})`);
   }
+}
+
+export const assertFormulaFits = (input, db = pool) => checkFormula(db, input);
+
+export async function formulaFieldsOf(reportId, db = pool) {
+  const { rows } = await db.query(
+    `SELECT f.id, f.name, f.unit, f.input_type, f.formula
+       FROM lab_test_catalog f
+      WHERE f.id IN (SELECT id FROM (${REPORT_FIELDS_SQL}) inner_fields)
+        AND COALESCE(f.is_active, TRUE) AND f.input_type = 'numeric'
+      ORDER BY f.name`,
+    [reportId],
+  );
+  return rows;
 }
 
 const notRequiredAnywhere = (client, fieldId) =>
@@ -487,6 +504,69 @@ export function updateField(fieldId, input, actorId, db = pool) {
       }
     }
     return { id: String(row.id) };
+  });
+}
+
+export function removeField(reportId, fieldId, { expectedUpdatedAt }, actorId, db = pool) {
+  return inTransaction(db, async (client) => {
+    const report = await lockReport(client, reportId);
+    const { rows } = await client.query(
+      `SELECT id, name, input_type, parent_test_id, is_active, updated_at
+         FROM lab_test_catalog WHERE id = $1 FOR UPDATE`,
+      [fieldId],
+    );
+    const field = rows[0];
+    if (!field) throw fail(404, "Field not found");
+    await refuseIfStale(client, field, expectedUpdatedAt, "field");
+    const { rows: inReport } = await client.query(REPORT_FIELDS_SQL, [reportId]);
+    if (!inReport.some((r) => String(r.id) === String(field.id))) {
+      throw fail(404, "That field is not in this report");
+    }
+    const users = await formulasUsing(client, field.id);
+    if (users.length) {
+      throw fail(409, `Used in the formula of ${users.join(", ")} — change that formula first`);
+    }
+    const { rows: children } = await client.query(
+      `SELECT count(*)::int AS n FROM lab_test_catalog
+        WHERE parent_test_id = $1 AND COALESCE(is_active, TRUE)`,
+      [field.id],
+    );
+    if (children[0].n) {
+      throw fail(409, `Remove the ${children[0].n} field(s) under this heading first`);
+    }
+
+    const { rowCount: unlinked } = await client.query(
+      `DELETE FROM lab_report_tests WHERE report_id = $1 AND test_id = $2`,
+      [reportId, field.id],
+    );
+    const { rows: elsewhere } = await client.query(
+      `SELECT count(*)::int AS n FROM lab_report_tests WHERE test_id = $1`,
+      [field.id],
+    );
+    const stillUsed = unlinked > 0 && elsewhere[0].n > 0;
+    if (!stillUsed) {
+      await client.query(
+        `UPDATE lab_test_catalog
+            SET is_active = FALSE, parent_test_id = NULL, edited_at = NOW(), updated_at = NOW()
+          WHERE id = $1`,
+        [field.id],
+      );
+    }
+    await audit(
+      client,
+      actorId,
+      "field",
+      field.id,
+      "remove",
+      {
+        report_id: String(reportId),
+        report: report.name,
+        is_active: field.is_active !== false,
+        parent_test_id: field.parent_test_id == null ? null : String(field.parent_test_id),
+      },
+      { report_id: String(reportId), is_active: stillUsed, kept_in_other_reports: stillUsed },
+    );
+    return { id: String(field.id), keptElsewhere: stillUsed };
   });
 }
 

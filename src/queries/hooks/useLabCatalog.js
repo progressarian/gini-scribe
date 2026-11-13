@@ -66,3 +66,14 @@ export const useMoveField = () =>
 
 export const useSaveRanges = () =>
   useCatalogWrite(({ fieldId, ...body }) => api.put(`${BASE}/fields/${fieldId}/ranges`, body));
+
+export const useFormulaFromText = () =>
+  useMutation({
+    mutationFn: async ({ reportId, ...body }) =>
+      (await api.post(`${BASE}/reports/${reportId}/formula-from-text`, body)).data,
+  });
+
+export const useRemoveField = () =>
+  useCatalogWrite(({ reportId, fieldId, ...body }) =>
+    api.delete(`${BASE}/reports/${reportId}/fields/${fieldId}`, { data: body }),
+  );

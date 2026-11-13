@@ -4634,13 +4634,13 @@ export default function GHMPage() {
                                   const dueDate = hrDate
                                     ? ""
                                     : followUpDueDate(row.appointment_date, rawTiming);
-                                  if (hrDate || hrTiming) {
+                                  if (hrDate || hrTiming || dueDate) {
                                     return (
                                       <div
                                         className="fu-cell"
                                         title={
                                           dueDate
-                                            ? `${hrTiming} after the visit on ${prettyDate(row.appointment_date)} — the prescription gives no exact date`
+                                            ? `${hrTiming || rawTiming} after the visit on ${prettyDate(row.appointment_date)} — the prescription gives no exact date`
                                             : undefined
                                         }
                                       >

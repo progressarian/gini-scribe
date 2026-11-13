@@ -4,6 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import useAuthStore from "../stores/authStore";
 import { CAPABILITIES, hasAnyCapability, hasCapability } from "../../shared/permissions.js";
 import { ageBandText, fieldIssues, valueRangeText } from "../../shared/labCatalogRules.js";
+import { formulaAsNames } from "../../shared/labFormula.js";
 import { useLabCatalogHistory, useLabCatalogTest } from "../queries/hooks/useLabCatalog";
 import "../styles/flow.css";
 import "./flow/FlowSettings.css";
@@ -15,6 +16,7 @@ import {
   FieldEditor,
   MoveButtons,
   RangesEditor,
+  RemoveFieldButton,
   ReportBar,
   SetUpResults,
 } from "./testDetail/ResultFieldsEditor";
@@ -52,22 +54,95 @@ const whenText = (at) =>
     minute: "2-digit",
   });
 
-const shown = (v) =>
-  v === null || v === undefined || v === "" ? "—" : Array.isArray(v) ? v.join(", ") : String(v);
+const TYPE_WORD = {
+  numeric: "Number",
+  text: "Text",
+  select: "Pick list",
+  group: "Heading",
+};
+
+const FIELD_WORD = {
+  name: "Name",
+  unit: "Unit",
+  no_unit: "No unit",
+  input_type: "Type",
+  decimals: "Decimals",
+  is_active: "Active",
+  formula: "Formula",
+  options: "Choices",
+};
+
+const nameOf = (names) => (id) => names?.[String(id)] || `field ${id}`;
+
+function valueWord(key, value, names) {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (key === "input_type") return TYPE_WORD[value] || value;
+  if (key === "formula") return formulaAsNames(value, nameOf(names));
+  if (Array.isArray(value)) return value.join(" / ");
+  return String(value);
+}
+
+const rangeWords = (list) =>
+  list?.length
+    ? list
+        .map(
+          (r) =>
+            `${r.gender} · ${ageBandText({
+              minAgeDays: r.min_age_days,
+              maxAgeDays: r.max_age_days,
+            })} · ${valueRangeText({ min: r.min_value, max: r.max_value, text: r.text_range })}`,
+        )
+        .join("; ")
+    : "none";
+
+function movedWords(before, after, names) {
+  const at = (list, id) => list.indexOf(id);
+  const moved = after.find((id, i) => at(before, id) > i);
+  return moved ? `Moved ${nameOf(names)(moved)} up` : "Changed the order";
+}
 
 function changeText(entry) {
-  if (entry.entity === "link") {
-    return entry.after?.report
-      ? `Linked to ${entry.after.report}`
-      : `Unlinked from ${entry.before?.report || "its report"}`;
-  }
   const before = entry.before || {};
   const after = entry.after || {};
-  const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(
-    (k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]),
+  const subject = entry.subject || "a field";
+  if (entry.entity === "link") {
+    if (entry.action === "file_only") return "Marked: results come as a file";
+    if (entry.action === "fields") return "Switched back to result fields";
+    const how = entry.action === "backfill" ? " (automatic setup)" : "";
+    return after.report
+      ? `Linked to ${after.report}${how}`
+      : `Unlinked from ${before.report || "its report"}`;
+  }
+  if (entry.entity === "report") return `Created report ${after.name || ""}`.trim();
+  if (entry.entity === "order")
+    return movedWords(before.order || [], after.order || [], entry.names);
+  if (entry.entity === "ranges") {
+    return `${subject}: ${rangeWords(before.ranges)} → ${rangeWords(after.ranges)}`;
+  }
+  if (entry.action === "create") {
+    const type = after.formula ? "Calculated" : TYPE_WORD[after.input_type] || after.input_type;
+    const unit = after.no_unit ? ", no unit" : after.unit ? `, ${after.unit}` : "";
+    const formula = after.formula ? ` = ${formulaAsNames(after.formula, nameOf(entry.names))}` : "";
+    return `Added ${after.name || subject} (${type}${unit})${formula}`;
+  }
+  if (entry.action === "remove") {
+    const kept = after.kept_in_other_reports ? " — still used in other reports" : "";
+    return `Removed ${subject} from ${before.report || "this report"}${kept}`;
+  }
+  if (entry.action === "required") {
+    return `${subject}: Required ${valueWord("", before.is_required)} → ${valueWord("", after.is_required)}`;
+  }
+  const keys = Object.keys(FIELD_WORD).filter(
+    (k) => JSON.stringify(before[k] ?? null) !== JSON.stringify(after[k] ?? null),
   );
-  if (!keys.length) return entry.action;
-  return keys.map((k) => `${k}: ${shown(before[k])} → ${shown(after[k])}`).join("; ");
+  if (!keys.length) return `${subject}: ${entry.action}`;
+  return `${subject}: ${keys
+    .map(
+      (k) =>
+        `${FIELD_WORD[k]} ${valueWord(k, before[k], entry.names)} → ${valueWord(k, after[k], entry.names)}`,
+    )
+    .join("; ")}`;
 }
 
 function RangeList({ ranges }) {
@@ -76,14 +151,14 @@ function RangeList({ ranges }) {
   return (
     <ul className="tdet__ranges">
       {live.map((r) => (
-        <li key={r.id}>
-          <span className="tdet__sex">{r.gender}</span> · {ageBandText(r)} ·{" "}
-          <strong>{valueRangeText(r)}</strong>
+        <li key={r.id} className="tdet__range">
+          <span className="tdet__sex">{r.gender}</span>
+          <span className="tdet__band">{ageBandText(r)}</span>
+          <strong className="tdet__value">{valueRangeText(r)}</strong>
           {r.minCritical != null || r.maxCritical != null ? (
-            <span className="tdet__muted">
-              {" "}
-              (critical{r.minCritical != null ? ` ≤ ${r.minCritical}` : ""}
-              {r.maxCritical != null ? ` ≥ ${r.maxCritical}` : ""})
+            <span className="tdet__critical">
+              critical{r.minCritical != null ? ` ≤ ${r.minCritical}` : ""}
+              {r.maxCritical != null ? ` ≥ ${r.maxCritical}` : ""}
             </span>
           ) : null}
         </li>
@@ -113,134 +188,138 @@ function FieldsTable({ report, canEdit }) {
   const toggle = (key) => setEditing((now) => (now === key ? null : key));
   const top = report.fields.filter((f) => f.depth === 0).map((f) => f.id);
   const columns = canEdit ? 9 : 8;
+  const captionId = useId();
   return (
-    <div className="fset__scroll">
-      <table className="flow-table tdet__table">
-        <caption className="tdet__caption">
-          Fields of {report.name}, in the order the lab enters and the report prints them
-        </caption>
-        <thead>
-          <tr>
-            <th scope="col">#</th>
-            <th scope="col">Field</th>
-            <th scope="col">Unit</th>
-            <th scope="col">Type</th>
-            <th scope="col">Decimals</th>
-            <th scope="col">Reference ranges</th>
-            <th scope="col">Formula</th>
-            <th scope="col">Required</th>
-            {canEdit ? <th scope="col">Actions</th> : null}
-          </tr>
-        </thead>
-        <tbody>
-          {report.fields.map((f, i) => {
-            const issues = fieldIssues(f);
-            return (
-              <Fragment key={f.id}>
-                <tr className={f.active ? "" : "tcat__retired"}>
-                  <td data-label="#" className="tdet__num">
-                    {i + 1}
-                  </td>
-                  <td data-label="Field">
-                    <div className="tdet__name" style={{ paddingLeft: f.depth * 16 }}>
-                      <strong>{f.name}</strong>
-                      {f.active ? null : <span className="bill-tree__badge">Off</span>}
-                    </div>
-                    {f.alsoIn.length ? (
-                      <div className="tdet__note">Also in: {f.alsoIn.join(", ")}</div>
-                    ) : null}
-                    {issues.map((issue) => (
-                      <div key={issue.code} className="tdet__issue">
-                        Needs attention: {issue.text}
+    <>
+      <p className="tdet__caption" id={captionId}>
+        Fields of {report.name}, in the order the lab enters and the report prints them
+      </p>
+      <div className="fset__scroll">
+        <table className="flow-table tdet__table" aria-labelledby={captionId}>
+          <thead>
+            <tr>
+              <th scope="col">#</th>
+              <th scope="col">Field</th>
+              <th scope="col">Unit</th>
+              <th scope="col">Type</th>
+              <th scope="col">Decimals</th>
+              <th scope="col">Reference ranges</th>
+              <th scope="col">Formula</th>
+              <th scope="col">Required</th>
+              {canEdit ? <th scope="col">Actions</th> : null}
+            </tr>
+          </thead>
+          <tbody>
+            {report.fields.map((f, i) => {
+              const issues = fieldIssues(f);
+              return (
+                <Fragment key={f.id}>
+                  <tr className={f.active ? "" : "tcat__retired"}>
+                    <td data-label="#" className="tdet__num">
+                      {i + 1}
+                    </td>
+                    <td data-label="Field">
+                      <div className="tdet__name" style={{ paddingLeft: f.depth * 16 }}>
+                        <strong>{f.name}</strong>
+                        {f.active ? null : <span className="bill-tree__badge">Off</span>}
                       </div>
-                    ))}
-                  </td>
-                  <td data-label="Unit">
-                    {f.type === "group" ? (
-                      <span className="tdet__muted">—</span>
-                    ) : f.unit ? (
-                      f.unit
-                    ) : f.noUnit ? (
-                      <span className="tdet__muted">No unit</span>
-                    ) : (
-                      <span className="tdet__muted">Not set</span>
-                    )}
-                  </td>
-                  <td data-label="Type">
-                    {TYPE_LABEL[f.type] || f.type}
-                    {f.type === "select" && f.options.length ? (
-                      <div className="tdet__muted">{f.options.join(" / ")}</div>
-                    ) : null}
-                  </td>
-                  <td data-label="Decimals" className="tdet__num">
-                    {["numeric", "calculated"].includes(f.type) ? f.decimals : "—"}
-                  </td>
-                  <td data-label="Reference ranges">
-                    {f.type === "group" ? (
-                      <span className="tdet__muted">—</span>
-                    ) : (
-                      <RangeList ranges={f.ranges} />
-                    )}
-                  </td>
-                  <td data-label="Formula">
-                    <FormulaCell formula={f.formula} />
-                  </td>
-                  <td data-label="Required">
-                    {f.required === null ? "—" : f.required ? "Yes" : "No"}
-                  </td>
-                  {canEdit ? (
-                    <td data-label="Actions" className="tdet__rowactions">
-                      {f.depth === 0 ? (
-                        <MoveButtons
-                          report={report}
-                          field={f}
-                          first={top[0] === f.id}
-                          last={top[top.length - 1] === f.id}
-                        />
+                      {f.alsoIn.length ? (
+                        <div className="tdet__note">Also in: {f.alsoIn.join(", ")}</div>
                       ) : null}
-                      <button
-                        type="button"
-                        className="flow-btn flow-btn-ghost flow-btn-mini"
-                        aria-expanded={editing === `field:${f.id}`}
-                        aria-label={`Edit ${f.name}`}
-                        onClick={() => toggle(`field:${f.id}`)}
-                      >
-                        Edit
-                      </button>
-                      {f.type === "group" ? null : (
+                      {issues.map((issue) => (
+                        <div key={issue.code} className="tdet__issue">
+                          Needs attention: {issue.text}
+                        </div>
+                      ))}
+                    </td>
+                    <td data-label="Unit">
+                      {["group", "text", "select"].includes(f.type) ? (
+                        <span className="tdet__muted">—</span>
+                      ) : f.unit ? (
+                        f.unit
+                      ) : f.noUnit ? (
+                        <span className="tdet__muted">No unit</span>
+                      ) : (
+                        <span className="tdet__muted">Not set</span>
+                      )}
+                    </td>
+                    <td data-label="Type">
+                      {TYPE_LABEL[f.type] || f.type}
+                      {f.type === "select" && f.options.length ? (
+                        <div className="tdet__muted">{f.options.join(" / ")}</div>
+                      ) : null}
+                    </td>
+                    <td data-label="Decimals" className="tdet__num">
+                      {["numeric", "calculated"].includes(f.type) ? f.decimals : "—"}
+                    </td>
+                    <td data-label="Reference ranges">
+                      {f.type === "group" ? (
+                        <span className="tdet__muted">—</span>
+                      ) : (
+                        <RangeList ranges={f.ranges} />
+                      )}
+                    </td>
+                    <td data-label="Formula">
+                      <FormulaCell formula={f.formula} />
+                    </td>
+                    <td data-label="Required">
+                      {f.required === null ? "—" : f.required ? "Yes" : "No"}
+                    </td>
+                    {canEdit ? (
+                      <td data-label="Actions" className="tdet__rowactions">
+                        {f.depth === 0 ? (
+                          <MoveButtons
+                            report={report}
+                            field={f}
+                            first={top[0] === f.id}
+                            last={top[top.length - 1] === f.id}
+                          />
+                        ) : null}
                         <button
                           type="button"
                           className="flow-btn flow-btn-ghost flow-btn-mini"
-                          aria-expanded={editing === `ranges:${f.id}`}
-                          aria-label={`Edit ranges of ${f.name}`}
-                          onClick={() => toggle(`ranges:${f.id}`)}
+                          aria-expanded={editing === `field:${f.id}`}
+                          aria-label={`Edit ${f.name}`}
+                          onClick={() => toggle(`field:${f.id}`)}
                         >
-                          Ranges
+                          Edit
                         </button>
-                      )}
-                    </td>
+                        {f.type === "group" || f.type === "select" ? null : (
+                          <button
+                            type="button"
+                            className="flow-btn flow-btn-ghost flow-btn-mini"
+                            aria-expanded={editing === `ranges:${f.id}`}
+                            aria-label={`Edit ranges of ${f.name}`}
+                            onClick={() => toggle(`ranges:${f.id}`)}
+                          >
+                            Ranges
+                          </button>
+                        )}
+                        <RemoveFieldButton report={report} field={f} />
+                      </td>
+                    ) : null}
+                  </tr>
+                  {editing === `field:${f.id}` ? (
+                    <tr className="tdet__editrow">
+                      <td colSpan={columns}>
+                        <FieldEditor report={report} field={f} onDone={() => setEditing(null)} />
+                      </td>
+                    </tr>
                   ) : null}
-                </tr>
-                {editing === `field:${f.id}` ? (
-                  <tr className="tdet__editrow">
-                    <td colSpan={columns}>
-                      <FieldEditor report={report} field={f} onDone={() => setEditing(null)} />
-                    </td>
-                  </tr>
-                ) : null}
-                {editing === `ranges:${f.id}` ? (
-                  <tr className="tdet__editrow">
-                    <td colSpan={columns}>
-                      <RangesEditor field={f} onDone={() => setEditing(null)} />
-                    </td>
-                  </tr>
-                ) : null}
-              </Fragment>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+                  {editing === `ranges:${f.id}` ? (
+                    <tr className="tdet__editrow">
+                      <td colSpan={columns}>
+                        <RangesEditor field={f} onDone={() => setEditing(null)} />
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 

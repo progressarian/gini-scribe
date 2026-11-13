@@ -1,4 +1,6 @@
 import { useId, useState } from "react";
+import { requestErrorOf } from "../../components/billing/format.js";
+import { useFormulaFromText } from "../../queries/hooks/useLabCatalog.js";
 import {
   PATIENT_VALUES,
   evaluateFormula,
@@ -9,15 +11,58 @@ import {
 } from "../../../shared/labFormula.js";
 
 const OPERATORS = [
-  { token: "+", label: "+", name: "plus" },
-  { token: "-", label: "−", name: "minus" },
-  { token: "*", label: "×", name: "times" },
-  { token: "/", label: "÷", name: "divided by" },
-  { token: "(", label: "(", name: "open bracket" },
-  { token: ")", label: ")", name: "close bracket" },
-  { token: "^", label: "^", name: "to the power of" },
-  { token: ",", label: ",", name: "comma" },
+  { token: "+", label: "+", name: "plus", needs: "sign" },
+  { token: "-", label: "−", name: "minus", needs: "sign" },
+  { token: "*", label: "×", name: "times", needs: "sign" },
+  { token: "/", label: "÷", name: "divided by", needs: "sign" },
+  { token: "(", label: "(", name: "open bracket", needs: "value" },
+  { token: ")", label: ")", name: "close bracket", needs: "close" },
+  { token: "^", label: "^", name: "to the power of", needs: "sign" },
+  { token: ",", label: ",", name: "comma", needs: "comma" },
 ];
+
+const SIGNS = new Set(["+", "-", "*", "/", "^"]);
+const FUNCTION_NAMES = new Set(["min", "max"]);
+
+export function nextAllowed(tokens) {
+  const open = [];
+  let wantValue = true;
+  tokens.forEach((t, i) => {
+    if (FUNCTION_NAMES.has(t)) wantValue = true;
+    else if (t === "(") {
+      open.push({ fn: FUNCTION_NAMES.has(tokens[i - 1]), commas: 0 });
+      wantValue = true;
+    } else if (t === ")") {
+      open.pop();
+      wantValue = false;
+    } else if (t === ",") {
+      if (open.length) open[open.length - 1].commas += 1;
+      wantValue = true;
+    } else if (SIGNS.has(t)) wantValue = true;
+    else wantValue = false;
+  });
+  const inner = open[open.length - 1];
+  return {
+    value: wantValue,
+    sign: !wantValue,
+    close: !wantValue && Boolean(inner) && (!inner.fn || inner.commas === 1),
+    comma: !wantValue && Boolean(inner?.fn) && inner.commas === 0,
+    openBrackets: open.length,
+  };
+}
+
+const nextHint = (allowed, tokens) => {
+  const step = !tokens.length
+    ? "Start with a field, a number, a patient value or a bracket."
+    : allowed.value
+      ? "Next: a field, a number, a patient value or a bracket."
+      : `Next: a sign${allowed.close ? ", or ) to close the bracket" : ""}${
+          allowed.comma ? ", or a comma before the second value" : ""
+        }.`;
+  return step;
+};
+
+const NUMBER = /^-?\d+(\.\d+)?$/;
 
 const FUNCTIONS = [
   { tokens: ["min", "("], label: "min(", name: "smaller of two values" },
@@ -78,9 +123,15 @@ export default function FormulaBuilder({
   const fields = nameLookup(report, extraInputs);
   const loopsBack = dependentsOf(report, selfId);
   const choices = report.fields.filter((f) => formulaUsable(f) && !loopsBack.has(f.id));
-  const [pick, setPick] = useState(choices[0]?.id || "");
   const [number, setNumber] = useState("");
   const [samples, setSamples] = useState({});
+  const [words, setWords] = useState("");
+  const [fromAi, setFromAi] = useState(null);
+  const ai = useFormulaFromText();
+  const allowed = nextAllowed(tokens);
+  const [patientOn, setPatientOn] = useState(() => tokens.some((t) => t.startsWith("@")));
+  const showPatient = patientOn || tokens.some((t) => t.startsWith("@"));
+  const afterDivide = tokens[tokens.length - 1] === "/";
   const problem = formulaSyntaxError(value);
   const inputs = [...new Set(formulaInputs(value).map(String))];
   const patientUsed = PATIENT_VALUES.filter((p) => tokens.includes(p.token));
@@ -89,11 +140,25 @@ export default function FormulaBuilder({
   );
   const result = problem ? null : evaluateFormula(value, samples, decimals ?? 2, patientSample);
 
-  const put = (next) => onChange(next.join(" "));
+  const put = (next) => {
+    setFromAi(null);
+    onChange(next.join(" "));
+  };
+  const askAi = () =>
+    ai.mutate(
+      { reportId: report.id, text: words, fieldId: selfId },
+      {
+        onSuccess: (r) => {
+          onChange(r.formula);
+          setFromAi(words.trim());
+          setSamples({});
+        },
+      },
+    );
   const append = (...more) => put([...tokens, ...more]);
   const addNumber = () => {
     const n = number.trim();
-    if (!/^\d+(\.\d+)?$/.test(n)) return;
+    if (!NUMBER.test(n) || !allowed.value) return;
     append(n);
     setNumber("");
   };
@@ -101,6 +166,45 @@ export default function FormulaBuilder({
   return (
     <fieldset className="tdet__formula-builder">
       <legend className="tdet__optitle">Formula</legend>
+      <div className="tdet__words">
+        <label htmlFor={`${id}-words`} className="tdet__label">
+          Write it in words (AI fills the formula below for you to check)
+        </label>
+        <div className="tdet__wordsrow">
+          <input
+            id={`${id}-words`}
+            className="jb-assign"
+            maxLength={500}
+            value={words}
+            placeholder="e.g. Neutrophil % times TLC divided by 100000"
+            onChange={(e) => setWords(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (words.trim() && !ai.isPending) askAi();
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="flow-btn flow-btn-ghost flow-btn-mini"
+            disabled={!words.trim() || ai.isPending}
+            onClick={askAi}
+          >
+            {ai.isPending ? "Reading…" : "Make formula"}
+          </button>
+        </div>
+        {ai.isError ? (
+          <p className="tdet__issue" role="alert">
+            {requestErrorOf(ai.error, "Could not make a formula from that")}
+          </p>
+        ) : null}
+        {fromAi ? (
+          <p className="tdet__note" role="status">
+            Made by AI from “{fromAi}”. Check “Reads as” and try sample values before saving.
+          </p>
+        ) : null}
+      </div>
       <div className="tdet__formula-chips" aria-live="polite" aria-label="Formula so far">
         {tokens.length ? (
           tokens.map((t, i) =>
@@ -125,36 +229,33 @@ export default function FormulaBuilder({
         <select
           id={`${id}-field`}
           className="jb-assign"
-          value={pick}
-          onChange={(e) => setPick(e.target.value)}
+          value=""
+          disabled={!choices.length || !allowed.value}
+          onChange={(e) => e.target.value && append(`#${e.target.value}`)}
         >
+          <option value="">Pick a field to add…</option>
           {choices.map((f) => (
             <option key={f.id} value={f.id}>
               {f.name}
             </option>
           ))}
         </select>
-        <button
-          type="button"
-          className="flow-btn flow-btn-ghost flow-btn-mini"
-          disabled={!pick}
-          onClick={() => append(`#${pick}`)}
-        >
-          Insert field
-        </button>
-        <span className="tdet__ops" role="group" aria-label="Patient values">
-          {PATIENT_VALUES.map((p) => (
-            <button
-              key={p.token}
-              type="button"
-              className="flow-btn flow-btn-ghost flow-btn-mini"
-              aria-label={`Insert the patient's ${p.label}`}
-              onClick={() => append(p.token)}
-            >
-              {SHOWN[p.token]}
-            </button>
-          ))}
-        </span>
+        {showPatient ? (
+          <span className="tdet__ops" role="group" aria-label="Patient values">
+            {PATIENT_VALUES.map((p) => (
+              <button
+                key={p.token}
+                type="button"
+                className="flow-btn flow-btn-ghost flow-btn-mini"
+                aria-label={`Insert the patient's ${p.label}`}
+                disabled={!allowed.value || (afterDivide && p.token === "@female")}
+                onClick={() => append(p.token)}
+              >
+                {SHOWN[p.token]}
+              </button>
+            ))}
+          </span>
+        ) : null}
         <span className="tdet__ops" role="group" aria-label="Functions">
           {FUNCTIONS.map((f) => (
             <button
@@ -162,6 +263,7 @@ export default function FormulaBuilder({
               type="button"
               className="flow-btn flow-btn-ghost flow-btn-mini"
               aria-label={`Insert ${f.name}`}
+              disabled={!allowed.value}
               onClick={() => append(...f.tokens)}
             >
               {f.label}
@@ -175,6 +277,7 @@ export default function FormulaBuilder({
               type="button"
               className="flow-btn flow-btn-ghost flow-btn-mini tdet__icon"
               aria-label={`Insert ${o.name}`}
+              disabled={!allowed[o.needs]}
               onClick={() => append(o.token)}
             >
               {o.label}
@@ -189,7 +292,8 @@ export default function FormulaBuilder({
           className="jb-assign tdet__cellinput"
           inputMode="decimal"
           value={number}
-          placeholder="e.g. 2.14"
+          placeholder="e.g. 2.14 or -1.2"
+          disabled={!allowed.value}
           onChange={(e) => setNumber(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -198,7 +302,12 @@ export default function FormulaBuilder({
             }
           }}
         />
-        <button type="button" className="flow-btn flow-btn-ghost flow-btn-mini" onClick={addNumber}>
+        <button
+          type="button"
+          className="flow-btn flow-btn-ghost flow-btn-mini"
+          disabled={!allowed.value || !NUMBER.test(number.trim())}
+          onClick={addNumber}
+        >
           Insert number
         </button>
         <button
@@ -218,12 +327,33 @@ export default function FormulaBuilder({
           Clear
         </button>
       </div>
+      <label className="tdet__check">
+        <input
+          type="checkbox"
+          checked={showPatient}
+          disabled={tokens.some((t) => t.startsWith("@"))}
+          onChange={(e) => setPatientOn(e.target.checked)}
+        />
+        Uses the patient&apos;s age, sex or weight (only for equations like eGFR or creatinine
+        clearance)
+      </label>
+      <p className="tdet__muted">
+        {nextHint(allowed, tokens)}
+        {allowed.openBrackets ? (
+          <strong className="tdet__openbrackets">
+            {" "}
+            {allowed.openBrackets} bracket{allowed.openBrackets === 1 ? "" : "s"} still open — close
+            with )
+          </strong>
+        ) : null}
+      </p>
       {!choices.length ? (
         <p className="tdet__issue">This report has no other number fields to calculate from.</p>
       ) : null}
       {problem && (touched || tokens.length) ? (
-        <p className="tdet__issue" role="status">
-          {problem}.
+        <p className="tdet__issue tdet__formula-problem" role="status">
+          {touched ? "" : "Not finished yet: "}
+          {touched ? problem : problem.charAt(0).toLowerCase() + problem.slice(1)}.
         </p>
       ) : null}
       {!problem ? (

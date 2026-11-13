@@ -22,6 +22,7 @@ import {
   useMoveField,
   useResultsAsFile,
   useSaveRanges,
+  useRemoveField,
   useUnlinkReport,
   useUpdateField,
 } from "../../queries/hooks/useLabCatalog";
@@ -259,6 +260,56 @@ export function ReportBar({ test, canEdit }) {
         onCancel={() => setConfirming(false)}
       />
     </div>
+  );
+}
+
+export function RemoveFieldButton({ report, field }) {
+  const [confirming, setConfirming] = useState(false);
+  const remove = useRemoveField();
+  const shared = field.alsoIn?.length > 0;
+  const doRemove = () =>
+    remove.mutate(
+      { reportId: report.id, fieldId: field.id, expectedUpdatedAt: field.updatedAt },
+      {
+        onSuccess: () => {
+          setConfirming(false);
+          toast(`${field.name} removed from ${report.name}`, "success");
+        },
+      },
+    );
+  return (
+    <>
+      <button
+        type="button"
+        className="flow-btn flow-btn-ghost flow-btn-mini"
+        aria-label={`Remove ${field.name}`}
+        onClick={() => {
+          remove.reset();
+          setConfirming(true);
+        }}
+      >
+        Remove
+      </button>
+      <ConfirmModal
+        open={confirming}
+        title={`Remove ${field.name} from ${report.name}?`}
+        message={
+          <>
+            The lab will no longer see <strong>{field.name}</strong> when entering {report.name}{" "}
+            results.{" "}
+            {shared
+              ? `It stays in ${field.alsoIn.join(", ")}.`
+              : "It is switched off, and the History tab keeps a record."}{" "}
+            Results already saved do not change.
+          </>
+        }
+        confirmLabel="Remove field"
+        busy={remove.isPending}
+        error={remove.isError ? requestErrorOf(remove.error, "Could not remove the field") : null}
+        onConfirm={doRemove}
+        onCancel={() => setConfirming(false)}
+      />
+    </>
   );
 }
 
@@ -895,7 +946,7 @@ export function RangesEditor({ field, onDone }) {
                 return (
                   <Fragment key={r.key}>
                     <tr className={issues.length ? "tdet__badrow" : ""}>
-                      <td>
+                      <td data-label="Sex">
                         <select
                           className="jb-assign tdet__cellinput"
                           value={r.gender}
@@ -913,35 +964,45 @@ export function RangesEditor({ field, onDone }) {
                         ["from", "age from"],
                         ["to", "age to"],
                       ].map(([part, label]) => (
-                        <td key={part} className="tdet__age">
-                          {cell(r, i, `${part}Amount`, label, {
-                            inputMode: "decimal",
-                            placeholder: part === "from" ? "0" : "any",
-                          })}
-                          <select
-                            className="jb-assign tdet__cellinput"
-                            value={r[`${part}Unit`]}
-                            aria-label={`Range ${i + 1} ${label} unit`}
-                            onChange={(e) => patch(r.key, { [`${part}Unit`]: e.target.value })}
-                          >
-                            {AGE_UNITS.map((u) => (
-                              <option key={u.value} value={u.value}>
-                                {u.label}
-                              </option>
-                            ))}
-                          </select>
+                        <td
+                          key={part}
+                          className="tdet__age"
+                          data-label={part === "from" ? "Age from" : "Age to"}
+                        >
+                          <div className="tdet__agepair">
+                            {cell(r, i, `${part}Amount`, label, {
+                              inputMode: "decimal",
+                              placeholder: part === "from" ? "0" : "any",
+                            })}
+                            <select
+                              className="jb-assign tdet__cellinput"
+                              value={r[`${part}Unit`]}
+                              aria-label={`Range ${i + 1} ${label} unit`}
+                              onChange={(e) => patch(r.key, { [`${part}Unit`]: e.target.value })}
+                            >
+                              {AGE_UNITS.map((u) => (
+                                <option key={u.value} value={u.value}>
+                                  {u.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
                         </td>
                       ))}
-                      <td>{cell(r, i, "min", "low", { inputMode: "decimal" })}</td>
-                      <td>{cell(r, i, "max", "high", { inputMode: "decimal" })}</td>
-                      <td>{cell(r, i, "minCritical", "critical low", { inputMode: "decimal" })}</td>
-                      <td>
+                      <td data-label="Low">{cell(r, i, "min", "low", { inputMode: "decimal" })}</td>
+                      <td data-label="High">
+                        {cell(r, i, "max", "high", { inputMode: "decimal" })}
+                      </td>
+                      <td data-label="Critical low">
+                        {cell(r, i, "minCritical", "critical low", { inputMode: "decimal" })}
+                      </td>
+                      <td data-label="Critical high">
                         {cell(r, i, "maxCritical", "critical high", { inputMode: "decimal" })}
                       </td>
-                      <td>
+                      <td data-label="Prints as">
                         {cell(r, i, "text", "prints as", { maxLength: 120, placeholder: "auto" })}
                       </td>
-                      <td>
+                      <td data-label="">
                         <button
                           type="button"
                           className="flow-btn flow-btn-ghost flow-btn-mini tdet__icon"

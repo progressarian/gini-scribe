@@ -157,7 +157,6 @@ test.describe.serial("LC07 formulas", () => {
     await add.getByLabel("Type").selectOption("calculated");
     await add.getByLabel("Unit", { exact: true }).fill("mg/dl");
     await add.getByLabel("Field", { exact: true }).selectOption({ label: "Triglycerides" });
-    await add.getByRole("button", { name: "Insert field" }).click();
     await add.getByRole("button", { name: "Insert divided by" }).click();
     await add.getByRole("button", { name: "Add field" }).click();
     await expect(add.getByText("The formula ends too early.")).toBeVisible();

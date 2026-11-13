@@ -5,21 +5,25 @@ import { handleError } from "../utils/errorHandler.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
 import {
   labAddFieldSchema,
+  labFormulaFromTextSchema,
   labCreateReportSchema,
   labLinkReportSchema,
   labMoveFieldSchema,
+  labRemoveFieldSchema,
   labRangesSchema,
   labReportSearchSchema,
   labResultsAsFileSchema,
   labUnlinkReportSchema,
   labUpdateFieldSchema,
 } from "../schemas/index.js";
+import { formulaFromText } from "../services/labCatalog/formulaFromText.js";
 import { readHistory, readTest } from "../services/labCatalog/read.js";
 import {
   addField,
   createAndLinkReport,
   linkReport,
   moveField,
+  removeField,
   replaceRanges,
   searchReports,
   setResultsAsFile,
@@ -103,11 +107,27 @@ router.post(
   route("Lab catalogue add field", (req) => addField(req.params.reportId, req.body, actor(req))),
 );
 
+router.post(
+  `/lab-catalog/reports/:reportId${ID}/formula-from-text`,
+  gate,
+  validate(labFormulaFromTextSchema),
+  route("Lab catalogue formula from text", (req) => formulaFromText(req.params.reportId, req.body)),
+);
+
 router.put(
   `/lab-catalog/reports/:reportId${ID}/order`,
   gate,
   validate(labMoveFieldSchema),
   route("Lab catalogue field order", (req) => moveField(req.params.reportId, req.body, actor(req))),
+);
+
+router.delete(
+  `/lab-catalog/reports/:reportId${ID}/fields/:fieldId${ID}`,
+  gate,
+  validate(labRemoveFieldSchema),
+  route("Lab catalogue remove field", (req) =>
+    removeField(req.params.reportId, req.params.fieldId, req.body, actor(req)),
+  ),
 );
 
 router.patch(

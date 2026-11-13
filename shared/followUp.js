@@ -75,10 +75,17 @@ export function intervalEndDate(fromDate, timing) {
   return d.toISOString().slice(0, 10);
 }
 
+const LEADING_INTERVAL = /^(?:after|in)?\s*(\d{1,2}\s*(?:day|week|month|year)s?)\b/i;
+
+const leadingInterval = (text) =>
+  String(text ?? "")
+    .trim()
+    .match(LEADING_INTERVAL)?.[1] ?? "";
+
 export function followUpDueDate(fromDate, timing) {
   const from = clean(fromDate);
   if (!from) return "";
-  const end = intervalEndDate(from, timing);
+  const end = intervalEndDate(from, timing) || intervalEndDate(from, leadingInterval(timing));
   return end ? skipSunday(end) : weekdayFollowUpDate(from, timing);
 }
 

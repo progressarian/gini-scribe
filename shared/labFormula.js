@@ -176,14 +176,14 @@ export function flagFor(
   value,
   { minValue = null, maxValue = null, minCritical = null, maxCritical = null } = {},
 ) {
-  const n =
+  const typed =
     typeof value === "number"
-      ? value
-      : Number(
-          String(value ?? "")
-            .replace(/^[<>]=?/, "")
-            .trim(),
-        );
+      ? null
+      : String(value ?? "")
+          .replace(/^[<>]=?/, "")
+          .trim();
+  if (typed === "") return { flag: null, critical: false };
+  const n = typed === null ? value : Number(typed);
   if (!Number.isFinite(n)) return { flag: null, critical: false };
   const min = minValue === null ? null : Number(minValue);
   const max = maxValue === null ? null : Number(maxValue);
@@ -231,3 +231,10 @@ export function formulaSyntaxError(formula) {
   if (!formulaInputs(text).length) return "Use at least one field";
   return null;
 }
+
+export const LAB_NUMBER = /^(?:[<>]=?\s*)?-?\d+(?:\.\d+)?$/;
+
+export const notANumber = (value) => {
+  const raw = String(value ?? "").trim();
+  return raw !== "" && !LAB_NUMBER.test(raw);
+};

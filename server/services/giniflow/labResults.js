@@ -15,6 +15,7 @@ import {
   formulaPatient,
   rangeText,
   flagFor,
+  notANumber,
 } from "../../../shared/labFormula.js";
 import { assertNotHeld } from "./cancelHold.js";
 
@@ -104,7 +105,7 @@ export async function suggestedRows(orderId, db = pool) {
   const machines = await getMachines(db);
   return groups.map((group) => {
     const presets = machineForTest(machines, group.test)?.values || [];
-    if (!presets.length) return group;
+    if (!presets.length || group.asFile) return group;
     const taken = new Set([flattenName(group.test), ...presets.map(flattenName)]);
     return {
       test: group.test,
@@ -131,14 +132,30 @@ async function suggestionsForTests(tests, db = pool, patientId = null) {
 
   const patient = patientId ? await patientFor(patientId, db) : {};
   const fromCatalog = await catalogRowsFor(tests, patient, db);
-  const missing = tests.filter((t) => !fromCatalog.get(t)?.length);
+  const asFile = await fileOnlyTests(tests, db);
+  const missing = tests.filter((t) => !fromCatalog.get(t)?.length && !asFile.has(t));
   const guessed = missing.length ? await guessedRowsForTests(missing, db) : [];
   const byGuess = new Map(guessed.map((g) => [g.test, g.params]));
 
-  return tests.map((test) => ({
-    test,
-    params: fromCatalog.get(test)?.length ? fromCatalog.get(test) : byGuess.get(test) || [],
-  }));
+  return tests.map((test) =>
+    asFile.has(test)
+      ? { test, asFile: true, params: [] }
+      : {
+          test,
+          params: fromCatalog.get(test)?.length ? fromCatalog.get(test) : byGuess.get(test) || [],
+        },
+  );
+}
+
+async function fileOnlyTests(tests, db = pool) {
+  const { rows } = await db.query(
+    `SELECT ordered.name
+       FROM unnest($1::text[]) AS ordered(name)
+       JOIN giniflow_test_catalog c ON lower(c.test_name) = lower(ordered.name)
+      WHERE c.results_as_file AND c.is_active`,
+    [tests],
+  );
+  return new Set(rows.map((r) => r.name));
 }
 
 async function guessedRowsForTests(tests, db = pool) {
@@ -309,6 +326,14 @@ async function applyCatalog(entries, patientId, db, onDate = null) {
           flag: null,
           isCritical: false,
         };
+      }
+      if (
+        !test.formula &&
+        test.inputType === "numeric" &&
+        e.value === null &&
+        notANumber(e.valueText)
+      ) {
+        throw bad(`${test.name}: enter a number, e.g. 12.5 or <0.1`, 400);
       }
       const value = test.formula ? computed[test.id] : e.value;
       if (test.formula && value === null) return null;

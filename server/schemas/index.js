@@ -1923,6 +1923,13 @@ export const labMoveFieldSchema = z.object({
   direction: z.enum(["up", "down"]),
 });
 
+export const labRemoveFieldSchema = z.object({ expectedUpdatedAt: labStamp });
+
+export const labFormulaFromTextSchema = z.object({
+  text: z.string().trim().min(1, "Write the formula in words first").max(500),
+  fieldId: labReportId.nullable().optional(),
+});
+
 export const labReportSearchSchema = z.object({ q: z.string().trim().max(80).optional() });
 
 const labLimit = z.union([z.number(), z.string().trim().max(20), z.null()]).optional();

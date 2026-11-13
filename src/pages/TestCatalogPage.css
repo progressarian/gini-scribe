@@ -228,3 +228,8 @@
   box-shadow: 0 0 0 3px var(--ui-ring);
   border-radius: 4px;
 }
+.fset.bill-ui .tcat__results {
+  width: auto;
+  height: 32px;
+  font-size: 12.5px;
+}

@@ -195,8 +195,11 @@ test.describe.serial("LC09 patient values in formulas (eGFR)", () => {
     await add.getByLabel("Type").selectOption("calculated");
     await add.getByLabel("No unit").check();
     await add.getByLabel("Field", { exact: true }).selectOption({ label: "Creatinine, Serum" });
-    await add.getByRole("button", { name: "Insert field" }).click();
     await add.getByRole("button", { name: "Insert times" }).click();
+    await expect(add.getByRole("button", { name: "Insert the patient's age (years)" })).toHaveCount(
+      0,
+    );
+    await add.getByLabel(/Uses the patient's age, sex or weight/).check();
     await add.getByRole("button", { name: "Insert the patient's age (years)" }).click();
     await expect(add.getByText("Reads as:")).toContainText("Creatinine, Serum × age");
     await add.getByLabel("Patient age (years)").fill("50");
