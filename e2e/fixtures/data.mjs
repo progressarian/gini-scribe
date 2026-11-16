@@ -21,6 +21,14 @@ export const USERS = {
   },
   lab_admin: { id: 9009, name: "E2E Lab Admin", short_name: "LabAdmin", role: "lab_admin" },
   auditor: { id: 9010, name: "E2E Auditor", short_name: "Auditor", role: "auditor" },
+  pharmacy_admin: {
+    id: 9011,
+    name: "E2E Pharmacy Admin",
+    short_name: "PharmAdmin",
+    role: "pharmacy_admin",
+  },
+  pharmacy: { id: 9012, name: "E2E Pharmacist", short_name: "Pharmacist", role: "pharmacy" },
+  nurse: { id: 9013, name: "E2E Nurse", short_name: "Nurse", role: "nurse" },
 };
 
 export const CONSULTANTS = {

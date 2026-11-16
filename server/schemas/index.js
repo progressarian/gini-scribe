@@ -1761,6 +1761,7 @@ export const patientAppUnlinkSchema = z.object({
 export * from "./billing.js";
 export * from "./billingReports.js";
 export * from "./pharmacyStock.js";
+export * from "./pharmacyVendors.js";
 
 const cancelTargetSchema = z.strictObject({
   orderId: z.string().trim().max(64).optional(),

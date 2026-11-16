@@ -120,6 +120,13 @@ const NAV_ITEMS = [
     show: () => true,
   },
   {
+    path: "/pharmacy/vendors",
+    group: "pharmacy",
+    label: "🏭 Vendors",
+    cap: C["/pharmacy/vendors"],
+    show: () => true,
+  },
+  {
     path: "/dose-change-requests",
     group: "pharmacy",
     label: "⚕️ Dose Reviews",

@@ -86,7 +86,7 @@ const PUBLIC_PATTERNS = [
 
 const DOCTOR_ONLY_PREFIXES = [
   "/api/lab-catalog",
-  "/api/pharmacy/stock",
+  "/api/pharmacy",
   "/api/active-visits",
   "/api/consultations",
   "/api/clinical",
@@ -195,6 +195,27 @@ const ROUTE_CAPABILITIES = [
   // Pharmacy counter worklist (docs/medicines-management/).
   ["/api/pharmacy", CAP.MED_COLLECTION],
   ["/api/pharmacy/stock", CAP.PHARMACY_STOCK_VIEW],
+  ["/api/pharmacy/vendors", [CAP.PHARMACY_MASTER, CAP.PHARMACY_PURCHASE]],
+  [
+    "/api/pharmacy/medicines",
+    [CAP.PHARMACY_MASTER, CAP.PHARMACY_PURCHASE, CAP.PHARMACY_BILL, CAP.PHARMACY_INDENT],
+  ],
+  ["/api/pharmacy/locations", [CAP.PHARMACY_MASTER, CAP.PHARMACY_DEPT_MANAGE, CAP.PHARMACY_INDENT]],
+  ["/api/pharmacy/settings", CAP.PHARMACY_MASTER],
+  ["/api/pharmacy/purchases", CAP.PHARMACY_PURCHASE],
+  ["/api/pharmacy/vendor-returns", CAP.PHARMACY_PURCHASE],
+  ["/api/pharmacy/adjustments", CAP.PHARMACY_STOCK_ADJUST],
+  [
+    "/api/pharmacy/batches",
+    [CAP.PHARMACY_STOCK_VIEW, CAP.PHARMACY_BILL, CAP.PHARMACY_INDENT, CAP.PHARMACY_DEPT_MANAGE],
+  ],
+  ["/api/pharmacy/expiry", [CAP.PHARMACY_STOCK_VIEW, CAP.PHARMACY_PURCHASE]],
+  ["/api/pharmacy/bills", CAP.PHARMACY_BILL],
+  ["/api/pharmacy/credit", [CAP.PHARMACY_CREDIT_REQUEST, CAP.PHARMACY_CREDIT_APPROVE]],
+  ["/api/pharmacy/transfers", CAP.PHARMACY_DEPT_MANAGE],
+  ["/api/pharmacy/indents", [CAP.PHARMACY_INDENT, CAP.PHARMACY_DEPT_MANAGE]],
+  ["/api/pharmacy/collect", CAP.PHARMACY_COLLECT],
+  ["/api/pharmacy/reports", CAP.PHARMACY_REPORTS],
   ["/api/doctors", CAP.RECEPTION_OPS],
   // Slot availability — drives the time-slot picker on both /find and /ghm.
   ["/api/availability", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],

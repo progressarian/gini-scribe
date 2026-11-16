@@ -87,6 +87,18 @@ export const PAGE_CAPABILITIES = {
   // Medication
   "/refills": CAP.REFILLS,
   "/pharmacy/stock": CAP.PHARMACY_STOCK_VIEW,
+  "/pharmacy/vendors": CAP.PHARMACY_MASTER,
+  "/pharmacy/medicines": CAP.PHARMACY_MASTER,
+  "/pharmacy/departments": [CAP.PHARMACY_MASTER, CAP.PHARMACY_DEPT_MANAGE],
+  "/pharmacy/settings": CAP.PHARMACY_MASTER,
+  "/pharmacy/purchases": CAP.PHARMACY_PURCHASE,
+  "/pharmacy/adjustments": CAP.PHARMACY_STOCK_ADJUST,
+  "/pharmacy/expiry": [CAP.PHARMACY_STOCK_VIEW, CAP.PHARMACY_PURCHASE],
+  "/pharmacy/billing": CAP.PHARMACY_BILL,
+  "/pharmacy/credit": [CAP.PHARMACY_CREDIT_REQUEST, CAP.PHARMACY_CREDIT_APPROVE],
+  "/pharmacy/transfers": CAP.PHARMACY_DEPT_MANAGE,
+  "/pharmacy/indents": [CAP.PHARMACY_INDENT, CAP.PHARMACY_DEPT_MANAGE],
+  "/pharmacy/reports": CAP.PHARMACY_REPORTS,
   "/dose-change-requests": CAP.DOSE_REVIEWS,
   "/side-effects": CAP.SIDE_EFFECTS,
   // Reception / operations

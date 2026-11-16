@@ -1,0 +1,10 @@
+.form-field__required {
+  color: var(--fre);
+}
+.fset .fset__field small.form-field__error {
+  color: var(--fre);
+  font-weight: 500;
+}
+.fset .fset__field [aria-invalid="true"] {
+  border-color: var(--fre);
+}
