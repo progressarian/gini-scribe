@@ -629,6 +629,9 @@ router.post("/call-attempts", async (req, res) => {
       actor,
     });
 
+    // The call just happened, so the "calling now" flag has served its purpose.
+    await releaseClaim(client, appointment_id);
+
     await client.query("COMMIT");
     await noteGhmEdit(appointment_id, actor, "call");
     res.status(201).json(ins.rows[0]);
@@ -2483,6 +2486,15 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       return s.length > 2000 ? `${s.slice(0, 2000)}…` : s;
     };
     const actor = claimant(req);
+    if (req.body.call_status && req.body.call_status !== "pending" && actor.id) {
+      const held = await pool.query(
+        `SELECT a.id FROM appointments a
+          WHERE a.calling_since IS NOT NULL AND a.calling_by_id = $2
+            AND (a.id = $1 OR (a.file_no IS NOT NULL AND a.file_no = $3))`,
+        [id, actor.id, r.rows[0].file_no],
+      );
+      for (const h of held.rows) await releaseClaim(pool, h.id);
+    }
     for (const k of [...trackingNow, ...trackingPatient]) {
       const oldV = logValue(before[k]);
       const newV = logValue(req.body[k] === "" ? null : req.body[k]);

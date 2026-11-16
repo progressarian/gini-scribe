@@ -606,8 +606,6 @@ const SUMMARY_BUCKET = {
 };
 
 const NO_SLOT_ACCESS = "Only staff with time slot access can change this.";
-const CLAIM_HINT =
-  "Press Calling on this row to change it. Only one person can change a patient at a time.";
 
 const IST_DAY = { timeZone: "Asia/Kolkata", day: "numeric", month: "short" };
 
@@ -4168,11 +4166,10 @@ export default function GHMPage() {
                         !!activeCall &&
                         (activeCall.calling_by_id === currentDoctor?.id ||
                           (!activeCall.calling_by_id && activeCall.calling_by === loggedInName));
-                      const rowLocked = !callingIsMine;
-                      const lockTitle =
-                        activeCall && !callingIsMine
-                          ? `${activeCall.calling_by} is calling this patient. Wait until they finish.`
-                          : CLAIM_HINT;
+                      const rowLocked = !!activeCall && !callingIsMine;
+                      const lockTitle = rowLocked
+                        ? `${activeCall.calling_by} is calling this patient. Wait until they finish.`
+                        : undefined;
 
                       return (
                         <Fragment key={row.id}>

@@ -47,11 +47,6 @@ async function openSheet(page, role, patient) {
 
 const headers = (page) => page.locator("table thead th");
 
-async function pressCalling(row) {
-  await row.getByRole("button", { name: "Calling" }).click();
-  await expect(row.getByRole("button", { name: "You" })).toBeVisible();
-}
-
 const endAllCalls = () =>
   query(
     `UPDATE appointments SET calling_by = NULL, calling_by_id = NULL, calling_since = NULL
@@ -119,7 +114,6 @@ test.describe("G29 GHM: live changes, the last editor takes the row, slots need 
     expect(await ownerOf(patients[0].id)).toBe(USERS.obt_one.id);
     expect(listCalls).toEqual([String(appts[0])]);
 
-    await pressCalling(row);
     const notes = row.getByText("Asked to call back after lunch");
     await notes.click();
     const box = row.locator("textarea");
@@ -166,8 +160,6 @@ test.describe("G29 GHM: live changes, the last editor takes the row, slots need 
     await expect(receptionRow.getByRole("button", { name: "Preferred time" })).toBeDisabled();
 
     const adminRow = await openSheet(page, "admin", patients[1]);
-    await expect(adminRow.getByRole("button", { name: "Preferred time" })).toBeDisabled();
-    await pressCalling(adminRow);
     await expect(adminRow.getByRole("button", { name: "Preferred time" })).toBeEnabled();
     const adminTexts = (await headers(page).allInnerTexts()).map((t) => t.trim().toUpperCase());
     expect(adminTexts).not.toContain("ASSIGNED TO");
@@ -241,7 +233,6 @@ test.describe("G29 GHM: live changes, the last editor takes the row, slots need 
     await page.context().clearCookies();
     await openSheet(page, "obt_two", patients[1]);
     const enabledRow = page.locator("tbody tr", { hasText: patients[1].name }).first();
-    await pressCalling(enabledRow);
     await expect(enabledRow.getByRole("button", { name: "Preferred time" })).toBeEnabled();
     await page.getByRole("button", { name: "New Appointment" }).click();
     await expect(page.locator(".modal").getByLabel("Time Slot *")).toBeEnabled();
@@ -253,7 +244,7 @@ test.describe("G29 GHM: live changes, the last editor takes the row, slots need 
     expect(moved.ok()).toBe(true);
   });
 
-  test("5. only the person calling a patient can change them; everyone else sees who has it", async ({
+  test("5. rows are editable any time; while someone is calling a patient only they can change them", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1600, height: 900 });
@@ -271,7 +262,7 @@ test.describe("G29 GHM: live changes, the last editor takes the row, slots need 
     const row = await openSheet(page, "obt_two", patients[0]);
     const notesCell = row.getByText(/Will come on Friday|Asked to call back/).first();
     await expect(row.getByRole("button", { name: "Calling" })).toBeVisible();
-    await expect(row.getByRole("button", { name: "Mode of appointment" })).toBeDisabled();
+    await expect(row.getByRole("button", { name: "Mode of appointment" })).toBeEnabled();
 
     expect((await obtOne.post(`/api/ghm-appointments/${appts[0]}/calling`)).ok()).toBe(true);
     await expect(row.locator(".calling-flag--other")).toContainText(USERS.obt_one.short_name, {
@@ -297,9 +288,13 @@ test.describe("G29 GHM: live changes, the last editor takes the row, slots need 
       ).ok(),
     ).toBe(true);
 
-    expect((await obtOne.delete(`/api/ghm-appointments/${appts[0]}/calling`)).ok()).toBe(true);
+    expect(
+      (
+        await obtOne.patch(`/api/ghm-appointments/${appts[0]}`, { data: { call_status: "called" } })
+      ).ok(),
+    ).toBe(true);
     await expect(row.getByRole("button", { name: "Calling" })).toBeVisible({ timeout: 8000 });
-    await pressCalling(row);
+    await expect(row.getByRole("button", { name: "Mode of appointment" })).toBeEnabled();
     expect(
       (
         await obtTwo.patch(`/api/ghm-appointments/${appts[0]}`, { data: { call_notes: "my turn" } })

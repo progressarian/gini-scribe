@@ -11,15 +11,22 @@ export const ghmHub = createHub({
   shape: ({ kind, appointmentId = null, patientId = null }) => ({ kind, appointmentId, patientId }),
 });
 
+let directWarned = false;
+
 export async function signalGhm({ kind, appointmentId = null, patientId = null, actorId = null }) {
+  const rowId = Number(appointmentId) > 0 ? Number(appointmentId) : null;
   try {
     await pool.query(
       `INSERT INTO ghm_live_events (kind, appointment_id, patient_id, actor_id)
        VALUES ($1, $2, $3, $4)`,
-      [kind, Number(appointmentId) > 0 ? Number(appointmentId) : null, patientId || null, actorId],
+      [kind, rowId, patientId || null, actorId],
     );
   } catch (e) {
-    console.error("[ghm] live signal:", e.message);
+    ghmHub.publish({ kind, appointmentId: rowId, patientId: patientId || null });
+    if (!directWarned) {
+      directWarned = true;
+      console.warn("[ghm] live events table unavailable, pushing changes directly:", e.message);
+    }
   }
 }
 
