@@ -36,7 +36,7 @@ const cleanup = async (patients) => {
   await query(`DELETE FROM patients WHERE id = ANY($1::int[])`, [ids]);
 };
 
-test.describe("GHM: OBT calls are divided and only the assignee calls", () => {
+test.describe("GHM: OBT calls are divided and whoever changes a row takes it", () => {
   const ONE = userFor("obt_one").id;
   const TWO = userFor("obt_two").id;
   let patients;
@@ -134,32 +134,27 @@ test.describe("GHM: OBT calls are divided and only the assignee calls", () => {
     expect(res.status()).toBe(400);
   });
 
-  test("5. only the assignee can call, change the call status or log a call", async () => {
+  test("5. anyone on the team can call or change a patient, and the row moves to them", async () => {
     await admin.post("/api/obt-assignments/assign", {
       data: { patient_ids: [patients[0].id], assigned_to_id: ONE },
     });
     const id = appts[0];
 
-    const claim = await obtTwo.post(`/api/ghm-appointments/${id}/calling`);
-    expect(claim.status()).toBe(403);
-    expect((await claim.json()).error).toMatch(/assigned to OBT One/);
+    expect((await obtTwo.post(`/api/ghm-appointments/${id}/calling`)).ok()).toBe(true);
+    expect(await ownerOf(patients[0].id)).toBe(TWO);
+    expect((await obtTwo.delete(`/api/ghm-appointments/${id}/calling`)).ok()).toBe(true);
 
     const status = await obtTwo.patch(`/api/ghm-appointments/${id}`, {
-      data: { call_status: "called" },
+      data: { call_status: "busy" },
     });
-    expect(status.status()).toBe(403);
+    expect(status.ok()).toBe(true);
+    expect(await ownerOf(patients[0].id)).toBe(TWO);
 
-    const attempt = await obtTwo.post("/api/call-attempts", {
+    const attempt = await obtOne.post("/api/call-attempts", {
       data: { appointment_id: id, outcome: "called" },
     });
-    expect(attempt.status()).toBe(403);
-
-    expect((await obtOne.post(`/api/ghm-appointments/${id}/calling`)).ok()).toBe(true);
-    expect(
-      (
-        await obtOne.post("/api/call-attempts", { data: { appointment_id: id, outcome: "called" } })
-      ).status(),
-    ).toBe(201);
+    expect(attempt.status()).toBe(201);
+    expect(await ownerOf(patients[0].id)).toBe(ONE);
   });
 
   test("6. the lead can change an assigned patient", async () => {
@@ -196,48 +191,55 @@ test.describe("GHM: OBT calls are divided and only the assignee calls", () => {
     expect(await listed(admin, `member:${ONE}`)).toEqual([patients[0].id]);
   });
 
-  test("8. an OBT member cannot change an unassigned patient, a lead and reception can", async () => {
-    const call = await obtTwo.post(`/api/ghm-appointments/${appts[0]}/calling`);
-    expect(call.status()).toBe(403);
-    expect((await call.json()).error).toMatch(/not assigned to you/);
-    expect(
-      (
-        await obtTwo.patch(`/api/ghm-appointments/${appts[0]}`, {
-          data: { preferred_time_slot: "10 AM to 11 AM" },
-        })
-      ).status(),
-    ).toBe(403);
+  test("8. a change to an unassigned patient assigns it to whoever made it, in any role", async () => {
+    const edit = await obtTwo.patch(`/api/ghm-appointments/${appts[0]}`, {
+      data: { booking_status: "not_connected" },
+    });
+    expect(edit.ok()).toBe(true);
+    expect(await ownerOf(patients[0].id)).toBe(TWO);
 
     const reception = await apiAs("reception");
     expect(
       (
-        await reception.patch(`/api/ghm-appointments/${appts[0]}`, {
+        await reception.patch(`/api/ghm-appointments/${appts[1]}`, {
           data: { call_status: "busy" },
         })
       ).ok(),
     ).toBe(true);
+    expect(await ownerOf(patients[1].id)).toBe(userFor("reception").id);
+
+    const log = await one(
+      `SELECT changed_by_id FROM appointment_change_log
+        WHERE appointment_id = $1 AND field = 'call_assigned_to'
+        ORDER BY changed_at DESC, id DESC LIMIT 1`,
+      [appts[0]],
+    );
+    expect(log.changed_by_id).toBe(TWO);
   });
 
-  test("9. an OBT member cannot edit any column of someone else's patient", async () => {
-    await admin.post("/api/obt-assignments/assign", {
-      data: { patient_ids: [patients[0].id], assigned_to_id: ONE },
+  test("9. setting a time slot needs the slot permission; an unchanged slot passes", async () => {
+    const slot = { preferred_time_slot: "10 AM to 11 AM" };
+    const refused = await obtTwo.patch(`/api/ghm-appointments/${appts[0]}`, { data: slot });
+    expect(refused.status()).toBe(403);
+    expect((await refused.json()).error).toMatch(/time slots/);
+
+    const unchanged = await obtTwo.patch(`/api/ghm-appointments/${appts[0]}`, {
+      data: { time_slot: "12:30 PM to 1 PM", notes: "same slot" },
     });
-    for (const data of [
-      { preferred_time_slot: "10 AM to 11 AM" },
-      { home_collection: true },
-      { patient_category: null },
-      { booking_status: "not_connected" },
-    ]) {
-      const res = await obtTwo.patch(`/api/ghm-appointments/${appts[0]}`, { data });
-      expect(res.status()).toBe(403);
+    expect(unchanged.ok()).toBe(true);
+
+    await query(`UPDATE doctors SET can_assign_slots = TRUE WHERE id = $1`, [TWO]);
+    try {
+      const fresh = await apiAs("obt_two");
+      expect((await fresh.patch(`/api/ghm-appointments/${appts[0]}`, { data: slot })).ok()).toBe(
+        true,
+      );
+    } finally {
+      await query(`UPDATE doctors SET can_assign_slots = FALSE WHERE id = $1`, [TWO]);
     }
-    expect(
-      (
-        await obtOne.patch(`/api/ghm-appointments/${appts[0]}`, {
-          data: { booking_status: "not_connected" },
-        })
-      ).ok(),
-    ).toBe(true);
+    expect((await admin.patch(`/api/ghm-appointments/${appts[1]}`, { data: slot })).ok()).toBe(
+      true,
+    );
   });
 
   test("10. an OBT member can book an incoming call for someone else's patient", async () => {

@@ -8,6 +8,7 @@ import {
   divideCalls,
   canAssignCalls,
 } from "../services/obtAssignments.js";
+import { signalGhm } from "../services/ghmLive.js";
 
 const router = Router();
 
@@ -42,7 +43,9 @@ router.post("/obt-assignments/counts", async (req, res) => {
 
 router.post("/obt-assignments/assign", requireCallAssigner, async (req, res) => {
   try {
-    res.json(await assignCalls(req.body?.patient_ids, req.body?.assigned_to_id, actorOf(req)));
+    const out = await assignCalls(req.body?.patient_ids, req.body?.assigned_to_id, actorOf(req));
+    await signalGhm({ kind: "assign", actorId: req.doctor?.doctor_id ?? null });
+    res.json(out);
   } catch (e) {
     handleError(res, e, "OBT assign");
   }
@@ -50,7 +53,9 @@ router.post("/obt-assignments/assign", requireCallAssigner, async (req, res) => 
 
 router.post("/obt-assignments/divide", requireCallAssigner, async (req, res) => {
   try {
-    res.json(await divideCalls(req.body?.patient_ids, req.body?.member_ids, actorOf(req)));
+    const out = await divideCalls(req.body?.patient_ids, req.body?.member_ids, actorOf(req));
+    await signalGhm({ kind: "assign", actorId: req.doctor?.doctor_id ?? null });
+    res.json(out);
   } catch (e) {
     handleError(res, e, "OBT divide");
   }

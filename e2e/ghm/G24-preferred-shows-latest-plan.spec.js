@@ -16,9 +16,15 @@ test.describe("G24 the follow-up row's preferred date and time show the latest b
 
   test.beforeAll(async () => {
     patient = await buildPatient();
+    await query(`UPDATE doctors SET can_assign_slots = TRUE WHERE id = $1`, [
+      userFor("reception_admin").id,
+    ]);
   });
 
   test.afterAll(async () => {
+    await query(`UPDATE doctors SET can_assign_slots = FALSE WHERE id = $1`, [
+      userFor("reception_admin").id,
+    ]);
     await query(
       `DELETE FROM appointment_change_log WHERE appointment_id IN
          (SELECT id FROM appointments WHERE file_no = $1)`,

@@ -607,7 +607,7 @@ const PdfViewerModal = memo(function PdfViewerModal({ doc, src, onClose, printab
             )}
             <button
               type="button"
-              className="pdf-btn"
+              className="pdf-btn pdf-btn-close"
               onClick={onClose}
               title="Close"
               aria-label="Close"

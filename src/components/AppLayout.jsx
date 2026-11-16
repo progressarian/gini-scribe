@@ -294,6 +294,13 @@ const NAV_ITEMS = [
     cap: C["/billing/dues"],
     show: () => true,
   },
+  {
+    path: "/billing/audit",
+    group: "billing",
+    label: "🔎 Billing audit",
+    cap: C["/billing/audit"],
+    show: () => true,
+  },
   { path: "/crm/home", group: "crm", label: "🤝 CRM", cap: C["/crm/home"], show: () => true },
   {
     path: "/crm/progress",

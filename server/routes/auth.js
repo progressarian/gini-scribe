@@ -69,7 +69,7 @@ router.post("/convert-heic", async (req, res) => {
 router.get("/doctors", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, name, short_name, specialty, qualification, role, is_chief, vitals_rest, chief_step, direct_consult, COALESCE((to_jsonb(doctors)->>'can_assign_calls')::boolean, FALSE) AS can_assign_calls, COALESCE((to_jsonb(doctors)->>'slot_booking')::boolean, FALSE) AS slot_booking, COALESCE((to_jsonb(doctors)->>'new_patient_workup')::boolean, FALSE) AS new_patient_workup, (to_jsonb(doctors)->>'assists_doctor_id')::int AS assists_doctor_id FROM doctors WHERE is_active=true ORDER BY role, name",
+      "SELECT id, name, short_name, specialty, qualification, role, is_chief, vitals_rest, chief_step, direct_consult, COALESCE((to_jsonb(doctors)->>'can_assign_calls')::boolean, FALSE) AS can_assign_calls, COALESCE((to_jsonb(doctors)->>'can_assign_slots')::boolean, FALSE) AS can_assign_slots, COALESCE((to_jsonb(doctors)->>'slot_booking')::boolean, FALSE) AS slot_booking, COALESCE((to_jsonb(doctors)->>'new_patient_workup')::boolean, FALSE) AS new_patient_workup, (to_jsonb(doctors)->>'assists_doctor_id')::int AS assists_doctor_id FROM doctors WHERE is_active=true ORDER BY role, name",
     );
     res.json(result.rows);
   } catch (e) {
@@ -252,7 +252,7 @@ router.get("/auth/me", async (req, res) => {
   if (!req.doctor) return res.json({ authenticated: false });
   try {
     const result = await pool.query(
-      "SELECT id, name, short_name, specialty, qualification, role, COALESCE((to_jsonb(doctors)->>'can_assign_calls')::boolean, FALSE) AS can_assign_calls FROM doctors WHERE id=$1 AND is_active=true",
+      "SELECT id, name, short_name, specialty, qualification, role, COALESCE((to_jsonb(doctors)->>'can_assign_calls')::boolean, FALSE) AS can_assign_calls, COALESCE((to_jsonb(doctors)->>'can_assign_slots')::boolean, FALSE) AS can_assign_slots FROM doctors WHERE id=$1 AND is_active=true",
       [req.doctor.doctor_id],
     );
     if (result.rows.length === 0) return res.json({ authenticated: false });
@@ -321,6 +321,7 @@ router.post("/doctors", requireCapability(CAPABILITIES.ADMIN), async (req, res) 
 // alone, so the Chief toggle and the qualification box save independently.
 const slotBookingReady = columnReady("doctors", "slot_booking");
 const assistsReady = columnReady("doctors", "assists_doctor_id");
+const slotAccessReady = columnReady("doctors", "can_assign_slots");
 const WORKUP_MIGRATION =
   "The History & Examination settings need a database update first. Ask an administrator to run the new-patient workup migration.";
 
@@ -333,6 +334,7 @@ router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, 
       chief_step,
       direct_consult,
       can_assign_calls,
+      can_assign_slots,
       slot_booking,
       new_patient_workup,
       assists_doctor_id,
@@ -378,6 +380,19 @@ router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, 
       }
       params.push(can_assign_calls);
       sets.push(`can_assign_calls=$${params.length}`);
+    }
+
+    if (can_assign_slots !== undefined) {
+      if (typeof can_assign_slots !== "boolean") {
+        return res.status(400).json({ error: "can_assign_slots must be a boolean" });
+      }
+      if (!(await slotAccessReady()))
+        return res.status(409).json({
+          error:
+            "Time slot access needs a database update first. Ask an administrator to run the time slot access migration.",
+        });
+      params.push(can_assign_slots);
+      sets.push(`can_assign_slots=$${params.length}`);
     }
 
     if (slot_booking !== undefined) {
@@ -435,6 +450,7 @@ router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, 
     const r = await pool.query(
       `UPDATE doctors SET ${sets.join(", ")} WHERE id=$1
         RETURNING id, name, short_name, is_chief, qualification, vitals_rest, chief_step, direct_consult, can_assign_calls,
+                  COALESCE((to_jsonb(doctors)->>'can_assign_slots')::boolean, FALSE) AS can_assign_slots,
                   COALESCE((to_jsonb(doctors)->>'new_patient_workup')::boolean, FALSE) AS new_patient_workup,
                   (to_jsonb(doctors)->>'assists_doctor_id')::int AS assists_doctor_id`,
       params,

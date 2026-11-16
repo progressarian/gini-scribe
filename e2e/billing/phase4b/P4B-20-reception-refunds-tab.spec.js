@@ -304,7 +304,6 @@ test.describe.serial("P4B-20 reception Refunds tab", () => {
       "Dues",
       "Shift",
       /^Refunds/,
-      /^Payments/,
     ]);
     await expect(tab(page, "Refunds")).toHaveAttribute("aria-selected", "true");
     await expect(refundsBadge(page)).toHaveText(String(toPay));
@@ -479,7 +478,6 @@ test.describe.serial("P4B-20 reception Refunds tab", () => {
     );
     await expect(page.getByRole("tablist", { name: "Reception" }).getByRole("tab")).toHaveText([
       /^Arrivals/,
-      /^Payments/,
     ]);
     await expect(tab(page, "Arrivals")).toHaveAttribute("aria-selected", "true");
     await expect(page.getByRole("searchbox", { name: "Search refunds" })).toHaveCount(0);

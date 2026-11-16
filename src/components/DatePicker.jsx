@@ -58,6 +58,7 @@ export default function DatePicker({
   style,
   activeStyle,
   label,
+  ariaLabel,
 }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState(() => startOfMonth(parseIso(value) || new Date()));
@@ -168,6 +169,9 @@ export default function DatePicker({
           disabled={disabled}
           aria-haspopup="dialog"
           aria-expanded={open}
+          aria-label={
+            ariaLabel ? `${ariaLabel}: ${value ? fmtDisplay(value) : placeholder}` : undefined
+          }
           onClick={() => setOpen((o) => !o)}
           style={baseStyle}
         >

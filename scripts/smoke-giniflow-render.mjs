@@ -225,16 +225,12 @@ try {
   check("live counts render on the tiles", landHtml.includes("in queue"));
   check("no raw 'undefined' in the launcher markup", !landHtml.includes(">undefined<"));
 
-  // Reception renders its own tree — two tabs, only one of them mounted at a
-  // time, so the payments half is rendered on its own as well.
-  const { default: ReceptionStationPage, PaymentsTab } = await vite.ssrLoadModule(
+  // Reception renders its own tree — the arrivals desk.
+  const { default: ReceptionStationPage } = await vite.ssrLoadModule(
     "/src/pages/giniflow/ReceptionStationPage.jsx",
   );
   const recClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const { getPaymentQueue, getArrivals } =
-    await import("../server/services/giniflow/receptionStation.js");
-  const payments = { date, ...(await getPaymentQueue(date)) };
-  recClient.setQueryData(["giniflow", "reception", "queue", "today"], payments);
+  const { getArrivals } = await import("../server/services/giniflow/receptionStation.js");
   recClient.setQueryData(["giniflow", "reception", "arrivals", "today", ""], {
     date,
     ...(await getArrivals(date)),
@@ -251,10 +247,7 @@ try {
     ),
   );
   check("reception renders without throwing", recHtml.length > 0, `${recHtml.length} chars`);
-  check(
-    "both halves of the desk are reachable",
-    ["Arrivals", "Payments"].every((t) => recHtml.includes(t)),
-  );
+  check("the arrivals tab is shown", recHtml.includes("Arrivals"));
   check(
     "the three arrival groups render",
     ["Expected", "On the floor"].every((g) => recHtml.includes(g)),
@@ -265,23 +258,6 @@ try {
     recHtml.includes("not written back"),
   );
   check("no raw 'undefined' in the reception markup", !recHtml.includes(">undefined<"));
-
-  const payHtml = renderToString(
-    createElement(
-      QueryClientProvider,
-      { client: recClient },
-      createElement(PaymentsTab, {
-        data: payments,
-        isLoading: false,
-        onClear: () => {},
-        pending: false,
-      }),
-    ),
-  );
-  check("the payment queue still renders", payHtml.includes("Payment pending"));
-  check("the workflow banner renders", payHtml.includes("triggers lab sample collection"));
-  check("the placeholder-price warning is shown", payHtml.includes("not the hospital"));
-  check("no raw 'undefined' in the payments markup", !payHtml.includes(">undefined<"));
 
   // MO/SD renders its own tree — queue, brief, plan, tests panel, action bar.
   const { default: MoStationPage } = await vite.ssrLoadModule(

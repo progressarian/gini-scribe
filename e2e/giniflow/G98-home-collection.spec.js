@@ -374,10 +374,7 @@ test.describe.serial("G98 home collection — where the sample was taken, and by
     expect(card.homeSample).toMatchObject({ site: "home", by: USERS.lab.short_name });
   });
 
-  test("14a. reception: the unpaid home sample is tagged and has its own filter until it is paid", async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 1280, height: 900 });
+  test("14a. reception: the unpaid home sample is tagged in the payment queue until it is paid", async () => {
     const made = await homeVisit("Desk");
     const [orderId] = await orderOf(made.visit);
     const plain = await homeVisit("DeskPlain", { tick: false });
@@ -387,23 +384,6 @@ test.describe.serial("G98 home collection — where the sample was taken, and by
     const pending = queue.pending.find((o) => o.orderId === orderId);
     expect(pending.homeSample).toMatchObject({ site: "home", by: USERS.lab.short_name });
     expect(queue.counts.homePaymentPending).toBeGreaterThanOrEqual(1);
-
-    await loginAs(page, "reception");
-    await gotoReady(page, "/giniflow/station/reception?tab=payments", () =>
-      page.getByPlaceholder("Search payments — name, file no or phone"),
-    );
-    await page.getByPlaceholder("Search payments — name, file no or phone").fill(`Desk`);
-    const homeCard = page.locator(".test-order-card").filter({ hasText: `P4 Desk ${tag}` });
-    const plainCard = page.locator(".test-order-card").filter({ hasText: `P4 DeskPlain ${tag}` });
-    await expect(homeCard.getByText(/🏠 Collected at home · Lab \d{2}:\d{2} · ₹\d/)).toBeVisible();
-    await expect(plainCard).toBeVisible();
-    const chip = page.getByRole("button", { name: /🏠 Home collection — payment pending/ });
-    await chip.click();
-    await expect(chip).toHaveAttribute("aria-pressed", "true");
-    await expect(homeCard).toBeVisible();
-    await expect(plainCard).toHaveCount(0);
-    await chip.click();
-    await expect(plainCard).toBeVisible();
 
     await query(
       `UPDATE giniflow_lab_orders SET payment_status = 'paid', amount_paid = amount_total

@@ -80,9 +80,7 @@ import {
   fetchLastVisit,
   fetchObtAssignments,
   useActiveCalls,
-  useAssignCalls,
   useDivideCalls,
-  useObtAssignments,
   useObtTeam,
   useAppointmentChanges,
   useCallAttemptCounts,
@@ -113,6 +111,7 @@ import {
   useUpdateAppointmentPatient,
 } from "../queries/hooks/useGhm";
 import { qk } from "../queries/keys";
+import { useGhmLive } from "../queries/hooks/useGhmLive";
 import { toast } from "../stores/uiStore";
 import { visitStatus } from "../lib/visitStatus.js";
 import { isEarlierVisitDue, isNewVisitType } from "../../shared/patientLists.js";
@@ -604,6 +603,31 @@ const SUMMARY_BUCKET = {
   show_no_show: (v) => (v === "Show" ? "came" : v === "No Show" ? "no_show" : null),
 };
 
+const NO_SLOT_ACCESS = "Only staff with time slot access can change this.";
+
+const IST_DAY = { timeZone: "Asia/Kolkata", day: "numeric", month: "short" };
+
+const changedWhen = (at) => {
+  const day = new Date(at).toLocaleDateString("en-IN", IST_DAY);
+  const today = new Date().toLocaleDateString("en-IN", IST_DAY);
+  return day === today ? istClock(at) : `${day}, ${istClock(at)}`;
+};
+
+function LastChangePill({ change }) {
+  if (!change?.by) return null;
+  const full = new Date(change.at).toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  return (
+    <span className="last-change" title={`Last changed by ${change.by} · ${full}`}>
+      <span className="last-change__who">{change.by}</span>
+      <span className="last-change__when">{changedWhen(change.at)}</span>
+    </span>
+  );
+}
+
 // Compact mode cuts the Patient cell down to the name and the number people
 // dial. What it drops has no column of its own, so it is read back here in the
 // row's expander — nothing compact hides becomes unreachable.
@@ -1083,7 +1107,14 @@ function DemographicFields({ dob, age, sex, onChange }) {
 }
 
 // ─── New Appointment modal ─────────────────────────────────────────────────
-export function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, onCreated }) {
+export function NewAppointmentModal({
+  doctors,
+  defaultDate,
+  prefill,
+  onClose,
+  onCreated,
+  canPickSlot = true,
+}) {
   const isPrefilled = !!prefill?.patient_name;
   const [form, setForm] = useState({
     patient_name: prefill?.patient_name || "",
@@ -1230,7 +1261,7 @@ export function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, on
     if (!/^[A-Za-z.\s'-]+$/.test(name)) return setErr("Patient name should contain letters only");
     if (!form.doctor_name) return setErr("Please select a doctor");
     if (!form.appointment_date) return setErr("Please select a date");
-    if (!form.time_slot) return setErr("Select a time slot");
+    if (canPickSlot && !form.time_slot) return setErr("Select a time slot");
     // Phone is optional, but if entered must be exactly 10 digits
     if (form.phone && !/^\d{10}$/.test(form.phone))
       return setErr("Mobile number must be exactly 10 digits");
@@ -1472,9 +1503,16 @@ export function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, on
                 />
               </label>
               <label className="fld">
-                <span>Time Slot *</span>
-                <select value={form.time_slot} onChange={(e) => pickSlot(e.target.value)}>
-                  <option value="">— Select slot</option>
+                <span>{canPickSlot ? "Time Slot *" : "Time Slot"}</span>
+                <select
+                  value={form.time_slot}
+                  onChange={(e) => pickSlot(e.target.value)}
+                  disabled={!canPickSlot}
+                  title={canPickSlot ? undefined : NO_SLOT_ACCESS}
+                >
+                  <option value="">
+                    {canPickSlot ? "— Select slot" : "Set later by slot staff"}
+                  </option>
                   {slotOptions(availSlots, slotCatalog).map((s) => (
                     <option key={s.slot_label} value={s.slot_label} disabled={!s.available}>
                       {slotOptionLabel(s)}
@@ -1601,7 +1639,7 @@ export function NewAppointmentModal({ doctors, defaultDate, prefill, onClose, on
 // re-pointing a booking at a different patient is a reassignment, not an edit.
 // The save writes the appointment and the patient master together, so the next
 // booking starts from the corrected record.
-function EditPatientModal({ row, doctors, onClose }) {
+function EditPatientModal({ row, doctors, onClose, canPickSlot = true }) {
   const [form, setForm] = useState({
     patient_name: row.patient_name || "",
     phone: String(row.phone || "")
@@ -1705,8 +1743,9 @@ function EditPatientModal({ row, doctors, onClose }) {
         age: form.dob ? "" : form.age,
         sex: form.sex,
         appointment_date: form.appointment_date,
-        time_slot: form.time_slot,
-        over_limit_reason: form.over_limit_reason || null,
+        ...(canPickSlot
+          ? { time_slot: form.time_slot, over_limit_reason: form.over_limit_reason || null }
+          : null),
         doctor_name: form.doctor_name,
         appointment_type: form.appointment_type,
         condition: form.condition.trim(),
@@ -1781,7 +1820,12 @@ function EditPatientModal({ row, doctors, onClose }) {
               </label>
               <label className="fld">
                 <span>Time Slot</span>
-                <select value={form.time_slot} onChange={(e) => pickSlot(e.target.value)}>
+                <select
+                  value={form.time_slot}
+                  onChange={(e) => pickSlot(e.target.value)}
+                  disabled={!canPickSlot}
+                  title={canPickSlot ? undefined : NO_SLOT_ACCESS}
+                >
                   <option value="">— Select slot</option>
                   {slotList.map((s) => (
                     <option
@@ -2756,14 +2800,6 @@ const callsFilterOptions = (team) => [
 const memberOfFilter = (team, filter) =>
   team.find((m) => `member:${m.id}` === filter)?.name || null;
 
-const assigneeOptions = (team, current) => [
-  { value: "", label: "Unassigned" },
-  ...team.map((m) => ({ value: String(m.id), label: m.name })),
-  ...(current && !team.some((m) => m.id === current.assigned_to_id)
-    ? [{ value: String(current.assigned_to_id), label: current.assigned_to }]
-    : []),
-];
-
 function DivideCallsDialog({ open, onClose, team, loadList, divide }) {
   const [list, setList] = useState(null);
   const [members, setMembers] = useState([]);
@@ -2940,7 +2976,7 @@ export default function GHMPage() {
   );
   const canReassign = visibleTabs.some((t) => t.id === "reassign");
   const canAssignCalls = hasCapability(currentDoctor, CAP.OBT_ASSIGN);
-  const isObtMember = currentDoctor?.role === "obt" && !canAssignCalls;
+  const canAssignSlots = hasCapability(currentDoctor, CAP.GHM_SLOT_ASSIGN);
   const defaultCallsFilter = "all";
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab =
@@ -2974,6 +3010,7 @@ export default function GHMPage() {
   const [search, setSearch] = useState(searchParams.get("q") || "");
   const [recordFor, setRecordFor] = useState(null);
   const [editPatientFor, setEditPatientFor] = useState(null);
+  useGhmLive({ paused: showNew || !!editPatientFor });
   const [expanded, setExpanded] = useState(null); // appointment_id of open history row
   const EXPORT_PAGE_SIZE = 100;
 
@@ -3171,10 +3208,7 @@ export default function GHMPage() {
   const biomarkerQuery = useGhmBiomarkers(patientIds);
   const blockQuery = usePatientBlockStatus(patientIds);
   const lastVisitQuery = useGhmLastVisit(patientIds);
-  const assignmentQuery = useObtAssignments(patientIds);
-  const assignments = assignmentQuery.data || {};
   const obtTeam = useObtTeam().data || [];
-  const assignCalls = useAssignCalls();
   const divideCalls = useDivideCalls();
   const attemptQuery = useCallAttemptCounts(appointmentIds);
   const activeCallQuery = useActiveCalls(appointmentIds);
@@ -3259,17 +3293,6 @@ export default function GHMPage() {
     };
   }, [divideListMutation]);
 
-  const assignRow = useCallback(
-    (row, memberId) =>
-      assignCalls.mutate(
-        { patientIds: [row.patient_id], memberId: memberId ? Number(memberId) : null },
-        {
-          onError: (e) =>
-            toast(e?.response?.data?.error || "Could not change who calls this patient.", "error"),
-        },
-      ),
-    [assignCalls],
-  );
   const buildBookedTodayQuery = useCallback(
     (pageNum, limit) =>
       new URLSearchParams({ limit, page: pageNum, date: todayStr(), booked: "today" }),
@@ -3488,7 +3511,6 @@ export default function GHMPage() {
         "doctor",
         "last_visit",
         showShowNoShow && "show_no_show",
-        "assigned_to",
         showCallStatus && "call_status",
         showRecovery && "recovery",
         showCalledBy && "called_by",
@@ -3911,6 +3933,7 @@ export default function GHMPage() {
         {showNew && (
           <NewAppointmentModal
             doctors={doctors}
+            canPickSlot={canAssignSlots}
             defaultDate={date}
             prefill={newPrefill}
             onClose={() => {
@@ -3929,6 +3952,7 @@ export default function GHMPage() {
           <EditPatientModal
             row={editPatientFor}
             doctors={doctors}
+            canPickSlot={canAssignSlots}
             onClose={() => setEditPatientFor(null)}
           />
         )}
@@ -4087,7 +4111,6 @@ export default function GHMPage() {
                       <th className="tl" style={{ width: 155 }}>
                         Biomarkers (auto)
                       </th>
-                      <th style={{ minWidth: 130, whiteSpace: "nowrap" }}>Assigned To</th>
                       <th style={{ width: 140 }}>Booking Status</th>
                       <th style={{ width: 100 }}>Visit Type</th>
                       <th style={{ width: 165 }}>Category</th>
@@ -4136,17 +4159,6 @@ export default function GHMPage() {
                         !!activeCall &&
                         (activeCall.calling_by_id === currentDoctor?.id ||
                           (!activeCall.calling_by_id && activeCall.calling_by === loggedInName));
-                      const owner = assignments[row.patient_id] || null;
-                      const ownedByOther =
-                        !canAssignCalls && !!owner && owner.assigned_to_id !== currentDoctor?.id;
-                      const rowLocked =
-                        isObtMember && (!owner || owner.assigned_to_id !== currentDoctor?.id);
-                      const callLocked = ownedByOther || rowLocked;
-                      const lockTitle = ownedByOther
-                        ? `Assigned to ${owner.assigned_to} today. Only ${owner.assigned_to} can change or call this patient.`
-                        : rowLocked
-                          ? "Not assigned to you. Only patients assigned to you can be changed or called."
-                          : undefined;
 
                       return (
                         <Fragment key={row.id}>
@@ -4168,6 +4180,7 @@ export default function GHMPage() {
                               thing any OBT agent sees on the row. */}
                             <td className="tc">
                               <div className="callcol">
+                                <LastChangePill change={row.last_change} />
                                 <button
                                   className={`chev ${isOpen ? "chev--open" : ""}`}
                                   title={isOpen ? "Hide call history" : "Show call history"}
@@ -4185,14 +4198,6 @@ export default function GHMPage() {
                                   claim={claimCall}
                                   release={releaseCall}
                                   takeOver={takeOverCall}
-                                  lockLabel={
-                                    ownedByOther
-                                      ? owner.assigned_to
-                                      : rowLocked
-                                        ? "Not yours"
-                                        : null
-                                  }
-                                  lockTitle={lockTitle}
                                 />
                               </div>
                             </td>
@@ -4373,7 +4378,6 @@ export default function GHMPage() {
                                     onBookNext={bookNext}
                                     onRecords={setRecordFor}
                                     onEditPatient={setEditPatientFor}
-                                    lockTitle={rowLocked ? lockTitle : undefined}
                                   />
                                 )}
                               </div>
@@ -4382,22 +4386,6 @@ export default function GHMPage() {
                             {/* Biomarkers — auto from lab data */}
                             <td>
                               <BiomarkerCell bio={biomarkers[row.patient_id]} />
-                            </td>
-
-                            <td>
-                              {canAssignCalls && row.patient_id ? (
-                                <Dropdown
-                                  value={owner ? String(owner.assigned_to_id) : ""}
-                                  options={assigneeOptions(obtTeam, owner)}
-                                  onChange={(v) => assignRow(row, v)}
-                                  variant="cell"
-                                  ariaLabel="Assigned to"
-                                />
-                              ) : owner ? (
-                                <span className="assignee">{owner.assigned_to}</span>
-                              ) : (
-                                <span className="muted">Unassigned</span>
-                              )}
                             </td>
 
                             {/* Booking status — OBT marks a cancellation from the call */}
@@ -4410,8 +4398,6 @@ export default function GHMPage() {
                                 }
                                 options={bookingStatusOptions(row)}
                                 onChange={(v) => patch(row.id, "booking_status", v)}
-                                disabled={rowLocked}
-                                title={lockTitle}
                               />
                               {!isMissed &&
                                 row.booking_status === "booked" &&
@@ -4453,8 +4439,6 @@ export default function GHMPage() {
                                 value={row.patient_category || ""}
                                 options={categoryOptions}
                                 onChange={(v) => patch(row.id, "patient_category", v)}
-                                disabled={rowLocked}
-                                title={lockTitle}
                               />
                             </td>
 
@@ -4464,8 +4448,6 @@ export default function GHMPage() {
                                 value={row.appointment_type || ""}
                                 options={withCurrent(MODE_OPTIONS, row.appointment_type)}
                                 onChange={(v) => patch(row.id, "appointment_type", v)}
-                                disabled={rowLocked}
-                                title={lockTitle}
                                 variant="cell"
                                 ariaLabel="Mode of appointment"
                               />
@@ -4493,8 +4475,6 @@ export default function GHMPage() {
                                       ...opts.map((d) => ({ value: d, label: d })),
                                     ]}
                                     onChange={(v) => patch(row.id, "doctor_name", v)}
-                                    disabled={rowLocked}
-                                    title={lockTitle}
                                     variant="cell"
                                     ariaLabel="Doctor"
                                   />
@@ -4513,8 +4493,6 @@ export default function GHMPage() {
                                   value={row.show_no_show}
                                   options={SHOW_STATUSES}
                                   onChange={(v) => patch(row.id, "show_no_show", v)}
-                                  disabled={rowLocked}
-                                  title={lockTitle}
                                 />
                               </td>
                             )}
@@ -4527,8 +4505,6 @@ export default function GHMPage() {
                                     value={callStat}
                                     options={callStatusOptions(callStat)}
                                     onChange={(v) => handleCallStatus(row, v)}
-                                    disabled={callLocked}
-                                    title={lockTitle}
                                   />
                                   {attempts > 0 && (
                                     <button
@@ -4550,8 +4526,6 @@ export default function GHMPage() {
                                   value={row.pt_recovery}
                                   options={RECOVERY_STATUSES}
                                   onChange={(v) => patch(row.id, "pt_recovery", v)}
-                                  disabled={rowLocked}
-                                  title={lockTitle}
                                 />
                               </td>
                             )}
@@ -4572,8 +4546,8 @@ export default function GHMPage() {
                                       : row.call_made_by || ""
                                   }
                                   key={`cb-${row.id}-${row.call_made_by}-${activeCall?.calling_by || ""}-${callLogged ? 1 : 0}`}
-                                  disabled={!callLogged || callLocked}
-                                  title={lockTitle || (callLogged ? undefined : CALL_LOCK_HINT)}
+                                  disabled={!callLogged}
+                                  title={callLogged ? undefined : CALL_LOCK_HINT}
                                   onBlur={(e) => {
                                     const v = e.target.value.trim();
                                     if (v !== (row.call_made_by || ""))
@@ -4590,12 +4564,12 @@ export default function GHMPage() {
 
                             {/* Call date — locked with Called By, for the same reason */}
                             {showCallDate && (
-                              <td title={lockTitle || (callLogged ? undefined : CALL_LOCK_HINT)}>
+                              <td title={callLogged ? undefined : CALL_LOCK_HINT}>
                                 <DatePicker
                                   value={row.call_date || ""}
                                   onChange={(v) => patch(row.id, "call_date", v)}
                                   placeholder="—"
-                                  disabled={!callLogged || callLocked}
+                                  disabled={!callLogged}
                                   style={CELL_DATE_STYLE}
                                 />
                               </td>
@@ -4674,8 +4648,6 @@ export default function GHMPage() {
                                   ).map((d) => ({ value: d, label: d })),
                                 ]}
                                 onChange={(v) => patch(row.id, "preferred_doctor", v)}
-                                disabled={rowLocked}
-                                title={lockTitle}
                                 variant="cell"
                                 ariaLabel="Preferred doctor"
                               />
@@ -4686,7 +4658,6 @@ export default function GHMPage() {
                               <DatePicker
                                 value={row.preferred_date || ""}
                                 onChange={(v) => changePreferredDate(row, v)}
-                                disabled={rowLocked}
                                 minDate={todayStr()}
                                 closedWeekdays={CLOSED_WEEKDAYS}
                                 placeholder="—"
@@ -4705,8 +4676,8 @@ export default function GHMPage() {
                                   slotCounts,
                                 )}
                                 onChange={(v) => pickTimeSlot(row, v)}
-                                disabled={rowLocked}
-                                title={lockTitle}
+                                disabled={!canAssignSlots}
+                                title={canAssignSlots ? undefined : NO_SLOT_ACCESS}
                                 variant="cell"
                                 ariaLabel="Preferred time"
                               />
@@ -4717,8 +4688,6 @@ export default function GHMPage() {
                                 value={row.home_collection ? "yes" : "no"}
                                 options={HOME_COLLECTION_OPTIONS}
                                 onChange={(v) => patch(row.id, "home_collection", v === "yes")}
-                                disabled={rowLocked}
-                                title={lockTitle}
                               />
                             </td>
 
@@ -4729,8 +4698,6 @@ export default function GHMPage() {
                                 onChange={(v) => patch(row.id, "call_notes", v)}
                                 placeholder="Patient said… / reason…"
                                 multiline
-                                disabled={callLocked}
-                                lockTitle={lockTitle}
                               />
                             </td>
 
@@ -4739,8 +4706,6 @@ export default function GHMPage() {
                               <InlineEdit
                                 value={row.prescription_explained_by}
                                 onChange={(v) => patch(row.id, "prescription_explained_by", v)}
-                                disabled={rowLocked}
-                                lockTitle={lockTitle}
                                 placeholder="Explained by…"
                               />
                             </td>
@@ -4749,7 +4714,6 @@ export default function GHMPage() {
                           {isOpen && (
                             <CallHistoryPanel
                               row={row}
-                              lockTitle={callLocked ? lockTitle : undefined}
                               ccAgents={ccAgents}
                               colSpan={colSpan}
                               details={compact ? compactDetails(row) : null}
@@ -4760,7 +4724,6 @@ export default function GHMPage() {
                                     onBookNext={bookNext}
                                     onRecords={setRecordFor}
                                     onEditPatient={setEditPatientFor}
-                                    lockTitle={rowLocked ? lockTitle : undefined}
                                   />
                                 ) : null
                               }

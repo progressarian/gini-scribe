@@ -25,6 +25,7 @@ const PLANNED_GAP_MS = 250;
 export function createLiveConnection({
   url,
   EventSourceImpl,
+  eventName = "flow",
   onSignal = () => {},
   onResync = () => {},
   onStatus = () => {},
@@ -80,7 +81,7 @@ export function createLiveConnection({
       onStatus(true);
     });
 
-    source.addEventListener("flow", (e) => {
+    source.addEventListener(eventName, (e) => {
       if (e.lastEventId) lastEventId = e.lastEventId;
       try {
         onSignal(JSON.parse(e.data));

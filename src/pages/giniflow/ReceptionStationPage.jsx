@@ -1,13 +1,7 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { validCounterDate } from "../../components/billing/counter/CounterDate";
 import {
-  useReceptionQueue,
-  useClearPayment,
-  useClearCharge,
-  useCancelReceptionTest,
-  useCancelCharge,
-  useCancelReceptionCase,
   useArrivals,
   useArrivalAction,
   useWalkInSearch,
@@ -55,12 +49,7 @@ import HomeSampleDialog, {
   homeProblemsNow,
 } from "../../components/giniflow/HomeSampleDialog";
 import { useSaveHomeSample } from "../../queries/hooks/useHomeSample";
-import {
-  cancelledText,
-  cancelledToastMs,
-  REFUND_TOAST_MS,
-  TOAST_MS,
-} from "../../lib/testCancelText.js";
+import { REFUND_TOAST_MS, TOAST_MS } from "../../lib/testCancelText.js";
 import ConfirmModal from "../../components/ui/ConfirmModal";
 import IdPendingBadge from "../../components/patient/IdPendingBadge.jsx";
 import OrderedServicesPanel from "../../components/billing/OrderedServicesPanel";
@@ -82,25 +71,13 @@ import {
   pauseReasonLabel,
 } from "../../../shared/giniflowStatus.js";
 import { useGiniflowTimeline } from "../../queries/hooks/useGiniflowBoard";
-import {
-  opensLabGate,
-  paise,
-  refundOnTestCancel,
-  rupeesFromPaise,
-} from "../../../shared/labPayment.js";
-import { istClock } from "../../../shared/homeCollection.js";
-import { amountLeft, cleanAmount } from "../../utils/amountInput.js";
+import { rupeesFromPaise } from "../../../shared/labPayment.js";
 import {
   dropUnbilledTestSteps,
   requiredStepsFirst,
   testsBeforeDoctors,
 } from "../../../shared/journeyOrder.js";
 import { categoryColor, categoryLabel } from "../../../shared/patientCategories.js";
-import {
-  OutsourcedNote,
-  OutsourcedTag,
-  TestNames,
-} from "../../components/giniflow/OutsourcedTests.jsx";
 import {
   useJourneyPlan,
   useArriveForAppointment,
@@ -122,32 +99,6 @@ import { useLabSite } from "../../queries/hooks/useLabSite";
 // — but they are not in the building.
 const FINISHED_STATUSES = ["dispensed", "exited"];
 
-const AVATAR_COLOURS = ["#374151", "#1e3a5f", "#14532d", "#7c2d12", "#7f1d1d", "#b45309"];
-
-const initials = (name = "") =>
-  name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase())
-    .join("");
-
-const avatarColour = (id) => AVATAR_COLOURS[Math.abs(id ?? 0) % AVATAR_COLOURS.length];
-
-const SAMPLE_LABEL = {
-  ordered: "Lab notified",
-  payment_pending: "Lab notified",
-  paid: "Lab collecting",
-  drawing: "Being drawn now",
-  sample_collected: "Sample taken",
-  sent_outside: "Sent to outside lab",
-  processing: "In analyzer",
-  results_ready: "Results ready",
-  uploaded: "Results uploaded",
-};
-
-const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
-
 const clock = (iso) =>
   iso
     ? new Date(iso).toLocaleTimeString("en-IN", {
@@ -157,14 +108,6 @@ const clock = (iso) =>
         timeZone: "Asia/Kolkata",
       })
     : "—";
-
-const sinceLabel = (iso) => {
-  if (!iso) return "";
-  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} min ago`;
-  return `${Math.floor(mins / 60)}h ${mins % 60}m ago`;
-};
 
 const identity = (p) =>
   `${p.age ?? "—"}${(p.sex || "")[0] || ""} · ${p.fileNo || "no file no"}${
@@ -210,1027 +153,6 @@ function VisitCategory({ arrival }) {
     <div className="dp-cat">
       <span className={`badge ${category.cls}`}>{category.label}</span>
     </div>
-  );
-}
-
-const CHIP = {
-  pending: { cls: "sp-pay", text: "⚠ Payment pending" },
-  part_paid: { cls: "sp-process", text: "◐ Part paid — balance due" },
-  insurance_claim: { cls: "sp-sample", text: "💰 Claim submitted — awaiting approval" },
-};
-
-const CLAIM_LINE = {
-  submitted: "awaiting approval",
-  approved: "approved",
-  rejected: "rejected by the insurer",
-};
-
-const collectedAtHome = (row) => row.homeSample?.site === "home";
-
-function HomePayTag({ row, due = null }) {
-  if (collectedAtHome(row)) {
-    return (
-      <span className="badge b-home">
-        🏠 Collected at home ·{" "}
-        {[row.homeSample.by, istClock(row.homeSample.at)].filter(Boolean).join(" ")}
-        {due ? ` · ${rupees(due)} pending` : ""}
-      </span>
-    );
-  }
-  return row.homeCollection ? <span className="badge b-home">🏠 Home collection</span> : null;
-}
-
-function OrderCard({ order, onClear, pending, actorId, onCancelTest, canCancelTest }) {
-  const claimed = order.claimState === "submitted";
-  const [form, setForm] = useState(null);
-  const ownClaim = claimed && actorId != null && order.claimSubmittedBy === actorId;
-  const chip = CHIP[order.paymentStatus] || CHIP.pending;
-  const due = Number(order.outstanding ?? order.total);
-  // The cash button offers what can actually be collected — with a claim
-  // standing, the balance is with the insurer, not at the counter.
-  const collectible = Number(order.collectible ?? due);
-
-  const field = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
-  const cashField = (e) => {
-    const cash = cleanAmount(e.target.value, collectible);
-    setForm((f) => ({
-      ...f,
-      amountPaid: cash,
-      amountClaimed: cash === "" ? f.amountClaimed : String(amountLeft(collectible, cash)),
-    }));
-  };
-  const claimField = (e) =>
-    setForm((f) => ({
-      ...f,
-      amountClaimed: cleanAmount(
-        e.target.value,
-        f.kind === "split" ? amountLeft(collectible, f.amountPaid) : collectible,
-      ),
-    }));
-  const send = (method, body) => {
-    onClear(order, method, body);
-    setForm(null);
-  };
-  const positive = (v) => Number(v) > 0;
-  const cashCoversAll =
-    form?.kind === "split" && form.amountPaid !== "" && Number(form.amountPaid) >= collectible;
-  const amountsOk =
-    !form ||
-    (form.kind === "split"
-      ? positive(form.amountPaid) && positive(form.amountClaimed)
-      : form.kind === "claim"
-        ? form.amountClaimed === "" || positive(form.amountClaimed)
-        : true);
-  const submit = (e) => {
-    e.preventDefault();
-    if (!amountsOk) return;
-    if (form.kind === "claim") {
-      send("insurance_claim", {
-        insurer: form.insurer,
-        policyNo: form.policyNo || undefined,
-        amountClaimed: form.amountClaimed ? Number(form.amountClaimed) : undefined,
-      });
-    } else if (form.kind === "split") {
-      send("split", {
-        amountPaid: Number(form.amountPaid),
-        amountClaimed: Number(form.amountClaimed),
-        insurer: form.insurer,
-        policyNo: form.policyNo || undefined,
-      });
-    } else {
-      send("claim_rejected", { note: form.note || undefined });
-    }
-  };
-
-  return (
-    <div className="test-order-card">
-      <div className="toc-head">
-        <div className="toc-av" style={{ background: avatarColour(order.patientId) }}>
-          {initials(order.name)}
-        </div>
-        <div className="toc-who">
-          <div className="toc-name">
-            {order.name} <span className="badge b-ink">{order.fileNo}</span>{" "}
-            <HomePayTag row={order} due={opensLabGate(order.paymentStatus) ? null : due} />
-            {order.kind === "machine" && <span className="badge b-ink">Machine Room</span>}
-            {order.afterConsult && <span className="badge b-amb">New after consultation</span>}
-            {order.paymentStatus !== "paid" && order.onBill === false && (
-              <span className="badge b-amb">Not on HealthRay bill yet</span>
-            )}
-            {order.paymentStatus !== "paid" && order.onBill == null && (
-              <span className="badge b-amb">HealthRay bill not read yet</span>
-            )}
-          </div>
-          <div className="toc-meta">
-            {order.age}
-            {(order.sex || "")[0] || ""}
-            {order.orderedBy ? ` · Ordered by ${order.orderedBy}` : ""} at {clock(order.orderedAt)}{" "}
-            · Urgency: <strong>{order.urgency}</strong>
-          </div>
-        </div>
-        <div className={`sp ${chip.cls}`}>{chip.text}</div>
-      </div>
-
-      <div className="toc-body">
-        {order.tests.map((t) => (
-          <span className="toc-test" key={t.name}>
-            {t.name}
-            {t.outsourced && <OutsourcedTag />} <span className="tp">{rupees(t.price)}</span>
-          </span>
-        ))}
-        {order.tests.length === 0 && <span className="toc-test">No tests listed</span>}
-      </div>
-      {canCancelTest && order.canCancel && (
-        <div className="toc-body">
-          {order.tests
-            .filter((t) => t.id)
-            .map((t) => (
-              <CancelTestControl
-                key={t.id}
-                what={t.name}
-                busy={pending}
-                cases={
-                  order.kind === "lab" && order.tests.length === 1 ? order.cancellableCases : []
-                }
-                amount={t.price}
-                refund={refundOnCancel(order, t)}
-                onCancel={(body, done) => onCancelTest(order, t, body, done)}
-              />
-            ))}
-        </div>
-      )}
-      {canCancelTest && (order.cancelHeld || order.cancelStage === "request") && (
-        <div className="toc-body">
-          {(order.tests.length > 1 ? order.tests.filter((t) => t.id) : order.tests.slice(0, 1)).map(
-            (t) => (
-              <UrgentCancelControl
-                key={t.id || t.name}
-                stage={order.cancelStage}
-                held={order.cancelHeld}
-                target={{
-                  orderId: order.orderId,
-                  ...(order.tests.length > 1 ? { testId: t.id } : {}),
-                }}
-                what={order.tests.length > 1 ? t.name : order.tests.map((x) => x.name).join(", ")}
-                patient={{ name: order.name, fileNo: order.fileNo }}
-              />
-            ),
-          )}
-        </div>
-      )}
-
-      {/* What has actually been collected against what was quoted. The
-          outstanding figure is the one the desk acts on, so it is the one that
-          turns red. */}
-      <div className="toc-total">
-        <span className="amt">Total: {rupees(order.total)}</span>
-        {order.billDiscount > 0 && (
-          <span className="toc-part">{rupees(order.billDiscount)} HealthRay discount</span>
-        )}
-        {order.homeDiscount > 0 && (
-          <span className="toc-part">{rupees(order.homeDiscount)} home-collection discount</span>
-        )}
-        {order.paid > 0 && <span className="toc-part">Collected {rupees(order.paid)}</span>}
-        {order.claimed > 0 && (
-          <span className="toc-part">
-            Claim {rupees(order.claimed)} · {CLAIM_LINE[order.claimState] || order.claimState}
-          </span>
-        )}
-        <span className={due > 0 ? "toc-due" : "toc-settled"}>
-          {due > 0 ? `Outstanding ${rupees(due)}` : "✓ Settled"}
-        </span>
-        <span className="toc-ins">
-          Insurance:{" "}
-          {order.insurer
-            ? `${order.insurer}${order.policyNo ? ` · ${order.policyNo}` : ""}`
-            : "None"}
-        </span>
-      </div>
-
-      {claimed && (
-        <div className="toc-claim">
-          Claim submitted by {order.claimSubmittedByName || "the desk"}
-        </div>
-      )}
-      {order.claimState === "rejected" && (
-        <div className="toc-claim">
-          Claim rejected{order.claimNote ? ` — ${order.claimNote}` : ""} · collect from the patient
-        </div>
-      )}
-
-      <div className="toc-foot">
-        {form ? (
-          <form className="toc-claim-form" onSubmit={submit}>
-            {form.kind === "split" && (
-              <input
-                autoFocus
-                required
-                inputMode="decimal"
-                className="ar-reason-input toc-amt-input"
-                placeholder={`Cash ₹ (max ${collectible})`}
-                aria-label="Cash collected"
-                value={form.amountPaid}
-                onChange={cashField}
-              />
-            )}
-            {form.kind !== "reject" && (
-              <input
-                autoFocus={form.kind === "claim"}
-                required={form.kind === "split"}
-                inputMode="decimal"
-                className="ar-reason-input toc-amt-input"
-                placeholder={form.kind === "split" ? "Claim ₹" : `Claim ₹ (default ${collectible})`}
-                aria-label="Amount claimed"
-                value={form.amountClaimed}
-                onChange={claimField}
-              />
-            )}
-            {form.kind !== "reject" && (
-              <>
-                <input
-                  required
-                  className="ar-reason-input"
-                  placeholder="Insurer or TPA"
-                  value={form.insurer}
-                  onChange={field("insurer")}
-                />
-                <input
-                  className="ar-reason-input"
-                  placeholder="Policy no (optional)"
-                  value={form.policyNo}
-                  onChange={field("policyNo")}
-                />
-              </>
-            )}
-            {form.kind === "reject" && (
-              <input
-                autoFocus
-                className="ar-reason-input"
-                placeholder="What the insurer said (optional)"
-                value={form.note}
-                onChange={field("note")}
-              />
-            )}
-            {cashCoversAll && (
-              <span className="dp-hint">
-                Cash covers the full {rupees(collectible)} — use “received” instead of a split
-              </span>
-            )}
-            <button
-              className={`st-btn ${form.kind === "reject" ? "st-btn-red" : "st-btn-blu"}`}
-              type="submit"
-              disabled={pending || !amountsOk}
-            >
-              {form.kind === "split"
-                ? "Take cash + claim rest"
-                : form.kind === "claim"
-                  ? "Submit claim"
-                  : "Record rejection"}
-            </button>
-            <button className="st-btn st-btn-ghost" type="button" onClick={() => setForm(null)}>
-              Cancel
-            </button>
-          </form>
-        ) : claimed ? (
-          <>
-            {/* The submitter is not offered the approval at all. A disabled
-                button says "you may not", which reads as a fault; what the desk
-                needs is who CAN, so the order can move. */}
-            {ownClaim ? (
-              <span className="toc-await">
-                Waiting for a second person to confirm the insurer approved this — you submitted it
-              </span>
-            ) : (
-              <button
-                className="st-btn st-btn-grn"
-                disabled={pending}
-                onClick={() => onClear(order, "claim_approved")}
-              >
-                ✓ Claim approved — notify lab
-              </button>
-            )}
-            <button
-              className="st-btn st-btn-ghost"
-              disabled={pending}
-              onClick={() => setForm({ kind: "reject", note: "" })}
-            >
-              Insurer refused
-            </button>
-          </>
-        ) : (
-          <>
-            {/* An order with nothing left to collect is still on this list
-                because its status says so — an unpriced order, or one written by
-                an older build. The button stays live: it is what reconciles the
-                order and lets the lab have it, and greying it out would strand
-                the patient with no way forward. */}
-            <button
-              className="st-btn st-btn-grn"
-              disabled={pending}
-              onClick={() => onClear(order, "paid")}
-            >
-              {collectible > 0
-                ? `✓ ${rupees(collectible)} received — notify lab`
-                : "✓ Nothing to collect — notify lab"}
-            </button>
-            <button
-              className="st-btn st-btn-blu"
-              disabled={pending}
-              onClick={() =>
-                setForm({ kind: "claim", insurer: "", policyNo: "", amountClaimed: "" })
-              }
-            >
-              Insurance claim
-            </button>
-            <button
-              className="st-btn st-btn-g"
-              disabled={pending}
-              onClick={() =>
-                setForm({
-                  kind: "split",
-                  insurer: "",
-                  policyNo: "",
-                  amountPaid: "",
-                  amountClaimed: "",
-                })
-              }
-            >
-              Split
-            </button>
-          </>
-        )}
-        <span className="toc-age">{sinceLabel(order.orderedAt)}</span>
-      </div>
-    </div>
-  );
-}
-
-// What the desk is told after a write. The outstanding balance is the useful
-// half: "received" on an order that still owes ₹350 would read as finished.
-const clearedMessage = (order, method, body, r) => {
-  const name = order.name;
-  if (r.alreadySettled) {
-    // The reconcile write settles nothing new but DOES hand the order to the
-    // lab, so "nothing changed" would be the wrong thing to tell the desk.
-    if (r.reconciled) return `✓ ${name}'s order had nothing left to collect — lab notified`;
-    return r.claimState === "submitted"
-      ? `${name}'s claim is already submitted — waiting for approval`
-      : `${name} was already settled — nothing charged twice`;
-  }
-  const rest = r.outstanding > 0 ? `₹${r.outstanding} still outstanding` : "lab can collect now";
-  if (method === "insurance_claim") return `${name}'s claim sent to ${body.insurer} — ${rest}`;
-  if (method === "split")
-    return `✓ ${rupees(body.amountPaid)} taken from ${name}, ${rupees(body.amountClaimed)} claimed from ${body.insurer} — ${rest}`;
-  if (method === "claim_approved") return `✓ ${name}'s claim approved — ${rest}`;
-  if (method === "claim_rejected")
-    return `${name}'s claim was refused — ₹${r.outstanding} to collect from the patient`;
-  return `✓ ${rupees(r.amountPaid - order.paid)} received from ${name} — ${rest}`;
-};
-
-// How a settled order reads once it is off the working list. A split says both
-// halves — "Paid ₹1,250" on an order where the insurer covered ₹900 would be a
-// lie the accounts would have to unpick later.
-const settledAs = (o) => {
-  const cash = Number(o.paid) || 0;
-  const claim = o.claimState === "approved" ? Number(o.claimed) || 0 : 0;
-  if (cash && claim) return `Cash ${rupees(cash)} + claim ${rupees(claim)} approved`;
-  if (claim) return `Insurance claim ${rupees(claim)} approved`;
-  if (!cash && !Number(o.total)) return "No charge";
-  return `Paid ${rupees(cash || o.total)}`;
-};
-
-const byVisit = (orders) => {
-  const groups = new Map();
-  for (const o of orders) {
-    const group = groups.get(o.visitId) || {
-      visitId: o.visitId,
-      name: o.name,
-      fileNo: o.fileNo,
-      age: o.age,
-      sex: o.sex,
-      orders: [],
-    };
-    group.orders.push(o);
-    groups.set(o.visitId, group);
-  }
-  return [...groups.values()].map((g) => ({
-    ...g,
-    paidAt:
-      g.orders
-        .map((o) => o.paidAt)
-        .filter(Boolean)
-        .sort()
-        .at(-1) || null,
-  }));
-};
-
-const refundOnCancel = (order, test) =>
-  refundOnTestCancel({ amountPaid: order.paid, amountTotal: order.total }, test.price);
-
-const testNames = (o) => (o.tests || []).map((t) => t.name).join(", ");
-
-const outsourcedIn = (orders) =>
-  orders.flatMap((o) => (o.tests || []).filter((t) => t.outsourced).map((t) => t.name));
-
-const testCount = (orders) => orders.reduce((n, o) => n + (o.tests || []).length, 0);
-
-const placeOnLine = (o) => {
-  const at = o.billLine.toLowerCase().indexOf(testNames(o).toLowerCase());
-  return at < 0 ? Infinity : at;
-};
-
-const sumOf = (orders, field) => rupeesFromPaise(orders.reduce((s, o) => s + paise(o[field]), 0));
-
-const collectibleOf = (o) => o.collectible ?? o.outstanding ?? o.total;
-
-const collectibleSum = (orders) =>
-  rupeesFromPaise(orders.reduce((s, o) => s + paise(collectibleOf(o)), 0));
-
-const mergedSettlement = (orders) => ({
-  paid: sumOf(orders, "paid"),
-  total: sumOf(orders, "total"),
-  claimed: 0,
-  claimState: "none",
-});
-
-const isCashOnly = (o) => !(Number(o.claimed) > 0) && (o.claimState || "none") === "none";
-
-const statusOf = (o) =>
-  o.kind === "charge"
-    ? "HealthRay charge"
-    : o.kind === "healthray_case"
-      ? `HealthRay lab case ${o.caseNos}`
-      : SAMPLE_LABEL[o.sampleStatus] || String(o.sampleStatus || "").replace(/_/g, " ");
-
-const byBillLine = (orders) => {
-  const rows = [];
-  const lines = new Map();
-  for (const o of orders) {
-    const row = o.billLine && lines.get(o.billLine);
-    if (row) {
-      row.orders.push(o);
-      continue;
-    }
-    const fresh = { key: o.orderId, orders: [o] };
-    if (o.billLine) lines.set(o.billLine, fresh);
-    rows.push(fresh);
-  }
-  return rows.map((r) => {
-    const sorted =
-      r.orders.length > 1
-        ? [...r.orders].sort((a, b) => placeOnLine(a) - placeOnLine(b))
-        : r.orders;
-    return {
-      key: r.key,
-      orders: sorted,
-      label: sorted.map(testNames).join(" + ") || "Tests",
-      outsourced: outsourcedIn(sorted),
-      total: testCount(sorted),
-    };
-  });
-};
-
-const clearedRows = (orders) =>
-  byBillLine(orders)
-    .flatMap((row) =>
-      row.orders.length > 1 && !row.orders.every(isCashOnly)
-        ? row.orders.map((o) => ({
-            key: o.orderId,
-            orders: [o],
-            label: testNames(o) || "Tests",
-            outsourced: outsourcedIn([o]),
-            total: testCount([o]),
-          }))
-        : [row],
-    )
-    .map((row) => ({
-      ...row,
-      settled: settledAs(row.orders.length > 1 ? mergedSettlement(row.orders) : row.orders[0]),
-      status: [...new Set(row.orders.map(statusOf))].join(" / "),
-    }));
-
-const pendingRows = (orders) =>
-  byBillLine(orders).flatMap((row) =>
-    row.orders.length > 1
-      ? [
-          {
-            key: row.key,
-            label: row.label,
-            price: sumOf(row.orders, "total"),
-            outsourced: row.outsourced,
-            total: row.total,
-          },
-        ]
-      : row.orders[0].tests.map((t) => ({
-          key: `${row.key}:${t.name}`,
-          label: t.name,
-          price: t.price,
-          outsourced: t.outsourced ? [t.name] : [],
-          total: 1,
-        })),
-  );
-
-const isPlainPending = (o) =>
-  o.paymentStatus === "pending" &&
-  (o.claimState || "none") === "none" &&
-  !(Number(o.paid) > 0) &&
-  !(Number(o.claimed) > 0);
-
-const byPatient = (orders) => {
-  const groups = new Map();
-  for (const o of orders) {
-    const group = groups.get(o.visitId) || [];
-    group.push(o);
-    groups.set(o.visitId, group);
-  }
-  return [...groups.values()];
-};
-
-function VisitPaymentCard({ orders, onClearAll, pending, onCancelTest, canCancelTest, children }) {
-  const [perTest, setPerTest] = useState(false);
-  const [collecting, setCollecting] = useState(false);
-  const [first] = orders;
-  const total = sumOf(orders, "total");
-  const discount = sumOf(orders, "billDiscount");
-  const collectible = collectibleSum(orders);
-  const busy = pending || collecting;
-  const collectAll = async () => {
-    setCollecting(true);
-    try {
-      await onClearAll(orders);
-    } finally {
-      setCollecting(false);
-    }
-  };
-  const orderedAt = orders
-    .map((o) => o.orderedAt)
-    .filter(Boolean)
-    .sort()[0];
-  const orderedBy = [...new Set(orders.map((o) => o.orderedBy).filter(Boolean))].join(", ");
-
-  return (
-    <div className="test-order-card">
-      <div className="toc-head">
-        <div className="toc-av" style={{ background: avatarColour(first.patientId) }}>
-          {initials(first.name)}
-        </div>
-        <div className="toc-who">
-          <div className="toc-name">
-            {first.name} <span className="badge b-ink">{first.fileNo}</span>
-            {orders.some((o) => o.kind === "machine") && (
-              <span className="badge b-ink">Machine Room</span>
-            )}
-          </div>
-          <div className="toc-meta">
-            {first.age}
-            {(first.sex || "")[0] || ""}
-            {orderedBy ? ` · Ordered by ${orderedBy}` : ""} at {clock(orderedAt)} · Urgency:{" "}
-            <strong>{first.urgency}</strong>
-          </div>
-        </div>
-        <div className={`sp ${CHIP.pending.cls}`}>{CHIP.pending.text}</div>
-      </div>
-
-      <div className="toc-body">
-        {pendingRows(orders).map((row) => (
-          <span className="toc-test" key={row.key}>
-            {row.label}
-            <OutsourcedNote names={row.outsourced} total={row.total} />{" "}
-            <span className="tp">{rupees(row.price)}</span>
-          </span>
-        ))}
-      </div>
-
-      {canCancelTest && !perTest && orders.some((o) => o.canCancel) && (
-        <div className="toc-body">
-          {orders
-            .filter((o) => o.canCancel)
-            .flatMap((o) =>
-              o.tests
-                .filter((t) => t.id)
-                .map((t) => (
-                  <CancelTestControl
-                    key={t.id}
-                    what={t.name}
-                    busy={busy}
-                    cases={o.kind === "lab" && o.tests.length === 1 ? o.cancellableCases : []}
-                    amount={t.price}
-                    refund={refundOnCancel(o, t)}
-                    onCancel={(body, done) => onCancelTest(o, t, body, done)}
-                  />
-                )),
-            )}
-        </div>
-      )}
-
-      <div className="toc-total">
-        <span className="amt">Total: {rupees(total)}</span>
-        {discount > 0 && <span className="toc-part">{rupees(discount)} HealthRay discount</span>}
-        <span className={collectible > 0 ? "toc-due" : "toc-settled"}>
-          {collectible > 0 ? `Outstanding ${rupees(collectible)}` : "✓ Settled"}
-        </span>
-        <span className="toc-ins">Insurance: None</span>
-      </div>
-
-      {perTest ? (
-        <>
-          <div className="toc-foot">
-            <button type="button" className="st-btn st-btn-g" onClick={() => setPerTest(false)}>
-              ← Back to one payment
-            </button>
-          </div>
-          {children}
-        </>
-      ) : (
-        <div className="toc-foot">
-          <button type="button" className="st-btn st-btn-grn" disabled={busy} onClick={collectAll}>
-            {collecting
-              ? "Recording payment…"
-              : collectible > 0
-                ? `✓ ${rupees(collectible)} received — notify lab`
-                : "✓ Nothing to collect — notify lab"}
-          </button>
-          <button
-            type="button"
-            className="st-btn st-btn-g"
-            disabled={busy}
-            onClick={() => setPerTest(true)}
-          >
-            Insurance or split per test
-          </button>
-          <span className="toc-age">{sinceLabel(orderedAt)}</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// How many of the day's cleared orders the tab shows before it is asked.
-
-// Exported so the render smoke can execute the payments branch too — only one
-// tab is mounted at a time, and the tab that is not showing still has to render.
-function HealthrayLabCard({ lab, onClear, pending, onCancelCase, canCancelTest }) {
-  return (
-    <div className="test-order-card">
-      <div className="toc-head">
-        <div className="toc-av" style={{ background: avatarColour(lab.patientId) }}>
-          {initials(lab.name)}
-        </div>
-        <div className="toc-who">
-          <div className="toc-name">
-            {lab.name} <span className="badge b-ink">{lab.fileNo}</span>{" "}
-            <HomePayTag row={lab} due={lab.labBill?.total || null} />
-          </div>
-          <div className="toc-meta">
-            {lab.age}
-            {(lab.sex || "")[0] || ""} · Lab tests ordered in HealthRay
-            {lab.registeredAt ? ` · registered ${clock(lab.registeredAt)}` : ""}
-          </div>
-        </div>
-        <div className={`sp ${CHIP.pending.cls}`}>{CHIP.pending.text}</div>
-      </div>
-      {lab.cases.map((c) => (
-        <div className="toc-body" key={c.caseNo}>
-          <span className="toc-test">
-            Case {c.caseNo} ·{" "}
-            <TestNames names={c.tests} outsourced={c.outsourcedTests} separator=", " />
-          </span>
-        </div>
-      ))}
-      {lab.labBill ? (
-        <>
-          <div className="toc-body">
-            {lab.labBill.lines.map((l) => (
-              <span className="toc-test" key={l.name}>
-                {l.name} <span className="tp">{rupees(l.amount)}</span>
-              </span>
-            ))}
-          </div>
-          <div className="toc-total">
-            <span className="amt">Lab total: {rupees(lab.labBill.total)}</span>
-            {lab.labBill.discount > 0 && (
-              <span className="toc-part">{rupees(lab.labBill.discount)} HealthRay discount</span>
-            )}
-            {lab.consultationAmount != null && (
-              <span className="toc-part">Billing: {rupees(lab.consultationAmount)}</span>
-            )}
-          </div>
-        </>
-      ) : (
-        <div className="toc-total">
-          <span className="toc-part">Not billed in HealthRay yet — amount unknown</span>
-        </div>
-      )}
-      <div className="toc-foot">
-        {lab.billingStepId && (
-          <button
-            type="button"
-            className="st-btn st-btn-grn"
-            disabled={pending}
-            onClick={() => onClear(lab, "billing")}
-          >
-            ✓ {lab.consultationAmount != null ? `${rupees(lab.consultationAmount)} ` : ""}Billing
-            cleared
-          </button>
-        )}
-        <button
-          type="button"
-          className="st-btn st-btn-grn"
-          disabled={pending}
-          onClick={() => onClear(lab, "lab")}
-        >
-          ✓ {lab.labBill ? `${rupees(lab.labBill.total)} ` : ""}Lab payment cleared
-        </button>
-        {canCancelTest && (
-          <CancelTestControl
-            what="lab tests"
-            busy={pending}
-            cases={lab.cases}
-            onCancel={(body, done) => onCancelCase(lab, body, done)}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ChargeCard({ charge, onClearCharge, pending, onCancelCharge, canCancelTest }) {
-  return (
-    <div className="test-order-card">
-      <div className="toc-head">
-        <div className="toc-av" style={{ background: avatarColour(charge.patientId) }}>
-          {initials(charge.name)}
-        </div>
-        <div className="toc-who">
-          <div className="toc-name">
-            {charge.name} <span className="badge b-ink">{charge.fileNo}</span>
-          </div>
-          <div className="toc-meta">
-            {charge.age}
-            {(charge.sex || "")[0] || ""} · On the HealthRay bill · no floor step
-          </div>
-        </div>
-        <div className={`sp ${CHIP.pending.cls}`}>{CHIP.pending.text}</div>
-      </div>
-      <div className="toc-body">
-        <span className="toc-test">
-          {charge.item} <span className="tp">{rupees(charge.amount)}</span>
-        </span>
-      </div>
-      <div className="toc-foot">
-        <button
-          type="button"
-          className="st-btn st-btn-grn"
-          disabled={pending}
-          onClick={() => onClearCharge(charge)}
-        >
-          ✓ {rupees(charge.amount)} received
-        </button>
-        {canCancelTest && (
-          <CancelTestControl
-            what={charge.item}
-            busy={pending}
-            amount={charge.amount}
-            onCancel={(body, done) => onCancelCharge(charge, body, done)}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-const chargeAsOrder = (c) => ({
-  orderId: c.chargeId,
-  visitId: c.visitId,
-  name: c.name,
-  fileNo: c.fileNo,
-  age: c.age,
-  sex: c.sex,
-  kind: "charge",
-  tests: [{ name: c.item }],
-  paid: c.amount,
-  total: c.amount,
-  claimed: 0,
-  claimState: "none",
-  sampleStatus: null,
-  paidAt: c.paidAt,
-});
-
-const healthrayCaseAsOrder = (lab) => ({
-  orderId: `case:${lab.visitId}`,
-  visitId: lab.visitId,
-  name: lab.name,
-  fileNo: lab.fileNo,
-  age: lab.age,
-  sex: lab.sex,
-  kind: "healthray_case",
-  caseNos: lab.cases.map((c) => c.caseNo).join(", "),
-  tests: lab.cases.flatMap((c) =>
-    (c.tests || []).map((name) => ({
-      name,
-      outsourced: (c.outsourcedTests || []).includes(name),
-    })),
-  ),
-  paid: lab.labBill?.total ?? 0,
-  total: lab.labBill?.total ?? 0,
-  claimed: 0,
-  claimState: "none",
-  sampleStatus: null,
-  paidAt: lab.clearedAt,
-});
-
-export function PaymentsTab({
-  data,
-  isLoading,
-  onClear,
-  onClearAll = () => {},
-  pending,
-  actorId,
-  search = "",
-  setSearch = () => {},
-  onClearCharge = () => {},
-  chargePending = false,
-  onCancelTest = () => {},
-  onCancelCharge = () => {},
-  canCancelTest = false,
-  onClearHealthrayLab = () => {},
-  onCancelHealthrayCase = () => {},
-  healthrayLabPending = false,
-  counts = null,
-}) {
-  const [homeOnly, setHomeOnly] = useState(false);
-  const homeWaiting = data?.counts?.homePaymentPending || 0;
-  const onlyHome = homeOnly && homeWaiting > 0;
-  const queue = (data?.pending || []).filter((o) => !onlyHome || collectedAtHome(o));
-  const healthrayLab = (data?.healthrayLab || []).filter((l) => !onlyHome || collectedAtHome(l));
-  const chargeQueue = onlyHome ? [] : data?.charges?.pending || [];
-  const cleared = byVisit([
-    ...(data?.awaitingSample || []),
-    ...(data?.cleared || []),
-    ...(data?.charges?.cleared || []).map(chargeAsOrder),
-    ...(data?.healthrayLabCleared || []).map(healthrayCaseAsOrder),
-  ]);
-  const searching = (data?.query || "").length >= 2;
-
-  return (
-    <>
-      {/* Shown only while the catalogue still holds the mockup's figures —
-          it disappears by itself once the hospital's tariff is loaded.
-          Reception must not collect against a placeholder unknowingly. */}
-      {data?.pricesArePlaceholders && (
-        <div className="price-note">
-          ⚠ Prices are placeholders from the design mockup, not the hospital's tariff — check the
-          amount before collecting.
-        </div>
-      )}
-
-      <div className="ar-controls pay-controls">
-        {counts ? (
-          <div className="stats stats--pay" aria-label="Payments today">
-            <div className="stat">
-              <div className="sv sv-red">{counts.pending}</div>
-              <div className="sl">Payment pending</div>
-            </div>
-            <div className="stat">
-              <div className="sv sv-tl">{counts.awaitingSample}</div>
-              <div className="sl">Sample pending</div>
-            </div>
-            <div className="stat">
-              <div className="sv sv-grn">{counts.cleared}</div>
-              <div className="sl">Cleared</div>
-            </div>
-          </div>
-        ) : null}
-        <div className="sq-search">
-          <input
-            value={search}
-            aria-label="Search payments"
-            placeholder="Search payments — name, file no or phone"
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          {search && (
-            <button type="button" className="st-btn st-btn-g" onClick={() => setSearch("")}>
-              Clear
-            </button>
-          )}
-        </div>
-        {homeWaiting > 0 && (
-          <div className="sq-filters" role="group" aria-label="Filter payments">
-            <button
-              type="button"
-              className={onlyHome ? "on" : ""}
-              aria-pressed={onlyHome}
-              onClick={() => setHomeOnly(!homeOnly)}
-            >
-              🏠 Home collection — payment pending
-              <span className="sq-fcount">{homeWaiting}</span>
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div className="pay-cols">
-        <div className="pay-col">
-          <div>
-            <div className="grp-lbl grp-lbl-sp">🔴 Payment pending — collect and clear</div>
-            {isLoading && <div className="empty-note">Loading…</div>}
-            {!isLoading && queue.length === 0 && healthrayLab.length === 0 && (
-              <div className="empty-note">
-                {searching
-                  ? "No pending payment matches that search."
-                  : "Nothing waiting for payment."}
-              </div>
-            )}
-            {byPatient(queue).map((orders) => {
-              const cards = orders.map((order) => (
-                <OrderCard
-                  key={order.orderId}
-                  order={order}
-                  onClear={onClear}
-                  pending={pending}
-                  actorId={actorId}
-                  onCancelTest={onCancelTest}
-                  canCancelTest={canCancelTest}
-                />
-              ));
-              if (orders.length < 2 || !orders.every(isPlainPending))
-                return <Fragment key={orders[0].visitId}>{cards}</Fragment>;
-              return (
-                <VisitPaymentCard
-                  key={orders[0].visitId}
-                  orders={orders}
-                  onClearAll={onClearAll}
-                  pending={pending}
-                  onCancelTest={onCancelTest}
-                  canCancelTest={canCancelTest}
-                >
-                  {cards}
-                </VisitPaymentCard>
-              );
-            })}
-            {healthrayLab.map((lab) => (
-              <HealthrayLabCard
-                key={lab.visitId}
-                lab={lab}
-                onClear={onClearHealthrayLab}
-                pending={healthrayLabPending}
-                onCancelCase={onCancelHealthrayCase}
-                canCancelTest={canCancelTest}
-              />
-            ))}
-          </div>
-
-          {chargeQueue.length > 0 && (
-            <div>
-              <div className="grp-lbl grp-lbl-sp">🧾 Billed in HealthRay — collect only</div>
-              {chargeQueue.map((charge) => (
-                <ChargeCard
-                  key={charge.chargeId}
-                  charge={charge}
-                  onClearCharge={onClearCharge}
-                  pending={chargePending}
-                  onCancelCharge={onCancelCharge}
-                  canCancelTest={canCancelTest}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="pay-col">
-          <div>
-            <div className="grp-lbl grp-lbl-sp">✅ Cleared today — lab notified</div>
-            {!isLoading && cleared.length === 0 && (
-              <div className="empty-note">Nothing cleared yet today.</div>
-            )}
-            {cleared.length > 0 && (
-              <div className="pay-cleared-list">
-                {cleared.map((g) => (
-                  <div className="test-order-card is-cleared" key={g.visitId}>
-                    <div className="toc-head">
-                      <div className="toc-cleared">
-                        {g.name} {g.fileNo && <span className="badge b-ink">{g.fileNo}</span>}
-                        <div className="toc-meta">
-                          {g.age ?? "—"}
-                          {(g.sex || "")[0] || ""}
-                        </div>
-                        {clearedRows(g.orders).map((row) => (
-                          <div className="tc-detail" key={row.key}>
-                            {row.label}
-                            <OutsourcedNote names={row.outsourced} total={row.total} /> ·{" "}
-                            {row.settled} · {row.status}
-                          </div>
-                        ))}
-                      </div>
-                      <div className="sp sp-paid">✓ Cleared {clock(g.paidAt)}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </>
   );
 }
 
@@ -2827,7 +1749,6 @@ function HealthraySync({ onNote }) {
 
 const TAB = {
   arrivals: "arrivals",
-  payments: "payments",
 };
 
 const DESK_TAB_KEYS = Object.keys(DESK_TABS);
@@ -2901,7 +1822,6 @@ function ReceptionTabs({
   deskTabs,
   arrivalsCount,
   toMarkArrivedCount,
-  paymentsCount,
   refundsCount,
   requestsCount,
   feeChangesCount,
@@ -2982,15 +1902,6 @@ function ReceptionTabs({
           )}
         </button>
       ))}
-      <button
-        type="button"
-        role="tab"
-        aria-selected={tab === TAB.payments}
-        className={`st-tab${tab === TAB.payments ? " on" : ""}`}
-        onClick={() => setTab(TAB.payments)}
-      >
-        Payments <span className="st-tab-n">{paymentsCount}</span>
-      </button>
     </div>
   );
 }
@@ -3004,8 +1915,6 @@ export default function ReceptionStationPage() {
   const sentPatient = useLocation().state?.duePatient ?? null;
   const [search, setSearch] = useState("");
   const [term, setTerm] = useState("");
-  const [paySearch, setPaySearch] = useState("");
-  const [payTerm, setPayTerm] = useState("");
   const [toast, setToast] = useState("");
   const toastTimer = useRef(null);
 
@@ -3016,14 +1925,9 @@ export default function ReceptionStationPage() {
     const t = setTimeout(() => setTerm(search.trim()), 250);
     return () => clearTimeout(t);
   }, [search]);
-  useEffect(() => {
-    const t = setTimeout(() => setPayTerm(paySearch.trim()), 250);
-    return () => clearTimeout(t);
-  }, [paySearch]);
 
-  const { data, isLoading } = useReceptionQueue(undefined, payTerm);
   const { data: arrivals, isLoading: arrivalsLoading } = useArrivals(undefined, term);
-  const live = useGiniflowLive({ date: data?.date });
+  const live = useGiniflowLive({ date: arrivals?.date });
   const pauseVisit = useGiniflowPauseVisit();
   const resumeVisit = useGiniflowResumeVisit();
   const pauseErr = (e) =>
@@ -3057,36 +1961,8 @@ export default function ReceptionStationPage() {
           },
         );
   };
-  // /api/auth/me returns the doctors row, so the id is `id` — `doctor_id` is
-  // only the login form's field name, and reading it left the card unable to
-  // tell whose claim it was showing.
-  const actorId = useAuthStore((st) => st.currentDoctor?.id ?? st.currentDoctor?.doctor_id);
-  const clearPayment = useClearPayment();
-  const clearCharge = useClearCharge();
-  const cancelTest = useCancelReceptionTest();
-  const cancelCharge = useCancelCharge();
-  const cancelCase = useCancelReceptionCase();
-  const journeyStep = useJourneyStep();
-  const canCancelTest = hasCapability(
-    useAuthStore((st) => st.currentDoctor?.role),
-    CAPS.GINIFLOW_TEST_CANCEL,
-  );
   const arrivalAction = useArrivalAction();
 
-  const pending = data?.pending || [];
-  const awaitingSample = data?.awaitingSample || [];
-  const cleared = data?.cleared || [];
-  const baseCounts = data?.counts || {
-    pending: pending.length,
-    awaitingSample: awaitingSample.length,
-    cleared: cleared.length,
-  };
-  const payCounts = {
-    ...baseCounts,
-    pending:
-      baseCounts.pendingPatients ??
-      baseCounts.pending + (baseCounts.charges || 0) + (baseCounts.healthrayLab || 0),
-  };
   const counts = arrivals?.counts || { expected: 0, onFloor: 0, notComing: 0 };
 
   const showToast = (msg, ms = TOAST_MS) => {
@@ -3106,128 +1982,6 @@ export default function ReceptionStationPage() {
 
   const failed = (e, fallback) =>
     showToast(e?.response?.data?.detail || e?.response?.data?.error || fallback);
-
-  // Every write carries the version the card was rendered from, so a second tap
-  // on a stale card is refused by the server instead of charging twice.
-  const onCancelTest = (order, test, body, done) =>
-    cancelTest.mutate(
-      { orderId: order.orderId, testId: test.id, ...body },
-      {
-        onSuccess: (r) => {
-          done();
-          showToast(
-            cancelledText(`✕ ${test.name} cancelled for ${order.name}`, r),
-            cancelledToastMs(r),
-          );
-        },
-        onError: (e) => failed(e, "Could not cancel — nothing was changed"),
-      },
-    );
-
-  const onCancelCharge = (charge, body, done) =>
-    cancelCharge.mutate(
-      { chargeId: charge.chargeId, ...body },
-      {
-        onSuccess: () => {
-          done();
-          showToast(`✕ ${charge.item} cancelled for ${charge.name}`);
-        },
-        onError: (e) => failed(e, "Could not cancel — nothing was changed"),
-      },
-    );
-
-  const onClearHealthrayLab = async (lab, which) => {
-    try {
-      if (which === "billing") {
-        await journeyStep.mutateAsync({ stepId: lab.billingStepId, status: "done" });
-        showToast(`✓ Billing cleared for ${lab.name}`);
-        return;
-      }
-      await journeyStep.mutateAsync({ stepId: lab.labBillingStepId, status: "done" });
-      showToast(`✓ Lab payment cleared for ${lab.name} — the lab can take the sample`);
-    } catch (e) {
-      failed(e, "Could not clear this — check the journey");
-    }
-  };
-
-  const onCancelHealthrayCase = (lab, body, done) =>
-    cancelCase.mutate(
-      {
-        ...body,
-        caseNos: body.caseNos?.length ? body.caseNos : lab.cases.map((c) => c.caseNo),
-        patientId: lab.patientId,
-        date: lab.visitDate,
-      },
-      {
-        onSuccess: () => {
-          done();
-          showToast(`✕ Lab tests cancelled for ${lab.name}`);
-        },
-        onError: (e) => failed(e, "Could not cancel — nothing was changed"),
-      },
-    );
-
-  const onClearCharge = (charge) =>
-    clearCharge.mutate(
-      { chargeId: charge.chargeId },
-      {
-        onSuccess: (r) =>
-          showToast(
-            r.unchanged
-              ? `${charge.item} was already cleared`
-              : `✓ ${rupees(charge.amount)} received from ${charge.name} for ${charge.item}`,
-          ),
-        onError: (e) => failed(e, "Could not clear this — nothing was changed"),
-      },
-    );
-
-  const [notOnBill, setNotOnBill] = useState(null);
-  const isNotOnBill = (e) => e?.response?.data?.code === "not_on_bill";
-
-  const onClear = (order, method, body = {}) =>
-    clearPayment.mutate(
-      { orderId: order.orderId, method, version: order.version, ...body },
-      {
-        onSuccess: (r) => showToast(clearedMessage(order, method, body, r)),
-        onError: (e) =>
-          isNotOnBill(e)
-            ? setNotOnBill({
-                message: e.response.data.error,
-                retry: () => onClear(order, method, { ...body, confirmNotOnBill: true }),
-              })
-            : failed(e, "Could not clear this — nothing was changed"),
-      },
-    );
-
-  const onClearAll = async (orders, confirmNotOnBill = false) => {
-    const name = orders[0].name;
-    const amount = collectibleSum(orders);
-    let cleared = 0;
-    try {
-      for (const order of orders) {
-        await clearPayment.mutateAsync({
-          orderId: order.orderId,
-          method: "paid",
-          version: order.version,
-          ...(confirmNotOnBill ? { confirmNotOnBill: true } : {}),
-        });
-        cleared++;
-      }
-      showToast(`✓ ${rupees(amount)} received from ${name} — lab can collect now`);
-    } catch (e) {
-      if (isNotOnBill(e)) {
-        const rest = orders.slice(cleared);
-        setNotOnBill({
-          message: `${e.response.data.error}${rest.length > 1 ? ` (${rest.length} payments left for ${name})` : ""}`,
-          retry: () => onClearAll(rest, true),
-        });
-      } else if (cleared)
-        showToast(
-          `Cleared ${cleared} of ${orders.length} payments for ${name} — the rest are still pending`,
-        );
-      else failed(e, "Could not clear this — nothing was changed");
-    }
-  };
 
   const ACTION_DONE = {
     arrived: (name) => `✓ ${name} checked in — they are on the floor now`,
@@ -3258,7 +2012,7 @@ export default function ReceptionStationPage() {
     if (raised?.labTests?.length) parts.push(`${raised.labTests.length} lab test(s)`);
     const machines = (raised?.machine || []).filter((m) => !m.alreadyThere).length;
     if (machines) parts.push(`${machines} machine test(s)`);
-    return parts.length ? ` · ${parts.join(" + ")} to bill on Test Orders` : "";
+    return parts.length ? ` · ${parts.join(" + ")} to bill on the Bill tab` : "";
   };
 
   const onCheckedIn = (arrival, result, sentWhatsapp) =>
@@ -3283,7 +2037,6 @@ export default function ReceptionStationPage() {
           ...(arrivals?.notComing || []),
         ].filter((a) => a.awaitsAppointment).length
       }
-      paymentsCount={payCounts.pending}
       refundsCount={refundsToPay}
       requestsCount={approvals.total}
       feeChangesCount={feeChanges.length}
@@ -3294,20 +2047,6 @@ export default function ReceptionStationPage() {
   return (
     <div className="gf">
       <StationNotice station="reception" />
-      <ConfirmModal
-        open={!!notOnBill}
-        title="Not on the HealthRay bill"
-        message={`${notOnBill?.message || ""}. Clear the payment anyway?`}
-        confirmLabel="Clear anyway"
-        cancelLabel="Go back"
-        variant="primary"
-        onConfirm={() => {
-          const retry = notOnBill.retry;
-          setNotOnBill(null);
-          retry();
-        }}
-        onCancel={() => setNotOnBill(null)}
-      />
       <div className="rail rc-rail">
         <div className="rl">Reception</div>
         <div className="rsep" />
@@ -3378,41 +2117,19 @@ export default function ReceptionStationPage() {
               </div>
             ) : null}
 
-            {tab === TAB.arrivals ? (
-              <ArrivalsTab
-                onCheckedIn={onCheckedIn}
-                onFailed={(e) => failed(e, "Could not check this patient in — nothing was changed")}
-                onNote={showToast}
-                search={search}
-                setSearch={setSearch}
-                data={arrivals}
-                isLoading={arrivalsLoading}
-                onAct={onAct}
-                onPauseToggle={onPauseToggle}
-                breakBusy={pauseVisit.isPending || resumeVisit.isPending}
-                busy={arrivalAction.isPending}
-              />
-            ) : (
-              <PaymentsTab
-                data={data}
-                isLoading={isLoading}
-                onClear={onClear}
-                onClearAll={onClearAll}
-                pending={clearPayment.isPending || cancelTest.isPending}
-                actorId={actorId}
-                search={paySearch}
-                setSearch={setPaySearch}
-                onClearCharge={onClearCharge}
-                chargePending={clearCharge.isPending || cancelCharge.isPending}
-                onCancelTest={onCancelTest}
-                onCancelCharge={onCancelCharge}
-                canCancelTest={canCancelTest}
-                onClearHealthrayLab={onClearHealthrayLab}
-                onCancelHealthrayCase={onCancelHealthrayCase}
-                healthrayLabPending={journeyStep.isPending || cancelCase.isPending}
-                counts={payCounts}
-              />
-            )}
+            <ArrivalsTab
+              onCheckedIn={onCheckedIn}
+              onFailed={(e) => failed(e, "Could not check this patient in — nothing was changed")}
+              onNote={showToast}
+              search={search}
+              setSearch={setSearch}
+              data={arrivals}
+              isLoading={arrivalsLoading}
+              onAct={onAct}
+              onPauseToggle={onPauseToggle}
+              breakBusy={pauseVisit.isPending || resumeVisit.isPending}
+              busy={arrivalAction.isPending}
+            />
           </div>
         </div>
       )}

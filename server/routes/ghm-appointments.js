@@ -42,7 +42,8 @@ import { isClosedDay } from "../../shared/followUp.js";
 import { listSchemes, isKnownScheme } from "../services/patientSchemes.js";
 import { slotDoctorKey, slotStartHour } from "../../shared/slotHour.js";
 import { resolveAppointmentId, opensLead } from "../services/ghmLead.js";
-import { editBlockedFor } from "../services/obtAssignments.js";
+import { noteGhmEdit, signalGhm } from "../services/ghmLive.js";
+import { canAssignSlots } from "../services/obtAssignments.js";
 import {
   missedCte,
   historyCte,
@@ -238,6 +239,20 @@ const normalizeDemographics = ({ dob, age, sex }) => {
   return { dob: d.value, age: d.value ? ageFromDob(d.value) : a.value, sex: s.value };
 };
 
+const SLOT_FIELDS = new Set(["time_slot", "preferred_time_slot"]);
+const NO_SLOT_ACCESS = "You don't have access to assign time slots.";
+
+const changesSlotWithoutAccess = async (req, appointmentId) => {
+  const sent = [...SLOT_FIELDS].filter((k) => k in (req.body || {}));
+  if (!sent.length || (await canAssignSlots(req.doctor))) return false;
+  const cur = await pool.query(
+    "SELECT time_slot, preferred_time_slot FROM appointments WHERE id=$1",
+    [appointmentId],
+  );
+  const now = cur.rows[0] || {};
+  return sent.some((k) => (req.body[k] || null) !== (now[k] || null));
+};
+
 const claimant = (req) => ({
   id: req.doctor?.doctor_id || null,
   name: (req.doctor?.short_name || req.doctor?.doctor_name || "").trim(),
@@ -333,8 +348,6 @@ router.post("/ghm-appointments/active-calls", async (req, res) => {
 // POST /api/ghm-appointments/:id/calling — take the claim
 router.post("/ghm-appointments/:id/calling", async (req, res) => {
   try {
-    const blocked = await editBlockedFor(req, req.params.id, { call: true });
-    if (blocked) return res.status(403).json({ error: blocked });
     const id = await resolveAppointmentId(req.params.id, { create: true });
     if (!id) return res.status(404).json({ error: NO_APPOINTMENT_ERROR });
     const me = claimant(req);
@@ -379,7 +392,10 @@ router.post("/ghm-appointments/:id/calling", async (req, res) => {
         RETURNING id, calling_by, calling_by_id, calling_since`,
       [id, me.name, me.id],
     );
-    if (r.rows.length) return res.json(r.rows[0]);
+    if (r.rows.length) {
+      await noteGhmEdit(id, me, "calling");
+      return res.json(r.rows[0]);
+    }
 
     const held = await pool.query(
       `SELECT a.id, ${claimCols("a")} FROM appointments a WHERE a.id=$1`,
@@ -418,6 +434,7 @@ router.delete("/ghm-appointments/:id/calling", async (req, res) => {
         RETURNING id`,
       [id],
     );
+    await signalGhm({ kind: "calling", appointmentId: id, actorId: me.id });
     res.json({ ok: true, id: r.rows[0]?.id ?? id });
   } catch (e) {
     handleError(res, e, "GHM call release");
@@ -515,8 +532,6 @@ router.post("/call-attempts", async (req, res) => {
     if (!req.body?.appointment_id)
       return res.status(400).json({ error: "appointment_id required" });
     if (!outcome) return res.status(400).json({ error: "outcome required" });
-    const blocked = await editBlockedFor(req, req.body.appointment_id, { call: true }, client);
-    if (blocked) return res.status(403).json({ error: blocked });
 
     await client.query("BEGIN");
 
@@ -586,6 +601,7 @@ router.post("/call-attempts", async (req, res) => {
     await releaseClaim(client, appointment_id);
 
     await client.query("COMMIT");
+    await noteGhmEdit(appointment_id, actor, "call");
     res.status(201).json(ins.rows[0]);
   } catch (e) {
     await client.query("ROLLBACK");
@@ -611,11 +627,6 @@ router.delete("/call-attempts/:id", async (req, res) => {
       return res.status(404).json({ error: "Call attempt not found" });
     }
     const apptId = found.rows[0].appointment_id;
-    const blocked = await editBlockedFor(req, apptId, { call: true }, client);
-    if (blocked) {
-      await client.query("ROLLBACK");
-      return res.status(403).json({ error: blocked });
-    }
     const gone = found.rows[0];
     await logAppointmentEvent(client, {
       appointmentId: apptId,
@@ -673,6 +684,7 @@ router.delete("/call-attempts/:id", async (req, res) => {
     }
 
     await client.query("COMMIT");
+    await noteGhmEdit(apptId, claimant(req), "call");
     res.json({ ok: true, appointment_id: apptId });
   } catch (e) {
     await client.query("ROLLBACK");
@@ -1257,6 +1269,11 @@ router.get("/ghm-appointments", async (req, res) => {
                      THEN COALESCE(${BOOKING_HOME_SAMPLE_SQL("a", homeOpts)}->>'site', 'not_collected') END
                   AS home_sample_status,
                 a.patient_category,
+                (SELECT json_build_object('by', l.changed_by, 'at', l.changed_at)
+                   FROM appointment_change_log l
+                  WHERE l.appointment_id = a.id AND l.changed_by_id IS NOT NULL
+                  ORDER BY l.changed_at DESC, l.id DESC
+                  LIMIT 1) AS last_change,
                 p.id AS patient_id, p.address, p.email,
                 COALESCE(p.is_blocked, FALSE) AS is_blocked,
                 p.dob AS disp_dob,
@@ -1698,7 +1715,7 @@ router.post("/ghm-appointments", async (req, res) => {
       return res
         .status(400)
         .json({ error: "patient_name, appointment_date, doctor_name required" });
-    if (!String(time_slot || "").trim())
+    if (!String(time_slot || "").trim() && (await canAssignSlots(req.doctor)))
       return res.status(400).json({ error: "Select a time slot before booking." });
 
     const booked_by_name = String(bookedByInput || "").trim() || claimant(req).name || null;
@@ -2084,6 +2101,7 @@ router.post("/ghm-appointments", async (req, res) => {
         actor: req.doctor,
         reason: req.body.over_limit_reason,
       });
+    if (r.rows[0]) await noteGhmEdit(r.rows[0].id, claimant(req), "booking");
     res.status(201).json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "GHM appointment create");
@@ -2091,22 +2109,13 @@ router.post("/ghm-appointments", async (req, res) => {
 });
 
 // PATCH /api/ghm-appointments/:id — update GHM fields
-const CALL_FIELDS = [
-  "call_status",
-  "call_made_by",
-  "call_date",
-  "call_notes",
-  "call_reschedule_date",
-];
-
 router.patch("/ghm-appointments/:id", async (req, res) => {
   try {
-    const blocked = await editBlockedFor(req, req.params.id, {
-      call: CALL_FIELDS.some((k) => k in req.body),
-    });
-    if (blocked) return res.status(403).json({ error: blocked });
     const id = await resolveAppointmentId(req.params.id, { create: opensLead(req.body) });
     if (!id) return res.status(404).json({ error: NO_APPOINTMENT_ERROR });
+    if (await changesSlotWithoutAccess(req, id)) {
+      return res.status(403).json({ error: NO_SLOT_ACCESS });
+    }
     const sentKeys = new Set(Object.keys(req.body));
     const allowed = [
       "time_slot",
@@ -2462,6 +2471,7 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
         actor: req.doctor,
         reason: req.body.over_limit_reason,
       });
+    await noteGhmEdit(id, actor);
     res.json(r.rows[0]);
   } catch (e) {
     handleError(res, e, "GHM appointment update");
@@ -2572,10 +2582,9 @@ router.delete("/appointment-changes/:id", async (req, res) => {
       return res.status(404).json({ error: "Change log not found" });
     }
     const { appointment_id, field, old_value, changed_at } = found.rows[0];
-    const blocked = await editBlockedFor(req, appointment_id, {}, client);
-    if (blocked) {
+    if (SLOT_FIELDS.has(field) && !(await canAssignSlots(req.doctor, client))) {
       await client.query("ROLLBACK");
-      return res.status(403).json({ error: blocked });
+      return res.status(403).json({ error: NO_SLOT_ACCESS });
     }
     if (AUDIT_FIELDS.has(field)) {
       await client.query("ROLLBACK");
@@ -2616,6 +2625,7 @@ router.delete("/appointment-changes/:id", async (req, res) => {
     }
 
     await client.query("COMMIT");
+    await noteGhmEdit(appointment_id, claimant(req), "history");
     res.json({ ok: true, reverted_field: field, appointment_id });
   } catch (e) {
     await client.query("ROLLBACK");

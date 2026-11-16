@@ -165,6 +165,7 @@ export const PAGE_CAPABILITIES = {
   "/reports/opd-dashboard": CAP.OPD_SUMMARY,
   "/billing/cghs-register": CAP.BILLING_CLAIMS,
   "/billing/dues": CAP.BILLING_DUES,
+  "/billing/audit": CAP.BILLING_AUDIT,
   "/crm/home": CAP.CRM_ACCESS,
   "/crm/doctor/:doctorId": CAP.CRM_ACCESS,
   "/crm/doctor/:doctorId/edit": CAP.CRM_ACCESS,
@@ -209,6 +210,7 @@ export const ROLE_NAV_ALLOWLIST = {
   [ROLES.GROWTH_EXECUTIVE]: ["/crm/home", "/crm/progress"],
   [ROLES.GROWTH_MANAGER]: ["/crm/home", "/crm/progress"],
   [ROLES.HEAD_OF_GROWTH]: ["/crm/home", "/crm/progress", "/crm/import"],
+  [ROLES.AUDITOR]: ["/billing/audit"],
 };
 
 const STATION_ROLE_HIDDEN_NAV = [
@@ -260,6 +262,7 @@ export const ROLE_HOME = {
   [ROLES.GROWTH_EXECUTIVE]: "/crm/home",
   [ROLES.GROWTH_MANAGER]: "/crm/home",
   [ROLES.HEAD_OF_GROWTH]: "/crm/home",
+  [ROLES.AUDITOR]: "/billing/audit",
 };
 
 export function navAllowlistForRole(role) {

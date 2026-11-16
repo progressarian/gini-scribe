@@ -1,6 +1,7 @@
 import pool from "../../config/db.js";
 import { publish } from "./eventHub.js";
 import { publishEvents } from "./realtimeBus.js";
+import { primeGhmWatermark, tailGhm } from "../ghmLive.js";
 
 const TICK_MS = Number(process.env.GINIFLOW_TAIL_MS || 1000);
 const BATCH = 200;
@@ -94,6 +95,7 @@ async function tick(db) {
   } catch (e) {
     console.error("[giniflow] event tailer:", e.message);
   } finally {
+    await tailGhm(db);
     running = false;
   }
 }
@@ -101,6 +103,7 @@ async function tick(db) {
 export async function startEventTailer(db = pool) {
   if (timer) return { started: false };
   await primeWatermarks(db);
+  await primeGhmWatermark(db);
   timer = setInterval(() => tick(db), TICK_MS);
   timer.unref?.();
   return { started: true, watermarks: Object.fromEntries(watermarks) };

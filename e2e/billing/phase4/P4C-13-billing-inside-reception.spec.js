@@ -142,7 +142,6 @@ test.describe.serial("P4C-13 the billing counter inside the reception station", 
         "Shift",
         /^Refunds/,
         ...(role === "reception_admin" ? [/^Requests/] : []),
-        /^Payments/,
       ]);
       await expect(arrivalsTab(page)).toHaveAttribute("aria-selected", "true");
     }
@@ -152,7 +151,7 @@ test.describe.serial("P4C-13 the billing counter inside the reception station", 
     await openReception(coordinator, `?tab=bill&visit=${ids.visit}`);
     await expect(
       coordinator.getByRole("tablist", { name: "Reception" }).getByRole("tab"),
-    ).toHaveText([/^Arrivals/, /^Payments/]);
+    ).toHaveText([/^Arrivals/]);
     await expect(arrivalsTab(coordinator)).toHaveAttribute("aria-selected", "true");
     await expect(searchbox(coordinator)).toHaveCount(0);
     await expect(header(coordinator)).toHaveCount(0);

@@ -1,0 +1,199 @@
+.tpick {
+  position: relative;
+  width: 100%;
+}
+
+.tpick__btn {
+  width: 100%;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 32px 0 10px;
+  border: 1px solid var(--ui-field, #d5dce5);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ui-ink, #0f172a);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s;
+}
+
+.tpick__btn--empty {
+  color: #64748b;
+}
+
+.tpick__btn:hover:not(:disabled) {
+  border-color: #b8c3d1;
+}
+
+.tpick__btn:focus-visible,
+.tpick__btn[aria-expanded="true"] {
+  outline: none;
+  border-color: var(--ui-accent, #009e8c);
+  box-shadow: 0 0 0 3px var(--ui-ring, rgba(0, 158, 140, 0.16));
+}
+
+.tpick__btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.tpick__icon {
+  flex-shrink: 0;
+  color: #64748b;
+}
+
+.tpick__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tpick__clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.tpick__clear:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.tpick__clear:focus-visible {
+  outline: 2px solid var(--ui-accent, #009e8c);
+  outline-offset: 1px;
+}
+
+.tpick__pop {
+  width: 200px;
+  box-sizing: border-box;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow:
+    0 10px 30px rgba(15, 23, 42, 0.12),
+    0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.tpick__cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.tpick__col-head {
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-align: center;
+}
+
+.tpick__list {
+  height: 196px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+
+.tpick__opt {
+  flex-shrink: 0;
+  height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #0f172a;
+  font: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.tpick__opt:hover {
+  background: #e6f6f4;
+}
+
+.tpick__opt--on,
+.tpick__opt--on:hover {
+  background: var(--ui-accent, #009e8c);
+  color: #fff;
+  font-weight: 700;
+}
+
+.tpick__opt:focus-visible {
+  outline: 2px solid var(--ui-accent, #009e8c);
+  outline-offset: -2px;
+}
+
+.tpick__foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #eef2f6;
+}
+
+.tpick__link {
+  border: 0;
+  background: none;
+  color: #64748b;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tpick__link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.tpick__done {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--ui-accent, #009e8c);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tpick__link:focus-visible,
+.tpick__done:focus-visible {
+  outline: 2px solid var(--ui-accent, #009e8c);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tpick__btn {
+    transition: none;
+  }
+}

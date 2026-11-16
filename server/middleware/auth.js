@@ -112,6 +112,7 @@ const ROUTE_CAPABILITIES = [
   ["/api/billing/claims", CAP.BILLING_CLAIMS],
   ["/api/billing/reports", CAP.BILLING_REPORTS],
   ["/api/billing/dues-register", CAP.BILLING_DUES],
+  ["/api/billing/audit", CAP.BILLING_AUDIT],
   ["/api/approvals", [CAP.BILLING_MASTER, CAP.GINIFLOW_TEST_CANCEL_DECIDE, CAP.BOOKING_APPROVE]],
   ["/api/home-stats", null],
   ["/api/reports", CAP.ANALYTICS],
@@ -159,6 +160,7 @@ const ROUTE_CAPABILITIES = [
   ["/api/care-followups", CAP.CARE_FOLLOWUPS],
   ["/api/lab-catalog", [CAP.ADMIN, CAP.LAB_TEST_CATALOG]],
   ["/api/obt-assignments", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
+  ["/api/ghm-live", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],
   // Gini Flow. The board is read-only, so one capability covers every route
   // here; the SLA write is separately gated with requireCapability on the route.
   // Station routes carry their own per-station capability on the route itself;

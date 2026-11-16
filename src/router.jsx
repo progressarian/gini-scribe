@@ -100,6 +100,7 @@ const OpdDashboardPage = lazyWithRetry(() => import("./pages/reports/OpdDashboar
 const OpdVisitsPage = lazyWithRetry(() => import("./pages/reports/OpdVisitsPage"));
 const CghsRegisterPage = lazyWithRetry(() => import("./pages/billing/CghsRegisterPage"));
 const DuesRegisterPage = lazyWithRetry(() => import("./pages/billing/DuesRegisterPage"));
+const AuditReportPage = lazyWithRetry(() => import("./pages/billing/AuditReportPage"));
 const TestCatalogPage = lazyWithRetry(() => import("./pages/TestCatalogPage"));
 const TestDetailPage = lazyWithRetry(() => import("./pages/TestDetailPage"));
 const SettingsLayout = lazyWithRetry(() => import("./pages/SettingsLayout"));
@@ -327,6 +328,7 @@ const router = createBrowserRouter([
               { path: "/reports/opd-dashboard/visits", element: lazyEl(OpdVisitsPage) },
               { path: "/billing/cghs-register", element: lazyEl(CghsRegisterPage) },
               { path: "/billing/dues", element: lazyEl(DuesRegisterPage) },
+              { path: "/billing/audit", element: lazyEl(AuditReportPage) },
               { path: "/crm/home", element: lazyEl(RepHomePage) },
               { path: "/crm/visit/:doctorId", element: lazyEl(AddVisitPage) },
               { path: "/crm/doctor/:doctorId", element: lazyEl(Doctor360Page) },

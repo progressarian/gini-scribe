@@ -1,0 +1,288 @@
+.fset.bill-ui.audit-page .audit-head {
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.fset.bill-ui.audit-page .audit-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--ui-line);
+  margin-bottom: 12px;
+}
+
+.fset.bill-ui.audit-page .audit-range {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.fset.bill-ui.audit-page .audit-range .brep-field {
+  width: auto;
+  min-width: 0;
+}
+
+.fset.bill-ui .audit-select .doc-dd {
+  width: 100%;
+}
+
+.fset.bill-ui .audit-select .doc-dd__btn {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ui-ink);
+  background: #fff;
+  border: 1px solid var(--ui-field);
+  border-radius: 8px;
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s;
+}
+
+.fset.bill-ui .audit-select .doc-dd__btn:hover {
+  border-color: #b8c3d1;
+}
+
+.fset.bill-ui .audit-select .doc-dd__btn:focus-visible,
+.fset.bill-ui .audit-select .doc-dd__btn[aria-expanded="true"] {
+  outline: none;
+  border-color: var(--ui-accent);
+  box-shadow: 0 0 0 3px var(--ui-ring);
+}
+
+.fset.bill-ui .audit-select .doc-dd__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.fset.bill-ui.audit-page .audit-searchbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fset.bill-ui.audit-page .audit-searchbar .dues-search {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.fset.bill-ui.audit-page .audit-searchbar .audit-billno {
+  flex: 0 1 300px;
+  min-width: 0;
+}
+
+.fset.bill-ui.audit-page .audit-error {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid #fecaca;
+  border-left: 3px solid #dc2626;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #991b1b;
+  font-weight: 600;
+}
+
+.fset.bill-ui.audit-page .audit-totals {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.fset.bill-ui.audit-page .audit-totals__cell {
+  padding: 8px 10px;
+  border: 1px solid var(--ui-line);
+  border-radius: 8px;
+  background: var(--ui-soft);
+  min-width: 0;
+}
+
+.fset.bill-ui.audit-page .audit-totals dt {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ui-muted);
+}
+
+.fset.bill-ui.audit-page .audit-totals dd {
+  margin: 2px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ui-ink);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.fset.bill-ui.audit-page .audit-totals--split {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.fset.bill-ui.audit-page .audit-pct {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #92400e;
+}
+
+.fset.bill-ui.audit-page .audit-totals__label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ui-muted);
+}
+
+.fset.bill-ui.audit-page .audit-totals__value {
+  margin: 2px 0 4px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ui-ink);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.fset.bill-ui.audit-page .audit-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.fset.bill-ui.audit-page .audit-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ui-line);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--ui-soft);
+  color: var(--ui-ink2);
+}
+
+.fset.bill-ui.audit-page .audit-pill--final,
+.fset.bill-ui.audit-page .audit-pill--ok {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #166534;
+}
+
+.fset.bill-ui.audit-page .audit-pill--draft,
+.fset.bill-ui.audit-page .audit-pill--warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+.fset.bill-ui.audit-page .audit-pill--cancelled,
+.fset.bill-ui.audit-page .audit-pill--bad {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.fset.bill-ui.audit-page .audit-address {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fset.bill-ui.audit-page .audit-scroll {
+  max-height: max(360px, calc(100dvh - 140px));
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+@container (max-width: 700px) {
+  .fset.bill-ui.audit-page .audit-scroll {
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
+.fset.bill-ui.audit-page .audit-table td {
+  vertical-align: top;
+}
+
+.fset.bill-ui.audit-page .audit-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.fset.bill-ui.audit-page .audit-state p {
+  margin: 0;
+}
+
+@media (max-width: 1100px) {
+  .fset.bill-ui.audit-page .audit-totals,
+  .fset.bill-ui.audit-page .audit-totals--split {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .fset.bill-ui.audit-page .audit-range {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fset.bill-ui.audit-page .audit-range .brep-field:first-of-type {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .fset.bill-ui.audit-page .audit-totals {
+    display: flex;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+  }
+
+  .fset.bill-ui.audit-page .audit-totals__cell {
+    flex: 0 0 auto;
+    min-width: 120px;
+  }
+
+  .fset.bill-ui.audit-page .audit-address {
+    max-width: none;
+    white-space: normal;
+  }
+
+  .fset.bill-ui.audit-page .audit-head .reg-export {
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .fset.bill-ui.audit-page .audit-range {
+    grid-template-columns: 1fr;
+  }
+}
+
+.bill-dialog-layer .audit-day-bills {
+  max-width: min(720px, 100vw);
+}
+
+.bill-dialog-layer .audit-day-bills__meta {
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+
+.bill-dialog-layer .audit-day-bills .flow-table td,
+.bill-dialog-layer .audit-day-bills .flow-table th {
+  white-space: nowrap;
+}

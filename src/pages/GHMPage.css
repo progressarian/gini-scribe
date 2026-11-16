@@ -1192,6 +1192,11 @@ a.pcell__ph:hover {
   outline: none;
   border-color: #2563eb;
 }
+.fld select:disabled {
+  background: #f1f5f9;
+  color: #64748b;
+  cursor: not-allowed;
+}
 
 /* Book-next-appointment button (per row) */
 .book-next-btn {
@@ -1486,6 +1491,33 @@ a.pcell__ph:hover {
   flex-direction: column;
   align-items: center;
   gap: 4px;
+}
+
+.last-change {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 120px;
+  padding: 2px 8px;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3730a3;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.last-change__who {
+  max-width: 100%;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.last-change__when {
+  color: #4f46e5;
+  font-variant-numeric: tabular-nums;
 }
 
 .calling-flag {

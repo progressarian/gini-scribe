@@ -21,6 +21,7 @@ export const STAFF_ROLE_LABELS = {
   head_of_growth: "Head of growth",
   growth_manager: "Growth manager",
   growth_executive: "Growth executive",
+  auditor: "Auditor",
   guest: "Guest",
 };
 

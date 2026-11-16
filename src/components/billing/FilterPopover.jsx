@@ -9,6 +9,7 @@ export default function FilterPopover({ active, cleared, onClear, children }) {
   useEffect(() => {
     if (!open) return undefined;
     const outside = (e) => {
+      if (e.target.closest?.("[data-popover-layer]")) return;
       if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
     };
     const escape = (e) => {

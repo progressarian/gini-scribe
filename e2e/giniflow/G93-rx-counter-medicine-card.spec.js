@@ -163,7 +163,7 @@ test.describe.serial("G93 the Rx counter prints the medicine card", () => {
     await view.click();
     await expect(page.getByText(`Medicine card — P4 CardFull ${tag}`).first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Print", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "✕" }).click();
+    await page.getByRole("button", { name: "Close", exact: true }).click();
     await page.getByRole("button", { name: "← Back" }).click();
     await page.getByText(`P4 CardEmpty ${tag}`).first().click();
     await expect(page.getByRole("button", { name: "View medicine card" })).toBeDisabled();

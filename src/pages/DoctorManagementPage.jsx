@@ -13,6 +13,7 @@ import ReassignModal, { enrichAffected } from "../components/doctors/ReassignMod
 import ConfirmModal from "../components/ui/ConfirmModal";
 import { VITALS_REST_MINUTES } from "../../shared/giniflowStatus";
 import { SCHEDULED_ROLES, staffRoleLabel } from "../../shared/staffRoles";
+import { CAPABILITIES as CAP, hasAnyCapability, hasCapability } from "../../shared/permissions";
 import "./DoctorManagementPage.css";
 
 const todayISO = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
@@ -26,7 +27,12 @@ const TABS = [
 
 const isScheduled = (d) => SCHEDULED_ROLES.includes(d?.role);
 
+const offersSlotAccess = (doctor) =>
+  hasAnyCapability(doctor.role, [CAP.RECEPTION_OPS, CAP.OBT_OPS]) &&
+  !hasCapability(doctor.role, CAP.GHM_SLOT_ASSIGN);
+
 const hasSettings = (doctor) =>
+  offersSlotAccess(doctor) ||
   doctor.role === "consultant" ||
   doctor.is_chief ||
   doctor.role === "obt" ||
@@ -182,6 +188,7 @@ function SettingsTab({ doctor, consultants, onSaved }) {
   const consultant = doctor.role === "consultant";
   const routing = consultant || doctor.is_chief;
   const calls = doctor.role === "obt" || doctor.can_assign_calls === true;
+  const slots = offersSlotAccess(doctor);
   return (
     <div className="docmgmt-setgroups">
       {routing && (
@@ -266,7 +273,7 @@ function SettingsTab({ doctor, consultants, onSaved }) {
           <AssistsSetting doctor={doctor} consultants={consultants} onSaved={onSaved} />
         </SettingsGroup>
       )}
-      {calls && (
+      {(calls || slots) && (
         <SettingsGroup title="Access">
           {(doctor.role === "obt" || doctor.can_assign_calls === true) && (
             <ToggleSetting
@@ -281,6 +288,19 @@ function SettingsTab({ doctor, consultants, onSaved }) {
               }
               successText={(on) =>
                 `${name} ${on ? "can now assign" : "can no longer assign"} GHM calls`
+              }
+              onSaved={onSaved}
+            />
+          )}
+          {slots && (
+            <ToggleSetting
+              doctor={doctor}
+              field="can_assign_slots"
+              checked={doctor.can_assign_slots === true}
+              label="Can assign time slots"
+              hint="Shows the Time Slot column on the GHM Ops sheet and the time slot in its New Appointment form. Off by default — without it this person books without a slot."
+              successText={(on) =>
+                `${name} ${on ? "can now assign" : "can no longer assign"} time slots`
               }
               onSaved={onSaved}
             />

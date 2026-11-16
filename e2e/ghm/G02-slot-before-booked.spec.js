@@ -38,6 +38,18 @@ test.describe("GHM: a booking needs a time slot", () => {
   let patient;
   let api;
 
+  test.beforeAll(async () => {
+    await query(`UPDATE doctors SET can_assign_slots = TRUE WHERE id = $1`, [
+      userFor("reception_admin").id,
+    ]);
+  });
+
+  test.afterAll(async () => {
+    await query(`UPDATE doctors SET can_assign_slots = FALSE WHERE id = $1`, [
+      userFor("reception_admin").id,
+    ]);
+  });
+
   test.beforeEach(async () => {
     patient = await buildPatient();
     api = await apiAs("reception_admin");

@@ -61,6 +61,7 @@ export const ROLES = {
   HEAD_OF_GROWTH: "head_of_growth",
   GROWTH_MANAGER: "growth_manager",
   GROWTH_EXECUTIVE: "growth_executive",
+  AUDITOR: "auditor",
   GUEST: "guest",
 };
 
@@ -205,6 +206,7 @@ export const CAPABILITIES = {
   CARE_FOLLOWUPS: "CARE_FOLLOWUPS",
   CARE_HOLD_SKIP: "CARE_HOLD_SKIP",
   OBT_ASSIGN: "OBT_ASSIGN",
+  GHM_SLOT_ASSIGN: "GHM_SLOT_ASSIGN",
   BILLING_DESK: "BILLING_DESK",
   BILLING_MASTER: "BILLING_MASTER",
   BILLING_SETTINGS: "BILLING_SETTINGS",
@@ -212,6 +214,7 @@ export const CAPABILITIES = {
   BILLING_REPORTS: "BILLING_REPORTS",
   OPD_SUMMARY: "OPD_SUMMARY",
   BILLING_DUES: "BILLING_DUES",
+  BILLING_AUDIT: "BILLING_AUDIT",
   PHARMACY_STOCK_VIEW: "PHARMACY_STOCK_VIEW",
   PHARMACY_STOCK_UPLOAD: "PHARMACY_STOCK_UPLOAD",
   LAB_TEST_CATALOG: "LAB_TEST_CATALOG",
@@ -458,7 +461,9 @@ export const ROLE_CAPABILITIES = {
     C.BILLING_CLAIMS,
     C.BILLING_REPORTS,
     C.BILLING_DUES,
+    C.BILLING_AUDIT,
   ],
+  [ROLES.AUDITOR]: [C.BILLING_AUDIT],
   // Coordinators run GHM ops/calling and need Genie Chats with patients.
   // The GDA works two desks: Vitals and the Assistant Station. Dietitian was
   // never theirs — 4 steps ever, none worked by hand, no dietitian accounts —
@@ -602,6 +607,7 @@ const doctorIdOf = (who) =>
 export function hasCapability(who, capability) {
   if (GRANT_ALL_CAPABILITIES) return true;
   if (capability === C.OBT_ASSIGN && who?.can_assign_calls === true) return true;
+  if (capability === C.GHM_SLOT_ASSIGN && who?.can_assign_slots === true) return true;
   const override = DOCTOR_CAPABILITY_OVERRIDES[doctorIdOf(who)];
   if (override?.revoke.includes(capability)) return false;
   if (override?.grant.includes(capability)) return true;

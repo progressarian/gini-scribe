@@ -23,6 +23,7 @@ const ROLE_GROUPS = [
   { role: "reception", label: "Reception", showSpecialty: false },
   { role: "reception_admin", label: "Reception Admin", showSpecialty: false },
   { role: "obt", label: "OBT Team", showSpecialty: false },
+  { role: "auditor", label: "Auditors", showSpecialty: false },
   // One heading for the physician-relations team. A group may cover several
   // roles so the three growth tiers do not produce three identical headings.
   {
@@ -87,6 +88,7 @@ export default function LoginPage() {
     pharmacy: "/giniflow/station/pharmacy",
     pharmacy_admin: "/pharmacy/stock",
     rx: "/giniflow/station/rx",
+    auditor: "/billing/audit",
   };
   const getDefaultRoute = (role) => ROLE_LANDING[role] || "/";
   const listLoading = doctorsLoading && !doctorsList.length;

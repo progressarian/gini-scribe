@@ -73,19 +73,6 @@ test.describe.serial("P4C-32 outsourced tests are labelled on the floor", () => 
     expect(unified.outsourcedTests).toEqual([ids.hba1cName]);
   });
 
-  test("3. the Payments tab shows the label on the outsourced test only", async ({ page }) => {
-    await loginAs(page, "reception");
-    await gotoReady(page, "/giniflow/station/reception", () =>
-      page.getByRole("tablist", { name: "Reception" }),
-    );
-    await page.getByRole("tab", { name: /^Payments/ }).click();
-    const outsourcedTest = page.locator(".toc-test").filter({ hasText: ids.hba1cName });
-    const inhouseTest = page.locator(".toc-test").filter({ hasText: ids.looseName });
-    await expect(outsourcedTest.first().getByText("Outsourced", { exact: true })).toBeVisible();
-    await expect(inhouseTest.first()).toBeVisible();
-    await expect(inhouseTest.first().getByText("Outsourced", { exact: true })).toHaveCount(0);
-  });
-
   test("4. the lab station shows the label on the outsourced test only", async ({ page }) => {
     await loginAs(page, "lab");
     await page.goto("/giniflow/station/lab");

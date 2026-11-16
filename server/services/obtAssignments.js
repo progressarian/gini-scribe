@@ -16,6 +16,17 @@ export async function canAssignCalls(doctor, db = pool) {
   return r.rows[0]?.ok === true;
 }
 
+export async function canAssignSlots(doctor, db = pool) {
+  if (hasCapability(doctor, CAPABILITIES.GHM_SLOT_ASSIGN)) return true;
+  if (!doctor?.doctor_id) return false;
+  const r = await db.query(
+    `SELECT COALESCE((to_jsonb(d)->>'can_assign_slots')::boolean, FALSE) AS ok
+       FROM doctors d WHERE d.id = $1 AND d.is_active`,
+    [doctor.doctor_id],
+  );
+  return r.rows[0]?.ok === true;
+}
+
 const cleanIds = (ids) => [
   ...new Set((ids || []).map(Number).filter((n) => Number.isInteger(n) && n > 0)),
 ];
@@ -66,24 +77,6 @@ const patientIdOfRow = async (rawId, db) => {
   const r = await db.query("SELECT patient_id FROM appointments WHERE id=$1", [id]);
   return r.rows[0]?.patient_id ?? null;
 };
-
-export async function patientEditBlockedFor(req, patientId, { call = false } = {}, db = pool) {
-  if (await canAssignCalls(req.doctor, db)) return null;
-  const obt = req.doctor?.role === ROLES.OBT;
-  if (!patientId) return obt ? "Only patients assigned to you can be changed." : null;
-  const owner = (await assignmentsFor([patientId], db))[patientId];
-  if (owner?.assigned_to_id === req.doctor?.doctor_id) return null;
-  if (owner && (obt || call))
-    return `This patient is assigned to ${owner.assigned_to} today. Only ${owner.assigned_to} can change or call them.`;
-  if (!owner && obt)
-    return "This patient is not assigned to you. Only patients assigned to you can be changed.";
-  return null;
-}
-
-export async function editBlockedFor(req, rawAppointmentId, opts = {}, db = pool) {
-  if (await canAssignCalls(req.doctor, db)) return null;
-  return patientEditBlockedFor(req, await patientIdOfRow(rawAppointmentId, db), opts, db);
-}
 
 const todayAppointmentIds = async (patientIds, db) => {
   const r = await db.query(
@@ -147,6 +140,16 @@ const writeAssignments = async (client, pairs, actor) => {
     });
   }
 };
+
+export async function assignToEditor(rawAppointmentId, actor, db = pool) {
+  if (!actor?.id) return null;
+  const patientId = await patientIdOfRow(rawAppointmentId, db);
+  if (!patientId) return null;
+  const current = (await assignmentsFor([patientId], db))[patientId];
+  if (current?.assigned_to_id === actor.id) return patientId;
+  await writeAssignments(db, [{ patientId, memberId: actor.id }], actor);
+  return patientId;
+}
 
 const assertMembers = async (memberIds, db) => {
   const team = new Set((await obtTeam(db)).map((m) => m.id));

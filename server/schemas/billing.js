@@ -1,5 +1,19 @@
 import { z } from "zod";
 import {
+  AUDIT_BILL_KINDS,
+  AUDIT_BILL_SORTS,
+  AUDIT_CLAIM_STATUSES,
+  AUDIT_DOCUMENTS,
+  AUDIT_ITEM_KINDS,
+  AUDIT_ITEM_SORTS,
+  AUDIT_LINE_SOURCES,
+  AUDIT_PAYMENT_MODES,
+  AUDIT_PAYMENT_STATES,
+  AUDIT_SEARCH_MAX,
+  AUDIT_STATUSES,
+  TIME_TEXT,
+} from "../../shared/billingAudit.js";
+import {
   CONSULTATION_ITEM_VISIT_TYPES,
   FOLLOW_UP_WINDOW_MAX_DAYS,
   RECENT_FOLLOW_UP,
@@ -1604,6 +1618,87 @@ export const BILLING_DUES_LABELS = {
   sort: "Sort",
   page: "Page",
   page_size: "Page size",
+};
+
+const choiceOf = (list) => z.union([z.enum(list.map((o) => o.value)), blank]).optional();
+const auditCode = z.string().trim().max(40).optional();
+const auditTime = z
+  .union([z.string().trim().regex(TIME_TEXT, "must be a time like 09:30"), blank])
+  .optional();
+const auditDate = z.union([realDateText, blank]).optional();
+const auditMoney = z.string().trim().max(20).optional();
+const auditId = z.union([count, blank]).optional();
+
+const AUDIT_COMMON = {
+  q: z.string().trim().max(AUDIT_SEARCH_MAX).optional(),
+  from: auditDate,
+  to: auditDate,
+  from_time: auditTime,
+  to_time: auditTime,
+  group: auditCode,
+  document: choiceOf(AUDIT_DOCUMENTS),
+  status: choiceOf(AUDIT_STATUSES),
+  category: auditCode,
+  sub_category: auditCode,
+  min: auditMoney,
+  max: auditMoney,
+  page: auditId,
+  page_size: auditId,
+};
+
+export const billingAuditBillsQuerySchema = z.strictObject({
+  ...AUDIT_COMMON,
+  kind: choiceOf(AUDIT_BILL_KINDS),
+  payment: choiceOf(AUDIT_PAYMENT_STATES),
+  consultant: auditId,
+  created_by: auditId,
+  finalised_by: auditId,
+  payer: z.string().trim().max(120).optional(),
+  claim: choiceOf(AUDIT_CLAIM_STATUSES),
+  mode: choiceOf(AUDIT_PAYMENT_MODES),
+  bill_no: z.string().trim().max(60).optional(),
+  sort: choiceOf(AUDIT_BILL_SORTS),
+});
+
+export const billingAuditItemsQuerySchema = z.strictObject({
+  ...AUDIT_COMMON,
+  item: z.string().trim().max(AUDIT_SEARCH_MAX).optional(),
+  kind: choiceOf(AUDIT_ITEM_KINDS),
+  subgroup: auditCode,
+  source: choiceOf(AUDIT_LINE_SOURCES),
+  doctor: auditId,
+  sort: choiceOf(AUDIT_ITEM_SORTS),
+});
+
+export const BILLING_AUDIT_LABELS = {
+  q: "Search",
+  item: "Item",
+  from: "Start date",
+  to: "End date",
+  from_time: "Start time",
+  to_time: "End time",
+  kind: "Bill type",
+  group: "Department",
+  subgroup: "Sub-department",
+  document: "Document",
+  status: "Bill status",
+  payment: "Payment status",
+  category: "Category",
+  sub_category: "Sub-category",
+  consultant: "Doctor",
+  doctor: "Doctor",
+  created_by: "Created by",
+  finalised_by: "Finalised by",
+  payer: "Payer",
+  claim: "Claim status",
+  mode: "Payment mode",
+  source: "Item source",
+  bill_no: "Bill number",
+  min: "The smallest amount",
+  max: "The largest amount",
+  sort: "Sort",
+  page: "Page",
+  page_size: "Rows per page",
 };
 
 export const BILLING_CLAIMS_LABELS = {
