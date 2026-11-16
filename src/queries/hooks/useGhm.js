@@ -67,6 +67,39 @@ export function useGhmList({ buildQuery, enabled = true, keepPrevious = true }) 
   });
 }
 
+const ROW_REFRESH_VIEWS = new Set(["lookup", "missed", "changes"]);
+
+export async function refreshGhmRows(queryClient, buildQuery, ids) {
+  const params = buildQuery(1, PAGE_SIZE);
+  if (ROW_REFRESH_VIEWS.has(params.get("mode"))) return false;
+  const key = qk.ghm.list(params.toString());
+  const cached = queryClient.getQueryData(key);
+  if (!cached?.pages?.length) return false;
+  params.set("ids", ids.join(","));
+  const { data } = await api.get(`/api/ghm-appointments?${params}`);
+  const fresh = new Map((data?.data || []).map((row) => [row.id, row]));
+  const listed = new Set(cached.pages.flatMap((pg) => (pg?.data || []).map((row) => row.id)));
+  if ([...fresh.keys()].some((id) => !listed.has(id))) return false;
+  const changed = new Set(ids);
+  queryClient.setQueryData(key, (old) =>
+    old?.pages
+      ? {
+          ...old,
+          pages: old.pages.map((pg, i) => ({
+            ...pg,
+            ...(i === 0
+              ? { summary: data?.summary ?? pg.summary, total: data?.total ?? pg.total }
+              : null),
+            data: (pg?.data || []).flatMap((row) =>
+              changed.has(row.id) ? (fresh.has(row.id) ? [fresh.get(row.id)] : []) : [row],
+            ),
+          })),
+        }
+      : old,
+  );
+  return true;
+}
+
 function useIdBatch(keyFn, url, ids, field, options = {}) {
   const key = idKey(ids);
   return useQuery({

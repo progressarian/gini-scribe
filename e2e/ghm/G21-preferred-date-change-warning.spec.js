@@ -47,12 +47,19 @@ test.describe("G21 changing a preferred date someone else set asks first", () =>
   });
 
   const openRow = async (page, patient) => {
+    await query(
+      `UPDATE appointments SET calling_by = NULL, calling_by_id = NULL, calling_since = NULL
+        WHERE calling_by_id = $1`,
+      [USERS.admin.id],
+    );
     await loginAs(page, "admin");
     await gotoReady(page, "/ghm", () => page.getByRole("button", { name: "Search", exact: true }));
     await page.getByRole("button", { name: "Search", exact: true }).click();
     await page.getByPlaceholder(/Search this date/).fill(patient.file_no);
     const row = page.locator("tr", { hasText: patient.name });
     await expect(row).toBeVisible();
+    await row.getByRole("button", { name: "Calling" }).click();
+    await expect(row.getByRole("button", { name: "You" })).toBeVisible();
     return row;
   };
 

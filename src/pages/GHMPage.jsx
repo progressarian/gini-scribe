@@ -36,6 +36,7 @@ import {
   CalendarClock,
 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import "./GHMPage.css";
 import { istClock } from "../../shared/homeCollection.js";
 import useAuthStore from "../stores/authStore";
@@ -77,6 +78,7 @@ import useBodyScrollLock from "../hooks/useBodyScrollLock.js";
 import useViewportFill from "../hooks/useViewportFill.js";
 import {
   PAGE_SIZE,
+  refreshGhmRows,
   fetchLastVisit,
   fetchObtAssignments,
   useActiveCalls,
@@ -604,6 +606,8 @@ const SUMMARY_BUCKET = {
 };
 
 const NO_SLOT_ACCESS = "Only staff with time slot access can change this.";
+const CLAIM_HINT =
+  "Press Calling on this row to change it. Only one person can change a patient at a time.";
 
 const IST_DAY = { timeZone: "Asia/Kolkata", day: "numeric", month: "short" };
 
@@ -3010,7 +3014,6 @@ export default function GHMPage() {
   const [search, setSearch] = useState(searchParams.get("q") || "");
   const [recordFor, setRecordFor] = useState(null);
   const [editPatientFor, setEditPatientFor] = useState(null);
-  useGhmLive({ paused: showNew || !!editPatientFor });
   const [expanded, setExpanded] = useState(null); // appointment_id of open history row
   const EXPORT_PAGE_SIZE = 100;
 
@@ -3189,6 +3192,12 @@ export default function GHMPage() {
 
   const listEnabled = !isChanges && (view !== "lookup" || lookupQ.length > 0);
   const listKey = qk.ghm.list(buildQuery(1, PAGE_SIZE).toString());
+  const queryClient = useQueryClient();
+  const refreshRows = useCallback(
+    (ids) => refreshGhmRows(queryClient, buildQuery, ids),
+    [queryClient, buildQuery],
+  );
+  useGhmLive({ paused: showNew || !!editPatientFor, refreshRows });
   const listQuery = useGhmList({
     buildQuery,
     enabled: listEnabled,
@@ -4159,6 +4168,11 @@ export default function GHMPage() {
                         !!activeCall &&
                         (activeCall.calling_by_id === currentDoctor?.id ||
                           (!activeCall.calling_by_id && activeCall.calling_by === loggedInName));
+                      const rowLocked = !callingIsMine;
+                      const lockTitle =
+                        activeCall && !callingIsMine
+                          ? `${activeCall.calling_by} is calling this patient. Wait until they finish.`
+                          : CLAIM_HINT;
 
                       return (
                         <Fragment key={row.id}>
@@ -4378,6 +4392,7 @@ export default function GHMPage() {
                                     onBookNext={bookNext}
                                     onRecords={setRecordFor}
                                     onEditPatient={setEditPatientFor}
+                                    lockTitle={rowLocked ? lockTitle : undefined}
                                   />
                                 )}
                               </div>
@@ -4398,6 +4413,8 @@ export default function GHMPage() {
                                 }
                                 options={bookingStatusOptions(row)}
                                 onChange={(v) => patch(row.id, "booking_status", v)}
+                                disabled={rowLocked}
+                                title={lockTitle}
                               />
                               {!isMissed &&
                                 row.booking_status === "booked" &&
@@ -4439,6 +4456,8 @@ export default function GHMPage() {
                                 value={row.patient_category || ""}
                                 options={categoryOptions}
                                 onChange={(v) => patch(row.id, "patient_category", v)}
+                                disabled={rowLocked}
+                                title={lockTitle}
                               />
                             </td>
 
@@ -4448,6 +4467,8 @@ export default function GHMPage() {
                                 value={row.appointment_type || ""}
                                 options={withCurrent(MODE_OPTIONS, row.appointment_type)}
                                 onChange={(v) => patch(row.id, "appointment_type", v)}
+                                disabled={rowLocked}
+                                title={lockTitle}
                                 variant="cell"
                                 ariaLabel="Mode of appointment"
                               />
@@ -4475,6 +4496,8 @@ export default function GHMPage() {
                                       ...opts.map((d) => ({ value: d, label: d })),
                                     ]}
                                     onChange={(v) => patch(row.id, "doctor_name", v)}
+                                    disabled={rowLocked}
+                                    title={lockTitle}
                                     variant="cell"
                                     ariaLabel="Doctor"
                                   />
@@ -4493,6 +4516,8 @@ export default function GHMPage() {
                                   value={row.show_no_show}
                                   options={SHOW_STATUSES}
                                   onChange={(v) => patch(row.id, "show_no_show", v)}
+                                  disabled={rowLocked}
+                                  title={lockTitle}
                                 />
                               </td>
                             )}
@@ -4505,6 +4530,8 @@ export default function GHMPage() {
                                     value={callStat}
                                     options={callStatusOptions(callStat)}
                                     onChange={(v) => handleCallStatus(row, v)}
+                                    disabled={rowLocked}
+                                    title={lockTitle}
                                   />
                                   {attempts > 0 && (
                                     <button
@@ -4526,6 +4553,8 @@ export default function GHMPage() {
                                   value={row.pt_recovery}
                                   options={RECOVERY_STATUSES}
                                   onChange={(v) => patch(row.id, "pt_recovery", v)}
+                                  disabled={rowLocked}
+                                  title={lockTitle}
                                 />
                               </td>
                             )}
@@ -4546,8 +4575,8 @@ export default function GHMPage() {
                                       : row.call_made_by || ""
                                   }
                                   key={`cb-${row.id}-${row.call_made_by}-${activeCall?.calling_by || ""}-${callLogged ? 1 : 0}`}
-                                  disabled={!callLogged}
-                                  title={callLogged ? undefined : CALL_LOCK_HINT}
+                                  disabled={!callLogged || rowLocked}
+                                  title={lockTitle || (callLogged ? undefined : CALL_LOCK_HINT)}
                                   onBlur={(e) => {
                                     const v = e.target.value.trim();
                                     if (v !== (row.call_made_by || ""))
@@ -4564,12 +4593,12 @@ export default function GHMPage() {
 
                             {/* Call date — locked with Called By, for the same reason */}
                             {showCallDate && (
-                              <td title={callLogged ? undefined : CALL_LOCK_HINT}>
+                              <td title={lockTitle || (callLogged ? undefined : CALL_LOCK_HINT)}>
                                 <DatePicker
                                   value={row.call_date || ""}
                                   onChange={(v) => patch(row.id, "call_date", v)}
                                   placeholder="—"
-                                  disabled={!callLogged}
+                                  disabled={!callLogged || rowLocked}
                                   style={CELL_DATE_STYLE}
                                 />
                               </td>
@@ -4648,6 +4677,8 @@ export default function GHMPage() {
                                   ).map((d) => ({ value: d, label: d })),
                                 ]}
                                 onChange={(v) => patch(row.id, "preferred_doctor", v)}
+                                disabled={rowLocked}
+                                title={lockTitle}
                                 variant="cell"
                                 ariaLabel="Preferred doctor"
                               />
@@ -4658,6 +4689,7 @@ export default function GHMPage() {
                               <DatePicker
                                 value={row.preferred_date || ""}
                                 onChange={(v) => changePreferredDate(row, v)}
+                                disabled={rowLocked}
                                 minDate={todayStr()}
                                 closedWeekdays={CLOSED_WEEKDAYS}
                                 placeholder="—"
@@ -4676,8 +4708,8 @@ export default function GHMPage() {
                                   slotCounts,
                                 )}
                                 onChange={(v) => pickTimeSlot(row, v)}
-                                disabled={!canAssignSlots}
-                                title={canAssignSlots ? undefined : NO_SLOT_ACCESS}
+                                disabled={!canAssignSlots || rowLocked}
+                                title={lockTitle || (canAssignSlots ? undefined : NO_SLOT_ACCESS)}
                                 variant="cell"
                                 ariaLabel="Preferred time"
                               />
@@ -4688,6 +4720,8 @@ export default function GHMPage() {
                                 value={row.home_collection ? "yes" : "no"}
                                 options={HOME_COLLECTION_OPTIONS}
                                 onChange={(v) => patch(row.id, "home_collection", v === "yes")}
+                                disabled={rowLocked}
+                                title={lockTitle}
                               />
                             </td>
 
@@ -4696,6 +4730,8 @@ export default function GHMPage() {
                               <InlineEdit
                                 value={row.call_notes}
                                 onChange={(v) => patch(row.id, "call_notes", v)}
+                                disabled={rowLocked}
+                                lockTitle={lockTitle}
                                 placeholder="Patient said… / reason…"
                                 multiline
                               />
@@ -4706,6 +4742,8 @@ export default function GHMPage() {
                               <InlineEdit
                                 value={row.prescription_explained_by}
                                 onChange={(v) => patch(row.id, "prescription_explained_by", v)}
+                                disabled={rowLocked}
+                                lockTitle={lockTitle}
                                 placeholder="Explained by…"
                               />
                             </td>
@@ -4714,6 +4752,7 @@ export default function GHMPage() {
                           {isOpen && (
                             <CallHistoryPanel
                               row={row}
+                              lockTitle={rowLocked ? lockTitle : undefined}
                               ccAgents={ccAgents}
                               colSpan={colSpan}
                               details={compact ? compactDetails(row) : null}
@@ -4724,6 +4763,7 @@ export default function GHMPage() {
                                     onBookNext={bookNext}
                                     onRecords={setRecordFor}
                                     onEditPatient={setEditPatientFor}
+                                    lockTitle={rowLocked ? lockTitle : undefined}
                                   />
                                 ) : null
                               }

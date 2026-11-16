@@ -165,6 +165,23 @@ const CALL_CLAIM_TTL = "10 minutes";
 const claimActive = (a = "a") =>
   `(${a}.calling_since IS NOT NULL AND ${a}.calling_since > NOW() - INTERVAL '${CALL_CLAIM_TTL}')`;
 
+const heldByOther = async (req, rawId, db = pool) => {
+  const id = Number(rawId);
+  const patientId = await patientOf(rawId);
+  const r = await db.query(
+    `SELECT a.calling_by FROM appointments a
+      WHERE ${claimActive("a")}
+        AND (a.id = $1 OR ($2::int IS NOT NULL AND a.patient_id = $2::int))
+        AND a.calling_by_id IS DISTINCT FROM $3::int
+      LIMIT 1`,
+    [id > 0 ? id : 0, patientId, req.doctor?.doctor_id || null],
+  );
+  return r.rows[0]?.calling_by || null;
+};
+
+const lockedBy = (who) =>
+  `${who} is calling this patient. Wait until they finish before changing this row.`;
+
 const claimCols = (a = "a") => `
   CASE WHEN ${claimActive(a)} THEN ${a}.calling_by END    AS calling_by,
   CASE WHEN ${claimActive(a)} THEN ${a}.calling_by_id END AS calling_by_id,
@@ -238,6 +255,17 @@ const normalizeDemographics = ({ dob, age, sex }) => {
   if (s.error) return s;
   return { dob: d.value, age: d.value ? ageFromDob(d.value) : a.value, sex: s.value };
 };
+
+const ROW_IDS_MAX = 50;
+const rowIdsOf = (raw) =>
+  [
+    ...new Set(
+      String(raw || "")
+        .split(",")
+        .map(Number)
+        .filter((n) => Number.isInteger(n) && n > 0),
+    ),
+  ].slice(0, ROW_IDS_MAX);
 
 const SLOT_FIELDS = new Set(["time_slot", "preferred_time_slot"]);
 const NO_SLOT_ACCESS = "You don't have access to assign time slots.";
@@ -352,6 +380,8 @@ router.post("/ghm-appointments/:id/calling", async (req, res) => {
     if (!id) return res.status(404).json({ error: NO_APPOINTMENT_ERROR });
     const me = claimant(req);
     if (!me.name) return res.status(401).json({ error: "Sign in to mark a call in progress" });
+    const holder = await heldByOther(req, id);
+    if (holder) return res.status(409).json({ error: `${holder} is already calling this patient` });
 
     const openFlags = await pool.query(
       `SELECT a.id, a.patient_name, a.file_no,
@@ -532,6 +562,8 @@ router.post("/call-attempts", async (req, res) => {
     if (!req.body?.appointment_id)
       return res.status(400).json({ error: "appointment_id required" });
     if (!outcome) return res.status(400).json({ error: "outcome required" });
+    const holder = await heldByOther(req, req.body.appointment_id);
+    if (holder) return res.status(409).json({ error: lockedBy(holder) });
 
     await client.query("BEGIN");
 
@@ -597,9 +629,6 @@ router.post("/call-attempts", async (req, res) => {
       actor,
     });
 
-    // The call just happened, so the "calling now" flag has served its purpose.
-    await releaseClaim(client, appointment_id);
-
     await client.query("COMMIT");
     await noteGhmEdit(appointment_id, actor, "call");
     res.status(201).json(ins.rows[0]);
@@ -627,6 +656,11 @@ router.delete("/call-attempts/:id", async (req, res) => {
       return res.status(404).json({ error: "Call attempt not found" });
     }
     const apptId = found.rows[0].appointment_id;
+    const holder = await heldByOther(req, apptId, client);
+    if (holder) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: lockedBy(holder) });
+    }
     const gone = found.rows[0];
     await logAppointmentEvent(client, {
       appointmentId: apptId,
@@ -1607,9 +1641,12 @@ router.get("/ghm-appointments", async (req, res) => {
       }
     }
 
-    const rowWhere = buckets.length
-      ? `${where} AND ${bucketsWhere(buckets, "a", callStatusToday("a"), dayRef)}`
-      : where;
+    const onlyIds = rowIdsOf(req.query.ids);
+    const idsCond = onlyIds.length ? ` AND a.id = ANY($${params.length + 3}::int[])` : "";
+    const rowWhere =
+      (buckets.length
+        ? `${where} AND ${bucketsWhere(buckets, "a", callStatusToday("a"), dayRef)}`
+        : where) + idsCond;
 
     const [countR, dataR] = await Promise.all([
       pool.query(
@@ -1655,7 +1692,7 @@ router.get("/ghm-appointments", async (req, res) => {
          ${rowWhere}
          ${orderBy}
          LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-        [...params, effLimit, offset],
+        [...params, effLimit, onlyIds.length ? 0 : offset, ...(onlyIds.length ? [onlyIds] : [])],
       ),
     ]);
 
@@ -2111,6 +2148,8 @@ router.post("/ghm-appointments", async (req, res) => {
 // PATCH /api/ghm-appointments/:id — update GHM fields
 router.patch("/ghm-appointments/:id", async (req, res) => {
   try {
+    const holder = await heldByOther(req, req.params.id);
+    if (holder) return res.status(409).json({ error: lockedBy(holder) });
     const id = await resolveAppointmentId(req.params.id, { create: opensLead(req.body) });
     if (!id) return res.status(404).json({ error: NO_APPOINTMENT_ERROR });
     if (await changesSlotWithoutAccess(req, id)) {
@@ -2444,15 +2483,6 @@ router.patch("/ghm-appointments/:id", async (req, res) => {
       return s.length > 2000 ? `${s.slice(0, 2000)}…` : s;
     };
     const actor = claimant(req);
-    if (req.body.call_status && req.body.call_status !== "pending" && actor.id) {
-      const held = await pool.query(
-        `SELECT a.id FROM appointments a
-          WHERE a.calling_since IS NOT NULL AND a.calling_by_id = $2
-            AND (a.id = $1 OR (a.file_no IS NOT NULL AND a.file_no = $3))`,
-        [id, actor.id, r.rows[0].file_no],
-      );
-      for (const h of held.rows) await releaseClaim(pool, h.id);
-    }
     for (const k of [...trackingNow, ...trackingPatient]) {
       const oldV = logValue(before[k]);
       const newV = logValue(req.body[k] === "" ? null : req.body[k]);
@@ -2582,6 +2612,11 @@ router.delete("/appointment-changes/:id", async (req, res) => {
       return res.status(404).json({ error: "Change log not found" });
     }
     const { appointment_id, field, old_value, changed_at } = found.rows[0];
+    const holder = await heldByOther(req, appointment_id, client);
+    if (holder) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: lockedBy(holder) });
+    }
     if (SLOT_FIELDS.has(field) && !(await canAssignSlots(req.doctor, client))) {
       await client.query("ROLLBACK");
       return res.status(403).json({ error: NO_SLOT_ACCESS });

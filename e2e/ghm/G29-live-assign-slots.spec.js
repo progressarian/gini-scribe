@@ -47,6 +47,18 @@ async function openSheet(page, role, patient) {
 
 const headers = (page) => page.locator("table thead th");
 
+async function pressCalling(row) {
+  await row.getByRole("button", { name: "Calling" }).click();
+  await expect(row.getByRole("button", { name: "You" })).toBeVisible();
+}
+
+const endAllCalls = () =>
+  query(
+    `UPDATE appointments SET calling_by = NULL, calling_by_id = NULL, calling_since = NULL
+      WHERE calling_by_id = ANY($1::int[])`,
+    [[USERS.obt_one.id, USERS.obt_two.id, USERS.admin.id, USERS.reception.id]],
+  );
+
 test.describe("G29 GHM: live changes, the last editor takes the row, slots need permission", () => {
   const patients = [];
   const appts = [];
@@ -60,7 +72,10 @@ test.describe("G29 GHM: live changes, the last editor takes the row, slots need 
     await setSlotAccess(USERS.obt_two, false);
   });
 
+  test.beforeEach(endAllCalls);
+
   test.afterAll(async () => {
+    await endAllCalls();
     await setSlotAccess(USERS.obt_two, false);
     const ids = patients.map((p) => p.id);
     await query(`DELETE FROM obt_call_assignments WHERE patient_id = ANY($1::int[])`, [ids]);
@@ -85,6 +100,11 @@ test.describe("G29 GHM: live changes, the last editor takes the row, slots need 
     await page.setViewportSize({ width: 1600, height: 900 });
     const row = await openSheet(page, "obt_two", patients[0]);
     await expect(row.locator(".last-change")).toHaveCount(0);
+    const listCalls = [];
+    page.on("request", (r) => {
+      const url = new URL(r.url());
+      if (url.pathname === "/api/ghm-appointments") listCalls.push(url.searchParams.get("ids"));
+    });
 
     const obtOne = await apiAs("obt_one");
     const res = await obtOne.patch(`/api/ghm-appointments/${appts[0]}`, {
@@ -97,7 +117,9 @@ test.describe("G29 GHM: live changes, the last editor takes the row, slots need 
     await expect(pill).toContainText(USERS.obt_one.short_name);
     await expect(pill).toHaveAttribute("title", /Last changed by OBT One/);
     expect(await ownerOf(patients[0].id)).toBe(USERS.obt_one.id);
+    expect(listCalls).toEqual([String(appts[0])]);
 
+    await pressCalling(row);
     const notes = row.getByText("Asked to call back after lunch");
     await notes.click();
     const box = row.locator("textarea");
@@ -144,6 +166,8 @@ test.describe("G29 GHM: live changes, the last editor takes the row, slots need 
     await expect(receptionRow.getByRole("button", { name: "Preferred time" })).toBeDisabled();
 
     const adminRow = await openSheet(page, "admin", patients[1]);
+    await expect(adminRow.getByRole("button", { name: "Preferred time" })).toBeDisabled();
+    await pressCalling(adminRow);
     await expect(adminRow.getByRole("button", { name: "Preferred time" })).toBeEnabled();
     const adminTexts = (await headers(page).allInnerTexts()).map((t) => t.trim().toUpperCase());
     expect(adminTexts).not.toContain("ASSIGNED TO");
@@ -217,6 +241,7 @@ test.describe("G29 GHM: live changes, the last editor takes the row, slots need 
     await page.context().clearCookies();
     await openSheet(page, "obt_two", patients[1]);
     const enabledRow = page.locator("tbody tr", { hasText: patients[1].name }).first();
+    await pressCalling(enabledRow);
     await expect(enabledRow.getByRole("button", { name: "Preferred time" })).toBeEnabled();
     await page.getByRole("button", { name: "New Appointment" }).click();
     await expect(page.locator(".modal").getByLabel("Time Slot *")).toBeEnabled();
@@ -226,5 +251,59 @@ test.describe("G29 GHM: live changes, the last editor takes the row, slots need 
       data: { preferred_time_slot: "10 AM to 11 AM" },
     });
     expect(moved.ok()).toBe(true);
+  });
+
+  test("5. only the person calling a patient can change them; everyone else sees who has it", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1600, height: 900 });
+    const obtOne = await apiAs("obt_one");
+    const obtTwo = await apiAs("obt_two");
+    const second = await one(
+      `INSERT INTO appointments
+         (patient_id, file_no, patient_name, phone, doctor_name, appointment_date, status, visit_type)
+       VALUES ($1, $2, $3, $4, 'Dr E2E Banshali',
+               (NOW() AT TIME ZONE 'Asia/Kolkata')::date + 7, 'scheduled', 'Follow-Up')
+       RETURNING id`,
+      [patients[0].id, patients[0].file_no, patients[0].name, patients[0].phone],
+    );
+
+    const row = await openSheet(page, "obt_two", patients[0]);
+    const notesCell = row.getByText(/Will come on Friday|Asked to call back/).first();
+    await expect(row.getByRole("button", { name: "Calling" })).toBeVisible();
+    await expect(row.getByRole("button", { name: "Mode of appointment" })).toBeDisabled();
+
+    expect((await obtOne.post(`/api/ghm-appointments/${appts[0]}/calling`)).ok()).toBe(true);
+    await expect(row.locator(".calling-flag--other")).toContainText(USERS.obt_one.short_name, {
+      timeout: 8000,
+    });
+    await expect(row.getByRole("button", { name: "Calling" })).toHaveCount(0);
+    await expect(row.getByRole("button", { name: "Mode of appointment" })).toBeDisabled();
+    await expect(notesCell).toHaveAttribute("title", /OBT One is calling this patient/);
+
+    for (const [method, url, data] of [
+      ["patch", `/api/ghm-appointments/${appts[0]}`, { call_notes: "two at once" }],
+      ["patch", `/api/ghm-appointments/${second.id}`, { call_notes: "other visit, same patient" }],
+      ["post", "/api/call-attempts", { appointment_id: appts[0], outcome: "called" }],
+      ["post", `/api/ghm-appointments/${appts[0]}/calling`, undefined],
+    ]) {
+      const res = await obtTwo[method](url, data ? { data } : undefined);
+      expect(res.status(), `${method} ${url}`).toBe(409);
+      expect((await res.json()).error).toMatch(/OBT One/);
+    }
+    expect(
+      (
+        await obtOne.patch(`/api/ghm-appointments/${appts[0]}`, { data: { call_notes: "mine" } })
+      ).ok(),
+    ).toBe(true);
+
+    expect((await obtOne.delete(`/api/ghm-appointments/${appts[0]}/calling`)).ok()).toBe(true);
+    await expect(row.getByRole("button", { name: "Calling" })).toBeVisible({ timeout: 8000 });
+    await pressCalling(row);
+    expect(
+      (
+        await obtTwo.patch(`/api/ghm-appointments/${appts[0]}`, { data: { call_notes: "my turn" } })
+      ).ok(),
+    ).toBe(true);
   });
 });

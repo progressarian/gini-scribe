@@ -217,7 +217,7 @@ test.describe("GHM one open call per caller", () => {
     }
   });
 
-  test("setting the call status ends the caller's open call", async () => {
+  test("setting the call status keeps the caller's flag until they end the call", async () => {
     const first = await bookedPatient();
     const second = await bookedPatient();
     const api = await apiAs("reception_admin");
@@ -227,6 +227,10 @@ test.describe("GHM one open call per caller", () => {
         data: { call_status: "called" },
       });
       expect(patched.ok()).toBeTruthy();
+      const next = await api.post(`/api/ghm-appointments/${second.id}/calling`);
+      expect(next.status()).toBe(409);
+      expect((await next.json()).error).toBe("still_calling");
+      expect((await api.delete(`/api/ghm-appointments/${first.id}/calling`)).ok()).toBeTruthy();
       expect((await api.post(`/api/ghm-appointments/${second.id}/calling`)).ok()).toBeTruthy();
     } finally {
       await api.dispose();

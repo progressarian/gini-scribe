@@ -23,10 +23,14 @@ export async function signalGhm({ kind, appointmentId = null, patientId = null, 
   }
 }
 
+const RETRY_PRIME_MS = 60 * 1000;
+
 let watermark = null;
 let prunedAt = 0;
+let primedAt = 0;
 
 export async function primeGhmWatermark(db = pool) {
+  primedAt = Date.now();
   try {
     const { rows } = await db.query(`SELECT COALESCE(max(seq), 0) AS seq FROM ghm_live_events`);
     watermark = Number(rows[0].seq);
@@ -38,7 +42,10 @@ export async function primeGhmWatermark(db = pool) {
 }
 
 export async function tailGhm(db = pool) {
-  if (watermark === null && (await primeGhmWatermark(db)) === null) return;
+  if (watermark === null) {
+    if (Date.now() - primedAt < RETRY_PRIME_MS) return;
+    if ((await primeGhmWatermark(db)) === null) return;
+  }
   try {
     const { rows } = await db.query(
       `SELECT m.top, e.seq, e.kind, e.appointment_id, e.patient_id

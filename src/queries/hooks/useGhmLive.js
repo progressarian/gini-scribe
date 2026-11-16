@@ -6,8 +6,9 @@ import { createLiveConnection } from "./giniflowLiveConnection";
 const COALESCE_MS = 250;
 const DROP_GRACE_MS = 8000;
 
+const LIST_KEY = ["ghm", "list"];
+
 const ROW_KEYS = [
-  ["ghm", "list"],
   ["ghm", "obt-assignments"],
   ["ghm", "attempt-counts"],
   ["ghm", "active-calls"],
@@ -21,17 +22,19 @@ const ROW_KEYS = [
   ["ghm", "availability"],
 ];
 
-export function useGhmLive({ enabled = true, paused = false } = {}) {
+export function useGhmLive({ enabled = true, paused = false, refreshRows = null } = {}) {
   const queryClient = useQueryClient();
   const [live, setLiveState] = useState(null);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
+  const refreshRowsRef = useRef(refreshRows);
+  refreshRowsRef.current = refreshRows;
   const waitingRef = useRef(false);
 
   useEffect(() => {
     if (!paused && waitingRef.current) {
       waitingRef.current = false;
-      for (const key of ROW_KEYS) queryClient.invalidateQueries({ queryKey: key });
+      for (const key of [LIST_KEY, ...ROW_KEYS]) queryClient.invalidateQueries({ queryKey: key });
     }
   }, [paused, queryClient]);
 
@@ -41,6 +44,8 @@ export function useGhmLive({ enabled = true, paused = false } = {}) {
 
     let flushTimer = null;
     let dropTimer = null;
+    const pendingIds = new Set();
+    let wholeList = false;
 
     const setLive = (value) => {
       clearTimeout(dropTimer);
@@ -55,16 +60,34 @@ export function useGhmLive({ enabled = true, paused = false } = {}) {
       }, DROP_GRACE_MS);
     };
 
+    const reloadList = () => queryClient.invalidateQueries({ queryKey: LIST_KEY });
+
+    const refreshList = async (ids, whole) => {
+      if (whole || !ids.length || !refreshRowsRef.current) return reloadList();
+      try {
+        if (!(await refreshRowsRef.current(ids))) reloadList();
+      } catch {
+        reloadList();
+      }
+    };
+
     const flush = () => {
       flushTimer = null;
+      const ids = [...pendingIds];
+      const whole = wholeList;
+      pendingIds.clear();
+      wholeList = false;
       if (pausedRef.current) {
         waitingRef.current = true;
         return;
       }
+      refreshList(ids, whole);
       for (const key of ROW_KEYS) queryClient.invalidateQueries({ queryKey: key });
     };
 
-    const queue = () => {
+    const queue = (signal) => {
+      if (signal?.appointmentId) pendingIds.add(signal.appointmentId);
+      else wholeList = true;
       if (!flushTimer) flushTimer = setTimeout(flush, COALESCE_MS);
     };
 
@@ -79,7 +102,7 @@ export function useGhmLive({ enabled = true, paused = false } = {}) {
       EventSourceImpl: EventSource,
       eventName: "ghm",
       onSignal: queue,
-      onResync: queue,
+      onResync: () => queue(null),
       onStatus: setLive,
     });
     connection.start();
