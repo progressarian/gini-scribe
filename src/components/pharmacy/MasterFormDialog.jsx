@@ -47,6 +47,7 @@ export default function MasterFormDialog({
 
           {confirmDiscard ? (
             <div
+              key="discard"
               className="bill-dialog__actions bill-dialog__discard"
               role="group"
               aria-label="Discard changes?"
@@ -65,7 +66,7 @@ export default function MasterFormDialog({
               </button>
             </div>
           ) : (
-            <div className="bill-dialog__actions">
+            <div key="actions" className="bill-dialog__actions">
               <button type="button" className="flow-btn flow-btn-ghost" onClick={requestClose}>
                 Cancel
               </button>

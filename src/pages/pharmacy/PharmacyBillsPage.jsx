@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Plus } from "lucide-react";
 import { inr, showDate } from "../../components/pharmacy/format";
@@ -15,6 +15,7 @@ import "./pharmacyStock.css";
 import "./pharmacyVendors.css";
 import "./pharmacyBills.css";
 import PillGroup from "../../components/pharmacy/Pills";
+import useUrlState, { useUrlSearch, asNumber } from "../../hooks/useUrlState";
 
 const STATUSES = [
   { key: "all", label: "All" },
@@ -25,19 +26,10 @@ const STATUSES = [
 export default function PharmacyBillsPage() {
   const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
-  const [search, setSearch] = useState("");
-  const [q, setQ] = useState("");
-  const [status, setStatus] = useState("all");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setQ(search.trim().length >= 2 ? search.trim() : "");
-      setPage(1);
-    }, 250);
-    return () => clearTimeout(t);
-  }, [search]);
+  const { search, setSearch, q } = useUrlSearch("q", () => setPage(1));
+  const [status, setStatus] = useUrlState("status", "all");
+  const [page, setPage] = useUrlState("page", 1, asNumber);
+  const [pageSize, setPageSize] = useUrlState("size", 25, asNumber);
 
   const list = useBillList({
     ...(q ? { q } : {}),

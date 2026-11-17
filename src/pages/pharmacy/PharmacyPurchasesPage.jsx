@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { PackagePlus, Plus } from "lucide-react";
 import { requestErrorOf } from "../../components/billing/format";
@@ -13,6 +13,7 @@ import "../billing/billingUi.css";
 import "./pharmacyStock.css";
 import "./pharmacyVendors.css";
 import PillGroup from "../../components/pharmacy/Pills";
+import useUrlState, { useUrlSearch, asNumber } from "../../hooks/useUrlState";
 
 const STATUSES = [
   { key: "all", label: "All" },
@@ -34,20 +35,11 @@ export function PurchaseStatus({ status }) {
 export default function PharmacyPurchasesPage() {
   const navigate = useNavigate();
   const create = useCreatePurchase();
-  const [search, setSearch] = useState("");
-  const [q, setQ] = useState("");
-  const [status, setStatus] = useState("all");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const { search, setSearch, q } = useUrlSearch("q", () => setPage(1));
+  const [status, setStatus] = useUrlState("status", "all");
+  const [page, setPage] = useUrlState("page", 1, asNumber);
+  const [pageSize, setPageSize] = useUrlState("size", 25, asNumber);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setQ(search.trim().length >= 2 ? search.trim() : "");
-      setPage(1);
-    }, 250);
-    return () => clearTimeout(t);
-  }, [search]);
 
   const list = usePurchaseList({
     ...(q ? { q } : {}),

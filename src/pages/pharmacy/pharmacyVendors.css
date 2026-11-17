@@ -191,15 +191,12 @@
 .pur-confirm-text {
   margin: 0 0 10px;
 }
-.pur-reason {
-  display: block;
-  margin-bottom: 4px;
-  font-weight: 600;
-  color: #0f172a;
-}
-.pur-reason__input {
+.fset.bill-ui.pur-cancel textarea.pur-reason__input {
   width: 100%;
   box-sizing: border-box;
+  min-height: 76px;
+  line-height: 1.45;
+  resize: vertical;
 }
 .pur-add-row {
   display: flex;

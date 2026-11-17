@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { toast } from "../../stores/uiStore";
 import { requestErrorOf } from "../billing/format";
@@ -11,6 +11,7 @@ import "../../pages/billing/billingUi.css";
 import "../../pages/pharmacy/pharmacyStock.css";
 import "../../pages/pharmacy/pharmacyVendors.css";
 import PillGroup from "./Pills";
+import useUrlState, { useUrlSearch, asNumber } from "../../hooks/useUrlState";
 
 const STATUSES = [
   { key: "active", label: "Active" },
@@ -36,25 +37,22 @@ export default function MasterListPage({
   rowActions,
   canToggle = () => true,
 }) {
-  const [search, setSearch] = useState("");
-  const [q, setQ] = useState("");
-  const [status, setStatus] = useState("active");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const { search, setSearch, q, clear: clearSearch } = useUrlSearch("q", () => setPage(1));
+  const [status, setStatus] = useUrlState("status", "active");
+  const [page, setPage] = useUrlState("page", 1, asNumber);
+  const [pageSize, setPageSize] = useUrlState("size", 25, asNumber);
   const [editing, setEditing] = useState(null);
   const [toggling, setToggling] = useState(null);
   const [toggleError, setToggleError] = useState("");
   const setActive = hooks.useSetActive();
 
+  const filtersKey = JSON.stringify(filters);
+  const shownFilters = useRef(filtersKey);
   useEffect(() => {
-    const t = setTimeout(() => {
-      setQ(search.trim().length >= 2 ? search.trim() : "");
-      setPage(1);
-    }, 250);
-    return () => clearTimeout(t);
-  }, [search]);
-
-  useEffect(() => setPage(1), [JSON.stringify(filters)]);
+    if (shownFilters.current === filtersKey) return;
+    shownFilters.current = filtersKey;
+    setPage(1);
+  }, [filtersKey]);
 
   const list = hooks.useList({
     ...(q ? { q } : {}),
@@ -68,8 +66,7 @@ export default function MasterListPage({
   const filtered = Boolean(q) || status !== "active" || filtersActive;
 
   const clearFilters = () => {
-    setSearch("");
-    setQ("");
+    clearSearch();
     setStatus("active");
     setPage(1);
     onClearFilters?.();

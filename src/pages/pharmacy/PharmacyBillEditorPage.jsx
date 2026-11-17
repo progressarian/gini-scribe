@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, HandCoins, Printer, Trash2, Undo2 } from "lucide-react";
+import { ArrowLeft, HandCoins, Pill, Printer, Trash2, Undo2 } from "lucide-react";
 import ReturnDialog from "../../components/pharmacy/ReturnDialog";
 import { AskCreditDialog, CollectDueDialog } from "../../components/pharmacy/CreditDialogs";
 import useAuthStore from "../../stores/authStore";
@@ -776,7 +776,13 @@ function DraftBill({ bill }) {
             onDiscount={setLineDiscount}
           />
         ) : (
-          <p className="phs-empty">No medicines yet. Search above to add the first one.</p>
+          <div className="phb-nolines">
+            <Pill size={20} className="phb-nolines__icon" aria-hidden="true" />
+            <p className="phb-nolines__title">No medicines on this bill yet</p>
+            <p className="phs-meta">
+              Search by medicine name or code above. Batches are offered soonest expiry first.
+            </p>
+          </div>
         )}
         {save.isPending ? (
           <p className="phs-meta" role="status">

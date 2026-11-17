@@ -14,21 +14,21 @@ const PATIENT_COLUMNS = `p.id, p.name, p.file_no, p.phone, p.age, p.sex, p.healt
     WHERE v.patient_id = p.id AND v.visit_date = $1::date AND v.merged_into_visit_id IS NULL
     ORDER BY v.created_at DESC LIMIT 1) AS today_visit_id`;
 
-export async function searchBillPatients({ q, limit = 20 }, db = pool) {
+export async function searchBillPatients({ q, limit = 20, offset = 0 }, db = pool) {
   const text = q.trim();
   const digits = text.replace(/\D/g, "");
-  const params = [today(), `%${text.toLowerCase()}%`, limit];
+  const params = [today(), `%${text.toLowerCase()}%`, limit, offset];
   let phone = "FALSE";
   if (digits.length >= 4) {
     params.push(`%${digits}%`);
-    phone = `${PHONE10} LIKE $4`;
+    phone = `${PHONE10} LIKE $5`;
   }
   const { rows } = await db.query(
     `SELECT ${PATIENT_COLUMNS}
        FROM patients p
       WHERE lower(p.name) LIKE $2 OR lower(COALESCE(p.file_no, '')) LIKE $2 OR ${phone}
       ORDER BY (lower(p.name) = lower(btrim($2, '%'))) DESC, p.id DESC
-      LIMIT $3`,
+      LIMIT $3 OFFSET $4`,
     params,
   );
   return rows;

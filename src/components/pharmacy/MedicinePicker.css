@@ -35,7 +35,21 @@
   cursor: pointer;
 }
 .mpick__option.is-active {
-  background: var(--fskl);
+  background: var(--ui-accent-soft, #e6f6f4);
+}
+.mpick__field {
+  position: relative;
+}
+.mpick__icon {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ui-muted, #64748b);
+  pointer-events: none;
+}
+.fset.bill-ui .jb-assign.mpick__input {
+  padding-left: 34px;
 }
 .mpick__name {
   font-size: 14px;

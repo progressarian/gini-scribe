@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useState } from "react";
 import { PackageX } from "lucide-react";
 import FormField from "../../components/ui/FormField";
 import MasterFormDialog from "../../components/pharmacy/MasterFormDialog";
@@ -12,6 +11,7 @@ import { useStockLocations } from "../../queries/hooks/usePharmacyBatches";
 import { useVendorList } from "../../queries/hooks/usePharmacyVendors";
 import { SelectInput, optionsOf } from "../../components/pharmacy/Fields";
 import PillGroup from "../../components/pharmacy/Pills";
+import useUrlState, { useUrlSearch } from "../../hooks/useUrlState";
 import {
   useCreateVendorReturn,
   useExpiryList,
@@ -97,7 +97,7 @@ function ReturnDialog({ rows, onClose, onDone }) {
     <MasterFormDialog
       title="Return to vendor"
       intro={
-        <p className="phs-meta">
+        <p className="phs-meta phb-dialog-intro">
           The stock leaves the main pharmacy now. Record the vendor&apos;s credit note number when
           you have it.
         </p>
@@ -135,7 +135,7 @@ function ReturnDialog({ rows, onClose, onDone }) {
             onChange={(e) => setVendorRef(e.target.value)}
           />
         </FormField>
-        <FormField label="Note">
+        <FormField label="Note" className="phv-span-all">
           <input
             className="jb-assign"
             maxLength={300}
@@ -144,6 +144,7 @@ function ReturnDialog({ rows, onClose, onDone }) {
           />
         </FormField>
       </div>
+      <h3 className="phv-section phb-dialog-section">Batches being returned</h3>
       <div className="fset__scroll">
         <table className="flow-table phs-table" aria-label="Batches being returned">
           <thead>
@@ -240,19 +241,12 @@ function RecentReturns() {
 export default function PharmacyExpiryPage() {
   const role = useAuthStore((s) => s.currentDoctor?.role);
   const canReturn = hasCapability(role, CAPABILITIES.PHARMACY_PURCHASE);
-  const [params] = useSearchParams();
   const locations = useStockLocations();
-  const [locationId, setLocationId] = useState(() => params.get("location_id") ?? "");
-  const [bucket, setBucket] = useState(() => params.get("bucket") ?? "all");
-  const [search, setSearch] = useState("");
-  const [q, setQ] = useState("");
+  const [locationId, setLocationId] = useUrlState("location_id", "");
+  const [bucket, setBucket] = useUrlState("bucket", "all");
+  const { search, setSearch, q } = useUrlSearch("q");
   const [picked, setPicked] = useState(() => new Set());
   const [returning, setReturning] = useState(false);
-
-  useEffect(() => {
-    const t = setTimeout(() => setQ(search.trim().length >= 2 ? search.trim() : ""), 250);
-    return () => clearTimeout(t);
-  }, [search]);
 
   const query = useExpiryList({
     ...(locationId ? { location_id: locationId } : {}),

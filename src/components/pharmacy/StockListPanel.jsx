@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ArrowDown, ArrowUp, Download } from "lucide-react";
 import Pagination from "../ui/Pagination";
 import { downloadFile } from "../../lib/downloadBlob";
@@ -7,6 +7,7 @@ import { toast } from "../../stores/uiStore";
 import { useStockList, useStockLocations } from "../../queries/hooks/usePharmacyBatches";
 import { useVendorList } from "../../queries/hooks/usePharmacyVendors";
 import { SelectInput } from "./Fields";
+import useUrlState, { useUrlSearch, asNumber, asFlag } from "../../hooks/useUrlState";
 
 const EXPIRY = [
   { key: "all", label: "Any expiry" },
@@ -54,25 +55,18 @@ function VendorFilter({ value, onChange }) {
 
 export default function StockListPanel({ withCost }) {
   const locations = useStockLocations();
-  const [locationId, setLocationId] = useState("");
-  const [form, setForm] = useState("");
-  const [vendorId, setVendorId] = useState("");
-  const [expiry, setExpiry] = useState("all");
-  const [includeEmpty, setIncludeEmpty] = useState(false);
-  const [search, setSearch] = useState("");
-  const [q, setQ] = useState("");
-  const [sort, setSort] = useState({ key: "medicine_name", dir: "asc" });
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [locationId, setLocationId] = useUrlState("l_location", "");
+  const [form, setForm] = useUrlState("l_type", "");
+  const [vendorId, setVendorId] = useUrlState("l_vendor", "");
+  const [expiry, setExpiry] = useUrlState("l_expiry", "all");
+  const [includeEmpty, setIncludeEmpty] = useUrlState("l_empty", false, asFlag);
+  const { search, setSearch, q } = useUrlSearch("l_q", () => setPage(1));
+  const [sortKey, setSortKey] = useUrlState("l_sort", "medicine_name");
+  const [sortDir, setSortDir] = useUrlState("l_dir", "asc");
+  const sort = { key: sortKey, dir: sortDir };
+  const [page, setPage] = useUrlState("l_page", 1, asNumber);
+  const [pageSize, setPageSize] = useUrlState("l_size", 50, asNumber);
   const [downloading, setDownloading] = useState(false);
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setQ(search.trim().length >= 2 ? search.trim() : "");
-      setPage(1);
-    }, 250);
-    return () => clearTimeout(t);
-  }, [search]);
 
   const filters = {
     ...(locationId ? { location_id: locationId } : {}),
@@ -93,7 +87,8 @@ export default function StockListPanel({ withCost }) {
   };
 
   const sortBy = (key) => {
-    setSort((was) => ({ key, dir: was.key === key && was.dir === "asc" ? "desc" : "asc" }));
+    setSortDir(sort.key === key && sort.dir === "asc" ? "desc" : "asc");
+    setSortKey(key);
     setPage(1);
   };
 

@@ -119,6 +119,8 @@ export const pharmacyBillListQuerySchema = z.object({
 
 export const pharmacyBillPatientQuerySchema = z.object({
   q: z.string().trim().min(2, "must be at least 2 characters").max(80),
+  limit: z.coerce.number().int().min(1).max(51).default(20),
+  offset: z.coerce.number().int().min(0).max(5000).default(0),
 });
 
 export const pharmacyWalkinSchema = z.strictObject({

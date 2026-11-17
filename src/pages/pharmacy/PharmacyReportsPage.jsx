@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Download } from "lucide-react";
 import FormField from "../../components/ui/FormField";
 import { DateInput, SelectInput } from "../../components/pharmacy/Fields";
@@ -15,6 +15,7 @@ import "../billing/billingUi.css";
 import "./pharmacyStock.css";
 import "./pharmacyVendors.css";
 import "./pharmacyBills.css";
+import useUrlState from "../../hooks/useUrlState";
 
 const WORDS = { sale_type: SALE_TYPE_LABEL, mode: PAYMENT_MODE_LABEL };
 
@@ -74,14 +75,12 @@ function ReportTable({ result }) {
 
 export default function PharmacyReportsPage() {
   const list = useReportList();
-  const [params, setParams] = useSearchParams();
+  const [reportParam, setReport] = useUrlState("report", "");
   const reports = list.data ?? [];
-  const key = reports.some((r) => r.key === params.get("report"))
-    ? params.get("report")
-    : reports[0]?.key;
+  const key = reports.some((r) => r.key === reportParam) ? reportParam : reports[0]?.key;
   const chosen = reports.find((r) => r.key === key);
-  const [from, setFrom] = useState(() => localDate(-6));
-  const [to, setTo] = useState(() => localDate());
+  const [from, setFrom] = useUrlState("from", localDate(-6));
+  const [to, setTo] = useUrlState("to", localDate());
   const [downloading, setDownloading] = useState(false);
   const badRange = chosen?.dated && from > to;
   const period = chosen?.dated ? { from, to } : {};
@@ -126,7 +125,7 @@ export default function PharmacyReportsPage() {
           <FormField label="Report">
             <SelectInput
               value={key ?? ""}
-              onChange={(report) => setParams({ report }, { replace: true })}
+              onChange={setReport}
               options={reports.map((r) => ({ value: r.key, label: r.label }))}
               placeholder="Loading reports…"
             />

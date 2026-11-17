@@ -104,7 +104,7 @@ export default function BatchPickerDialog({
       intro={
         <>
           {prescribed ? <p className="phb-prescribed">Prescribed: {prescribed}</p> : null}
-          <p className="phs-meta">
+          <p className="phs-meta phb-batch-intro">
             {medicine.pack_label} of {medicine.pack_size} {medicine.unit_label} ·{" "}
             {packUnits(inStock, medicine)} in stock. Soonest expiry is at the top.
           </p>
@@ -144,7 +144,7 @@ export default function BatchPickerDialog({
           <WandSparkles size={14} aria-hidden="true" />
           Auto-fill (earliest expiry first)
         </button>
-        <p className="phs-meta" role="status" aria-live="polite">
+        <p className="phs-meta phb-fill__note" role="status" aria-live="polite">
           {fillNote}
         </p>
       </div>

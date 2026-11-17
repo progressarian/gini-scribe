@@ -1,5 +1,4 @@
 import { useRef } from "react";
-import { useSearchParams } from "react-router-dom";
 import useAuthStore from "../../stores/authStore";
 import { CAPABILITIES, hasAnyCapability, hasCapability } from "../../../shared/permissions";
 import BatchStockPanel from "../../components/pharmacy/BatchStockPanel";
@@ -12,6 +11,7 @@ import "../billing/billingUi.css";
 import "./pharmacyStock.css";
 import "./pharmacyVendors.css";
 import "./pharmacyBills.css";
+import useUrlState from "../../hooks/useUrlState";
 
 const TABS = [
   { key: "batches", label: "Batch stock" },
@@ -21,8 +21,8 @@ const TABS = [
 
 export default function PharmacyStockPage() {
   const role = useAuthStore((s) => s.currentDoctor?.role);
-  const [params, setParams] = useSearchParams();
-  const tab = TABS.some((t) => t.key === params.get("tab")) ? params.get("tab") : "batches";
+  const [tabParam, setTab] = useUrlState("tab", "batches");
+  const tab = TABS.some((t) => t.key === tabParam) ? tabParam : "batches";
   const tabRefs = useRef({});
   const withCost = hasAnyCapability(role, [
     CAPABILITIES.PHARMACY_PURCHASE,
@@ -31,7 +31,7 @@ export default function PharmacyStockPage() {
   const canAdjust = hasCapability(role, CAPABILITIES.PHARMACY_STOCK_ADJUST);
 
   const select = (key) => {
-    setParams(key === "batches" ? {} : { tab: key }, { replace: true });
+    setTab(key);
     tabRefs.current[key]?.focus();
   };
 

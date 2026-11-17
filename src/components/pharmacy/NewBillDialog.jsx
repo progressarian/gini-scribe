@@ -121,9 +121,9 @@ export default function NewBillDialog({ onCreated, onClose }) {
       onClose={onClose}
     >
       {walkinMode ? (
-        <fieldset className="phb-fieldset">
+        <fieldset className="phb-section">
           <legend>Walk-in customer</legend>
-          <p className="phs-meta">
+          <p className="phs-meta phb-section__intro">
             Gets a temporary GNI file number. When they book an appointment with the same mobile
             number, the hospital record takes it over.
           </p>
@@ -181,7 +181,7 @@ export default function NewBillDialog({ onCreated, onClose }) {
           </button>
         </fieldset>
       ) : (
-        <fieldset className="phb-fieldset">
+        <fieldset className="phb-section">
           <legend>Patient</legend>
           <FormField
             label="Find patient"
@@ -198,16 +198,16 @@ export default function NewBillDialog({ onCreated, onClose }) {
               onChange={(e) => setSearch(e.target.value)}
             />
           </FormField>
-          {q.length >= 2 ? (
-            found.isError ? (
-              <p className="bill-dialog__error" role="alert">
-                Could not search patients. Try again.
-              </p>
-            ) : found.isLoading ? (
-              <p className="phs-meta" role="status">
-                Searching…
-              </p>
-            ) : results.length ? (
+          {q.length < 2 ? null : found.isError ? (
+            <p className="bill-dialog__error" role="alert">
+              Could not search patients. Try again.
+            </p>
+          ) : found.isLoading ? (
+            <p className="phs-meta" role="status">
+              Searching…
+            </p>
+          ) : results.length ? (
+            <>
               <div className="phb-patients" role="radiogroup" aria-label="Matching patients">
                 {results.map((p) => (
                   <label
@@ -234,12 +234,28 @@ export default function NewBillDialog({ onCreated, onClose }) {
                   </label>
                 ))}
               </div>
-            ) : (
-              <p className="phs-meta" role="status">
-                No patient matches “{q}”.
-              </p>
-            )
-          ) : null}
+              <div className="phb-more">
+                <span className="phs-meta" role="status">
+                  Showing {results.length} {results.length === 1 ? "patient" : "patients"}
+                  {found.hasNextPage ? "" : ", all matches"}
+                </span>
+                {found.hasNextPage ? (
+                  <button
+                    type="button"
+                    className="flow-btn flow-btn-ghost"
+                    disabled={found.isFetchingNextPage}
+                    onClick={() => found.fetchNextPage()}
+                  >
+                    {found.isFetchingNextPage ? "Loading…" : "Load more"}
+                  </button>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <p className="phs-meta" role="status">
+              No patient matches “{q}”.
+            </p>
+          )}
           <button
             type="button"
             className="flow-btn flow-btn-ghost phb-switch"
@@ -251,7 +267,7 @@ export default function NewBillDialog({ onCreated, onClose }) {
         </fieldset>
       )}
 
-      <fieldset className="phb-fieldset">
+      <fieldset className="phb-section">
         <legend>Sale type</legend>
         <div className="phb-saletypes" role="radiogroup" aria-label="Sale type">
           {COUNTER_SALE_TYPES.map((type) => (
@@ -270,7 +286,7 @@ export default function NewBillDialog({ onCreated, onClose }) {
             </label>
           ))}
         </div>
-        <div className="bill-form">
+        <div className="bill-form phb-section__fields">
           {saleType === "ipd" ? (
             <FormField label="IPD number" required error={errors.ipd}>
               <input
@@ -281,7 +297,11 @@ export default function NewBillDialog({ onCreated, onClose }) {
               />
             </FormField>
           ) : null}
-          <FormField label="Prescribed by" hint="Needed when a Schedule H1 medicine is sold">
+          <FormField
+            label="Prescribed by"
+            hint="Needed when a Schedule H1 medicine is sold"
+            className="phb-section__wide"
+          >
             <input
               className="jb-assign"
               maxLength={120}

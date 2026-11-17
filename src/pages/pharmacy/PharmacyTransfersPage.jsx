@@ -17,6 +17,7 @@ import "./pharmacyStock.css";
 import "./pharmacyVendors.css";
 import "./pharmacyBills.css";
 import { SelectInput } from "../../components/pharmacy/Fields";
+import useUrlState, { asNumber } from "../../hooks/useUrlState";
 
 const when = (value) =>
   new Date(value).toLocaleString("en-IN", {
@@ -169,9 +170,9 @@ function NewTransfer({ locations }) {
 }
 
 function TransferList({ locations }) {
-  const [locationId, setLocationId] = useState("");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const [locationId, setLocationId] = useUrlState("location_id", "");
+  const [page, setPage] = useUrlState("page", 1, asNumber);
+  const [pageSize, setPageSize] = useUrlState("size", 25, asNumber);
   const query = useTransfers({
     ...(locationId ? { location_id: locationId } : {}),
     limit: pageSize,

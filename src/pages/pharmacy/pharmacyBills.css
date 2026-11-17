@@ -105,8 +105,30 @@
   font-weight: 600;
 }
 .phb-add {
-  max-width: 560px;
-  margin-bottom: 12px;
+  margin: 14px 0 12px;
+}
+.phb-nolines {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 28px 16px;
+  text-align: center;
+  border: 1px dashed var(--ui-field);
+  border-radius: 8px;
+  background: var(--ui-soft);
+}
+.phb-nolines__icon {
+  margin-bottom: 4px;
+  color: var(--ui-muted);
+}
+.phb-nolines p {
+  margin: 0;
+}
+.phb-nolines__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ui-ink);
 }
 .phb-lines .phs-meta,
 .phb-batches .phs-meta {
@@ -204,24 +226,67 @@
   margin-top: 16px;
   flex-wrap: wrap;
 }
+.phb-batch-intro {
+  margin: 0 0 16px;
+}
 .phb-fill {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
+  display: grid;
+  grid-template-columns: minmax(160px, 240px) auto;
+  justify-content: start;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 6px;
+  margin-bottom: 16px;
 }
 .phb-fill .fset__field {
-  flex: 0 1 220px;
+  display: contents;
+}
+.phb-fill .fset__field > label {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+.phb-fill .fset__field > input {
+  grid-column: 1;
+  grid-row: 2;
+}
+.phb-fill .fset__field > small {
+  grid-column: 1;
+  grid-row: 3;
 }
 .phb-fill .flow-btn {
+  grid-column: 2;
+  grid-row: 2;
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  height: 36px;
+  white-space: nowrap;
 }
-.phb-fill > p {
-  flex-basis: 100%;
+.phb-fill__note {
+  grid-column: 2 / -1;
+  grid-row: 3;
   margin: 0;
+}
+.fset.bill-ui .phv-dialog .fset__scroll {
+  margin: 0;
+  padding: 0;
+}
+.fset.bill-ui .phb-batches .jb-assign.phb-qty {
+  width: 96px;
+}
+@media (max-width: 640px) {
+  .phb-fill {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .phb-fill .flow-btn {
+    grid-column: 1;
+    grid-row: 4;
+    justify-content: center;
+  }
+  .phb-fill__note {
+    grid-column: 1;
+    grid-row: 5;
+  }
 }
 .phb-give {
   display: flex;
@@ -475,4 +540,155 @@
 }
 .adj-change__arrow {
   vertical-align: -2px;
+}
+.phb-section {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.phb-section + .phb-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--ui-line);
+}
+.phb-section > legend {
+  float: left;
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ui-ink);
+}
+.phb-section > legend + * {
+  clear: left;
+}
+.phb-section__intro {
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+.fset.bill-ui .phb-section .bill-form {
+  margin-top: 0;
+}
+.fset.bill-ui .phb-section .bill-form.phb-section__fields {
+  margin-top: 14px;
+}
+.fset.bill-ui .phb-section__wide {
+  grid-column: span 2;
+}
+.phb-section .phb-switch {
+  margin-top: 12px;
+}
+.phb-section .phb-saletypes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+.phb-section .phb-saletype {
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-color: var(--ui-field);
+  border-radius: 8px;
+}
+.phb-section .phb-saletype input[type="radio"] {
+  flex-shrink: 0;
+  margin: 2px 0 0;
+  accent-color: var(--ui-accent);
+}
+.phb-section .phb-saletype > span {
+  gap: 2px;
+}
+.phb-section .phb-saletype.is-on {
+  border-color: var(--ui-accent);
+  background: var(--ui-accent-soft);
+}
+@media (max-width: 640px) {
+  .fset.bill-ui .phb-section__wide {
+    grid-column: auto;
+  }
+}
+.bill-dialog__title + .phb-section {
+  margin-top: 16px;
+}
+.phb-section .fset__field + .phs-meta,
+.phb-section .fset__field + .phb-patients,
+.phb-section .fset__field + .bill-dialog__error {
+  margin-top: 8px;
+}
+.phb-section .phb-patients {
+  gap: 6px;
+  margin: 8px -3px 0;
+  padding: 3px;
+}
+.phb-section .phb-patient {
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-color: var(--ui-field);
+  border-radius: 8px;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.phb-section .phb-patient:hover:not(.is-on) {
+  border-color: #b8c3d1;
+  background: var(--ui-soft);
+}
+.phb-section .phb-patient input[type="radio"] {
+  flex-shrink: 0;
+  margin: 2px 0 0;
+  accent-color: var(--ui-accent);
+}
+.phb-section .phb-patient > span:first-of-type {
+  gap: 2px;
+}
+.phb-section .phb-patient.is-on {
+  border-color: var(--ui-accent);
+  background: var(--ui-accent-soft);
+}
+.phb-section .phb-patient .phb-tag {
+  align-self: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .phb-section .phb-patient {
+    transition: none;
+  }
+}
+.phb-section .phb-patient:focus-within,
+.phb-section .phb-saletype:focus-within {
+  outline: none;
+}
+.phb-section .phb-patient:has(input:focus-visible),
+.phb-section .phb-saletype:has(input:focus-visible) {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 1px;
+}
+.phb-more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+.phb-more .flow-btn {
+  padding: 6px 12px;
+}
+.fset.bill-ui .phb-lines .jb-assign.phb-qty {
+  width: 84px;
+  margin-left: auto;
+}
+.phb-line-acts .flow-btn + .flow-btn {
+  margin-left: 6px;
+}
+.phb-dialog-intro {
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+.phv-section.phb-dialog-section {
+  margin: 20px 0 8px;
+}
+.fset.bill-ui .phv-dialog .jb-assign.phb-qty {
+  width: 96px;
+  margin-left: auto;
 }

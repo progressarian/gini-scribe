@@ -1,4 +1,10 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import api, { API_URL } from "../../services/api";
 
 const BASE = "/api/pharmacy/bills";
@@ -43,10 +49,21 @@ export function useBillPrescription(id, { enabled = true } = {}) {
   });
 }
 
+export const PATIENT_PAGE = 20;
+
 export function useBillPatientSearch(q) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: billKeys.patients(q),
-    queryFn: async () => (await api.get(`${BASE}/patients`, { params: { q } })).data,
+    queryFn: async ({ pageParam }) =>
+      (
+        await api.get(`${BASE}/patients`, {
+          params: { q, limit: PATIENT_PAGE + 1, offset: pageParam },
+        })
+      ).data,
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) =>
+      last.length > PATIENT_PAGE ? pages.length * PATIENT_PAGE : undefined,
+    select: (data) => data.pages.flatMap((page) => page.slice(0, PATIENT_PAGE)),
     enabled: q.length >= 2,
     placeholderData: keepPreviousData,
   });

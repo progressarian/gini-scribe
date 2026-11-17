@@ -1,4 +1,3 @@
-import { useState } from "react";
 import useAuthStore from "../../stores/authStore";
 import { CAPABILITIES, hasCapability } from "../../../shared/permissions";
 import { MEDICINE_TYPES } from "../../../shared/medicineTypes";
@@ -9,6 +8,7 @@ import MedicineDialog from "../../components/pharmacy/MedicineDialog";
 import { useMedicineList, useSetMedicineActive } from "../../queries/hooks/usePharmacyMedicines";
 import { SelectInput, optionsOf } from "../../components/pharmacy/Fields";
 import { Pill } from "../../components/pharmacy/Pills";
+import useUrlState, { asFlag } from "../../hooks/useUrlState";
 
 const hooks = { useList: useMedicineList, useSetActive: useSetMedicineActive };
 
@@ -92,9 +92,9 @@ const COLUMNS = [
 
 export default function PharmacyMedicinesPage() {
   const role = useAuthStore((s) => s.currentDoctor?.role);
-  const [form, setForm] = useState("");
-  const [schedule, setSchedule] = useState("");
-  const [review, setReview] = useState(false);
+  const [form, setForm] = useUrlState("form", "");
+  const [schedule, setSchedule] = useUrlState("schedule", "");
+  const [review, setReview] = useUrlState("review", false, asFlag);
   const filters = {
     ...(form ? { form } : {}),
     ...(schedule ? { schedule } : {}),

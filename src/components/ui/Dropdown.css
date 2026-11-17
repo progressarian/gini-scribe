@@ -132,8 +132,14 @@
   color: #fff;
 }
 
-.doc-dd__item:hover {
+.doc-dd__item:hover,
+.doc-dd__item:focus-visible {
   background: #f1f5f9;
+}
+
+.doc-dd__item:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
 }
 
 .doc-dd__item:disabled {
@@ -148,7 +154,8 @@
   font-weight: 600;
 }
 
-.doc-dd__item--active:hover {
+.doc-dd__item--active:hover,
+.doc-dd__item--active:focus-visible {
   background: #1d4ed8;
 }
 

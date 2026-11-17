@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { Search } from "lucide-react";
 import { useMedicineList } from "../../queries/hooks/usePharmacyMedicines";
 import "./MedicinePicker.css";
 
@@ -86,29 +87,32 @@ export default function MedicinePicker({
       <label htmlFor={id} className="mpick__label">
         {label}
       </label>
-      <input
-        id={id}
-        className="jb-assign"
-        role="combobox"
-        aria-autocomplete="list"
-        aria-expanded={expanded}
-        aria-controls={listId}
-        aria-activedescendant={
-          expanded && options[active] ? `${listId}-${optionId(options[active])}` : undefined
-        }
-        autoComplete="off"
-        autoFocus={autoFocus}
-        disabled={disabled}
-        placeholder={placeholder}
-        value={text}
-        onChange={(e) => {
-          setText(e.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
-        onKeyDown={onKeyDown}
-      />
+      <div className="mpick__field">
+        <Search size={15} className="mpick__icon" aria-hidden="true" />
+        <input
+          id={id}
+          className="jb-assign mpick__input"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={expanded}
+          aria-controls={listId}
+          aria-activedescendant={
+            expanded && options[active] ? `${listId}-${optionId(options[active])}` : undefined
+          }
+          autoComplete="off"
+          autoFocus={autoFocus}
+          disabled={disabled}
+          placeholder={placeholder}
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
+          onKeyDown={onKeyDown}
+        />
+      </div>
       <ul
         id={listId}
         role="listbox"

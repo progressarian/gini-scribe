@@ -37,7 +37,10 @@
 }
 .phs-head__acts {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
+  margin-left: auto;
 }
 .phs-upload {
   display: inline-flex;
@@ -380,4 +383,9 @@
   margin: 12px 0 0;
   font-size: 13px;
   color: var(--fink2);
+}
+
+.fset.bill-ui.phs .fset__scroll {
+  margin: 0;
+  padding: 0;
 }

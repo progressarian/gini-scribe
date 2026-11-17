@@ -12,6 +12,7 @@ import "./pharmacyStock.css";
 import "./pharmacyVendors.css";
 import "./pharmacyBills.css";
 import PillGroup from "../../components/pharmacy/Pills";
+import useUrlState, { useUrlSearch, asNumber } from "../../hooks/useUrlState";
 
 const COLUMNS = [
   { key: "name", label: "Patient name" },
@@ -36,20 +37,13 @@ const FILTERS = [
 ];
 
 export default function PharmacyLedgerPage() {
-  const [search, setSearch] = useState("");
-  const [q, setQ] = useState("");
-  const [only, setOnly] = useState("all");
-  const [sort, setSort] = useState({ key: "last_activity", dir: "desc" });
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setQ(search.trim().length >= 2 ? search.trim() : "");
-      setPage(1);
-    }, 250);
-    return () => clearTimeout(t);
-  }, [search]);
+  const { search, setSearch, q } = useUrlSearch("q", () => setPage(1));
+  const [only, setOnly] = useUrlState("only", "all");
+  const [sortKey, setSortKey] = useUrlState("sort", "last_activity");
+  const [sortDir, setSortDir] = useUrlState("dir", "desc");
+  const sort = { key: sortKey, dir: sortDir };
+  const [page, setPage] = useUrlState("page", 1, asNumber);
+  const [pageSize, setPageSize] = useUrlState("size", 50, asNumber);
 
   const query = usePatientLedger({
     ...(q ? { q } : {}),
@@ -61,7 +55,8 @@ export default function PharmacyLedgerPage() {
   });
   const rows = query.data?.rows ?? [];
   const sortBy = (key) => {
-    setSort((was) => ({ key, dir: was.key === key && was.dir === "desc" ? "asc" : "desc" }));
+    setSortDir(sort.key === key && sort.dir === "desc" ? "asc" : "desc");
+    setSortKey(key);
     setPage(1);
   };
 

@@ -495,22 +495,21 @@ function DraftReceipt({ purchase: loaded }) {
         open={cancelling}
         title={`Cancel ${purchase.receipt_no}?`}
         message={
-          <>
+          <div className="fset bill-ui pur-cancel">
             <p className="pur-confirm-text">
               The draft is kept for the record but nothing is added to stock.
             </p>
-            <label className="pur-reason" htmlFor="pur-cancel-reason">
-              Reason
-            </label>
-            <textarea
-              id="pur-cancel-reason"
-              className="jb-assign pur-reason__input"
-              rows={2}
-              maxLength={500}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          </>
+            <FormField label="Reason" required hint="Up to 500 characters.">
+              <textarea
+                className="jb-assign pur-reason__input"
+                rows={3}
+                maxLength={500}
+                placeholder="e.g. Wrong vendor chosen, invoice entered twice"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+              />
+            </FormField>
+          </div>
         }
         confirmLabel="Cancel receipt"
         cancelLabel="Keep draft"

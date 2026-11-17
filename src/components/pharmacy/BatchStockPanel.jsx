@@ -1,4 +1,3 @@
-import { useSearchParams } from "react-router-dom";
 import { Fragment, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import Pagination from "../ui/Pagination";
@@ -7,6 +6,7 @@ import BatchHistoryDialog from "./BatchHistoryDialog";
 import { inr, packUnits, showDate } from "./format";
 import { SelectInput } from "./Fields";
 import PillGroup from "./Pills";
+import useUrlState, { useUrlSearch, asNumber } from "../../hooks/useUrlState";
 import {
   useBatchStock,
   useBatchSummary,
@@ -135,24 +135,14 @@ function Batches({ row, alertDays, withCost, canAdjust, onAdjust, onHistory }) {
 
 export default function BatchStockPanel({ withCost, canAdjust }) {
   const locations = useStockLocations();
-  const [params] = useSearchParams();
-  const [locationId, setLocationId] = useState(() => params.get("location_id") ?? "");
-  const [search, setSearch] = useState(() => params.get("q") ?? "");
-  const [q, setQ] = useState(() => params.get("q") ?? "");
-  const [filter, setFilter] = useState(() => params.get("filter") || "all");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const [locationId, setLocationId] = useUrlState("location_id", "");
+  const { search, setSearch, q, clear: clearSearch } = useUrlSearch("q", () => setPage(1));
+  const [filter, setFilter] = useUrlState("filter", "all");
+  const [page, setPage] = useUrlState("page", 1, asNumber);
+  const [pageSize, setPageSize] = useUrlState("size", 25, asNumber);
   const [open, setOpen] = useState(() => new Set());
   const [adjusting, setAdjusting] = useState(null);
   const [historyOf, setHistoryOf] = useState(null);
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setQ(search.trim().length >= 2 ? search.trim() : "");
-      setPage(1);
-    }, 250);
-    return () => clearTimeout(t);
-  }, [search]);
 
   const summary = useBatchSummary(locationId || null);
   const stock = useBatchStock({
@@ -175,8 +165,7 @@ export default function BatchStockPanel({ withCost, canAdjust }) {
     });
 
   const clearFilters = () => {
-    setSearch("");
-    setQ("");
+    clearSearch();
     setFilter("all");
     setPage(1);
   };

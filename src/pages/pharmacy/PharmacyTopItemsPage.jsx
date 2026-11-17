@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Download } from "lucide-react";
 import api from "../../services/api";
@@ -20,6 +20,7 @@ import "../billing/billingUi.css";
 import "./pharmacyStock.css";
 import "./pharmacyVendors.css";
 import "./pharmacyBills.css";
+import useUrlState, { useUrlSearch, asNumber } from "../../hooks/useUrlState";
 
 const GROUPS = [
   { key: "item", label: "Merge suppliers" },
@@ -49,27 +50,20 @@ const useTopItems = (params, enabled) =>
 export default function PharmacyTopItemsPage() {
   const locations = useStockLocations();
   const vendors = useVendorList({ status: "all", limit: 200 });
-  const [from, setFrom] = useState(() => localDate(-29));
-  const [to, setTo] = useState(() => localDate());
-  const [locationId, setLocationId] = useState("");
-  const [saleType, setSaleType] = useState("");
-  const [form, setForm] = useState("");
-  const [vendorId, setVendorId] = useState("");
-  const [group, setGroup] = useState("item");
-  const [search, setSearch] = useState("");
-  const [q, setQ] = useState("");
-  const [sort, setSort] = useState({ key: "net_amount", dir: "desc" });
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [from, setFrom] = useUrlState("from", localDate(-29));
+  const [to, setTo] = useUrlState("to", localDate());
+  const [locationId, setLocationId] = useUrlState("location_id", "");
+  const [saleType, setSaleType] = useUrlState("sale_type", "");
+  const [form, setForm] = useUrlState("form", "");
+  const [vendorId, setVendorId] = useUrlState("vendor_id", "");
+  const [group, setGroup] = useUrlState("group", "item");
+  const { search, setSearch, q } = useUrlSearch("q", () => setPage(1));
+  const [sortKey, setSortKey] = useUrlState("sort", "net_amount");
+  const [sortDir, setSortDir] = useUrlState("dir", "desc");
+  const sort = { key: sortKey, dir: sortDir };
+  const [page, setPage] = useUrlState("page", 1, asNumber);
+  const [pageSize, setPageSize] = useUrlState("size", 50, asNumber);
   const [downloading, setDownloading] = useState(false);
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setQ(search.trim().length >= 2 ? search.trim() : "");
-      setPage(1);
-    }, 250);
-    return () => clearTimeout(t);
-  }, [search]);
 
   const badRange = from > to;
   const filters = {
@@ -96,7 +90,8 @@ export default function PharmacyTopItemsPage() {
   };
 
   const sortBy = (key) => {
-    setSort((was) => ({ key, dir: was.key === key && was.dir === "desc" ? "asc" : "desc" }));
+    setSortDir(sort.key === key && sort.dir === "desc" ? "asc" : "desc");
+    setSortKey(key);
     setPage(1);
   };
 

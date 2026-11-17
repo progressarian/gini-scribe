@@ -120,6 +120,17 @@ test.describe("PH61 the notifications bell and the expiry page", () => {
     await expect(dialog.getByRole("button", { name: /^Vendor/ })).toContainText(vendor.name);
     await expect(dialog.getByRole("button", { name: /^Reason/ })).toContainText("Expired");
     await dialog.getByLabel("Vendor credit note / reference").fill("VCN-55");
+
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await dialog.getByRole("button", { name: "Keep editing" }).click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Vendor credit note / reference")).toHaveValue("VCN-55");
+    const kept = await one(
+      `SELECT count(*)::int AS n FROM pharmacy_vendor_returns WHERE vendor_id = $1`,
+      [vendor.id],
+    );
+    expect(kept.n).toBe(0);
+
     await dialog.getByRole("button", { name: "Return stock worth ₹14.00" }).click();
     await expect(dialog).toBeHidden();
     await expect(page.getByText("Nothing expired or expiring in this view.")).toBeVisible();

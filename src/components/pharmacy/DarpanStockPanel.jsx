@@ -9,6 +9,7 @@ import StockLinkDialog from "../../components/pharmacy/StockLinkDialog";
 import NeededStock from "../../components/pharmacy/NeededStock";
 import Pagination from "../../components/ui/Pagination";
 import PillGroup from "./Pills";
+import useUrlState, { useUrlSearch, asNumber } from "../../hooks/useUrlState";
 import {
   useCreateStockUpload,
   useStockList,
@@ -144,11 +145,10 @@ export default function DarpanStockPanel() {
   const canUpload = hasCapability(role, CAPABILITIES.PHARMACY_STOCK_UPLOAD);
   const pickerId = useId();
   const picker = useRef(null);
-  const [search, setSearch] = useState("");
-  const [q, setQ] = useState("");
-  const [filter, setFilter] = useState("all");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const { search, setSearch, q, clear: clearSearch } = useUrlSearch("d_q", () => setPage(1));
+  const [filter, setFilter] = useUrlState("d_filter", "all");
+  const [page, setPage] = useUrlState("d_page", 1, asNumber);
+  const [pageSize, setPageSize] = useUrlState("d_size", 50, asNumber);
   const [uploadId, setUploadId] = useState(null);
   const [linking, setLinking] = useState(null);
   const [uploadError, setUploadError] = useState("");
@@ -170,14 +170,6 @@ export default function DarpanStockPanel() {
     setUploadId(id);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setQ(search.trim().length >= 2 ? search.trim() : "");
-      setPage(1);
-    }, 250);
-    return () => clearTimeout(t);
-  }, [search]);
 
   const { data: summary } = useStockSummary();
   const list = useStockList({
@@ -205,8 +197,7 @@ export default function DarpanStockPanel() {
   };
 
   const clearFilters = () => {
-    setSearch("");
-    setQ("");
+    clearSearch();
     setFilter("all");
     setPage(1);
   };

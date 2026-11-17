@@ -9,6 +9,7 @@ import { toast } from "../../stores/uiStore";
 import { useStockLocations } from "../../queries/hooks/usePharmacyBatches";
 import ReturnDialog from "../../components/pharmacy/ReturnDialog";
 import { SelectInput } from "../../components/pharmacy/Fields";
+import useUrlState, { asNumber } from "../../hooks/useUrlState";
 import {
   useCreateIndent,
   useIndent,
@@ -281,9 +282,9 @@ function IndentReturn({ indentId, onClose }) {
 
 function IndentList({ departments }) {
   const [returning, setReturning] = useState(null);
-  const [locationId, setLocationId] = useState("");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const [locationId, setLocationId] = useUrlState("location_id", "");
+  const [page, setPage] = useUrlState("page", 1, asNumber);
+  const [pageSize, setPageSize] = useUrlState("size", 25, asNumber);
   const query = useIndents({
     ...(locationId ? { location_id: locationId } : {}),
     limit: pageSize,

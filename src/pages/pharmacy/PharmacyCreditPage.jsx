@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import useAuthStore from "../../stores/authStore";
 import { CAPABILITIES, hasCapability } from "../../../shared/permissions";
 import Pagination from "../../components/ui/Pagination";
@@ -15,6 +15,7 @@ import "./pharmacyStock.css";
 import "./pharmacyVendors.css";
 import "./pharmacyBills.css";
 import PillGroup from "../../components/pharmacy/Pills";
+import useUrlState, { useUrlSearch, asNumber } from "../../hooks/useUrlState";
 
 const TABS = [
   { key: "requests", label: "Credit requests" },
@@ -70,9 +71,9 @@ function TableState({ query, empty, children }) {
 }
 
 function RequestsPanel({ canApprove, myId }) {
-  const [status, setStatus] = useState("pending");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const [status, setStatus] = useUrlState("status", "pending");
+  const [page, setPage] = useUrlState("page", 1, asNumber);
+  const [pageSize, setPageSize] = useUrlState("size", 25, asNumber);
   const [deciding, setDeciding] = useState(null);
   const query = useCreditRequests({ status, limit: pageSize, offset: (page - 1) * pageSize });
   const rows = query.data?.rows ?? [];
@@ -215,19 +216,10 @@ function RequestsPanel({ canApprove, myId }) {
 }
 
 function DuesPanel() {
-  const [search, setSearch] = useState("");
-  const [q, setQ] = useState("");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const { search, setSearch, q } = useUrlSearch("d_q", () => setPage(1));
+  const [page, setPage] = useUrlState("d_page", 1, asNumber);
+  const [pageSize, setPageSize] = useUrlState("d_size", 25, asNumber);
   const [collecting, setCollecting] = useState(null);
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setQ(search.trim().length >= 2 ? search.trim() : "");
-      setPage(1);
-    }, 250);
-    return () => clearTimeout(t);
-  }, [search]);
 
   const query = useDues({ ...(q ? { q } : {}), limit: pageSize, offset: (page - 1) * pageSize });
   const rows = query.data?.rows ?? [];
@@ -334,12 +326,12 @@ function DuesPanel() {
 export default function PharmacyCreditPage() {
   const me = useAuthStore((s) => s.currentDoctor);
   const canApprove = hasCapability(me?.role, CAPABILITIES.PHARMACY_CREDIT_APPROVE);
-  const [params, setParams] = useSearchParams();
-  const tab = TABS.some((t) => t.key === params.get("tab")) ? params.get("tab") : "requests";
+  const [tabParam, setTab] = useUrlState("tab", "requests");
+  const tab = TABS.some((t) => t.key === tabParam) ? tabParam : "requests";
   const tabRefs = useRef({});
 
   const select = (key) => {
-    setParams(key === "requests" ? {} : { tab: key }, { replace: true });
+    setTab(key);
     tabRefs.current[key]?.focus();
   };
 
