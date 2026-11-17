@@ -3,7 +3,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
+  min-width: 38px;
   height: 30px;
   border: 1px solid var(--fbd, #e2e8f0);
   border-radius: 6px;
@@ -17,17 +17,19 @@
 }
 .notif-bell__count {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  min-width: 18px;
-  height: 18px;
+  top: 1px;
+  right: 1px;
+  min-width: 16px;
+  height: 16px;
   padding: 0 4px;
-  border-radius: 9px;
+  box-sizing: border-box;
+  border-radius: 8px;
   background: var(--fre, #dc2626);
+  box-shadow: 0 0 0 1.5px var(--fwhite, #fff);
   color: #fff;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  line-height: 18px;
+  line-height: 16px;
   text-align: center;
 }
 .notif-panel {

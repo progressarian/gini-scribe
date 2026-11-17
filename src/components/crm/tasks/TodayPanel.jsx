@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import api from "../../../services/api.js";
 import { errorText } from "../import/importText.js";
-import { visitOutcomeMeta } from "../../../../shared/crmVocab.js";
+import { visitOutcomeMeta, visitSlotMeta } from "../../../../shared/crmVocab.js";
 import TaskRow from "./TaskRow.jsx";
 import useTaskActions from "./useTaskActions.jsx";
 
@@ -168,6 +168,7 @@ export default function TodayPanel({ refreshKey, onChanged }) {
                     <span className="rep__row-sub">
                       {[
                         time(v.occurred_at),
+                        visitSlotMeta(v.visit_slot)?.label,
                         outcome?.label,
                         v.area,
                         showOwner && v.rep_name,

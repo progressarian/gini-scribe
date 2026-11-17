@@ -364,8 +364,8 @@ export async function todayView(crmUser, { rep } = {}) {
       [owner],
     );
     const { rows: done } = await sql(
-      `SELECT v.id, v.doctor_id, d.full_name, d.area, v.visit_type, v.outcome, v.occurred_at,
-              v.source, v.executive_id, u.full_name AS rep_name,
+      `SELECT v.id, v.doctor_id, d.full_name, d.area, v.visit_type, v.visit_slot, v.outcome,
+              v.occurred_at, v.source, v.executive_id, u.full_name AS rep_name,
               (${istDayOf("v.created_at")} = ${IST_TODAY}) AS logged_today
          FROM crm.visits v
          JOIN crm.doctors d ON d.id = v.doctor_id

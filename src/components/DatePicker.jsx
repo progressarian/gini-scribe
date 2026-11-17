@@ -59,6 +59,10 @@ export default function DatePicker({
   activeStyle,
   label,
   ariaLabel,
+  yearNav = false,
+  id,
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
 }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState(() => startOfMonth(parseIso(value) || new Date()));
@@ -113,6 +117,10 @@ export default function DatePicker({
 
   const goPrevMonth = () => setView(new Date(view.getFullYear(), view.getMonth() - 1, 1));
   const goNextMonth = () => setView(new Date(view.getFullYear(), view.getMonth() + 1, 1));
+  const goPrevYear = () => setView(new Date(view.getFullYear() - 1, view.getMonth(), 1));
+  const goNextYear = () => setView(new Date(view.getFullYear() + 1, view.getMonth(), 1));
+  const canPrevYear = !min || new Date(view.getFullYear() - 1, view.getMonth() + 1, 0) >= min;
+  const canNextYear = !max || new Date(view.getFullYear() + 1, view.getMonth(), 1) <= max;
 
   const canPrev =
     !min ||
@@ -166,12 +174,16 @@ export default function DatePicker({
       <div style={{ position: "relative" }}>
         <button
           type="button"
+          id={id}
+          aria-invalid={ariaInvalid}
+          aria-describedby={ariaDescribedBy}
           disabled={disabled}
           aria-haspopup="dialog"
           aria-expanded={open}
           aria-label={
             ariaLabel ? `${ariaLabel}: ${value ? fmtDisplay(value) : placeholder}` : undefined
           }
+          aria-labelledby={id && !ariaLabel ? `${id}-label ${id}-value` : undefined}
           onClick={() => setOpen((o) => !o)}
           style={baseStyle}
         >
@@ -189,7 +201,7 @@ export default function DatePicker({
           >
             📅
           </span>
-          {value ? fmtDisplay(value) : placeholder}
+          <span id={id ? `${id}-value` : undefined}>{value ? fmtDisplay(value) : placeholder}</span>
         </button>
         {value && !disabled && clearable && (
           <button
@@ -260,6 +272,17 @@ export default function DatePicker({
                 marginBottom: 10,
               }}
             >
+              {yearNav ? (
+                <button
+                  type="button"
+                  onClick={goPrevYear}
+                  disabled={!canPrevYear}
+                  style={navBtnStyle(canPrevYear)}
+                  aria-label="Previous year"
+                >
+                  «
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={goPrevMonth}
@@ -281,6 +304,17 @@ export default function DatePicker({
               >
                 ›
               </button>
+              {yearNav ? (
+                <button
+                  type="button"
+                  onClick={goNextYear}
+                  disabled={!canNextYear}
+                  style={navBtnStyle(canNextYear)}
+                  aria-label="Next year"
+                >
+                  »
+                </button>
+              ) : null}
             </div>
 
             <div

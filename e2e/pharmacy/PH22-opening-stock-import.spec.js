@@ -226,7 +226,7 @@ test.describe("PH22 opening stock from the Excel template", () => {
     ).toHaveValue("GEL9");
     await expect(
       page.getByLabel(`Expiry for line 1, ${TAG} Antacid Gel`, { exact: true }),
-    ).toHaveValue(`${YEAR}-06-30`);
+    ).toContainText(`30 Jun ${YEAR}`);
     await expect(page.getByRole("status").filter({ hasText: "All changes saved" })).toBeVisible();
   });
 });

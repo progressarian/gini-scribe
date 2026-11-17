@@ -15,7 +15,7 @@ export default function FormField({
   const describedBy = [hintId, errorId].filter(Boolean).join(" ") || undefined;
   return (
     <div className={`fset__field ${className}`.trim()}>
-      <label htmlFor={id}>
+      <label htmlFor={id} id={`${id}-label`}>
         {label}
         {required ? (
           <span className="form-field__required" aria-hidden="true">

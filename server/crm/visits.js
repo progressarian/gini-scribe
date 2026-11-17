@@ -4,6 +4,8 @@ import {
   VISIT_TYPE_VALUES,
   VISIT_OUTCOME_VALUES,
   VISIT_FORM_STATUS_VALUES,
+  VISIT_SLOT_VALUES,
+  SLOT_SPLIT_HOUR_IST,
   DOCTOR_PRIORITY_VALUES,
 } from "../../shared/crmVocab.js";
 import {
@@ -117,6 +119,7 @@ export async function logVisit(crmUser, visit) {
     client_created_at,
     status,
     visit_date,
+    visit_slot,
   } = visit;
 
   if (!id) throw new Error("A visit needs a client-generated id");
@@ -127,6 +130,9 @@ export async function logVisit(crmUser, visit) {
   }
   if (status && !VISIT_FORM_STATUS_VALUES.includes(status)) {
     throw new DoctorError("Choose Completed or Doctor unavailable.");
+  }
+  if (visit_slot && !VISIT_SLOT_VALUES.includes(visit_slot)) {
+    throw new DoctorError("Choose Morning or Evening.");
   }
   const finalOutcome = status === "doctor_unavailable" ? "doctor_unavailable" : outcome;
   const loggedOn = visitBase(client_created_at);
@@ -169,10 +175,13 @@ export async function logVisit(crmUser, visit) {
           discussion_notes, doctor_requirements, objections, opportunities_identified,
           commitments, outcome, follow_up_required, next_visit_date,
           gps_latitude, gps_longitude, gps_accuracy_m, gps_captured_at,
-          client_created_at, created_by)
+          client_created_at, created_by, visit_slot)
        VALUES ($1,$2,$3,$4,$5,$6,
                COALESCE($7, LEAST(($21::date + time '12:00') AT TIME ZONE 'Asia/Kolkata', now()), now()),
-               $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$4)
+               $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$4,
+               COALESCE($22::text, CASE WHEN $21::date IS NULL THEN
+                 CASE WHEN extract(hour FROM COALESCE($7::timestamptz, now()) AT TIME ZONE 'Asia/Kolkata')
+                           < ${SLOT_SPLIT_HOUR_IST} THEN 'morning' ELSE 'evening' END END))
        ON CONFLICT (id) DO NOTHING
        RETURNING id, occurred_at, synced_at`,
       [
@@ -197,6 +206,7 @@ export async function logVisit(crmUser, visit) {
         fix?.captured_at ?? null,
         client_created_at ?? null,
         backDated ? pickedDay : null,
+        visit_slot || null,
       ],
     );
 
@@ -255,7 +265,8 @@ export async function repHome(crmUser, { limit = 25, lists = true } = {}) {
   return withCrmContext(crmUser, async (sql) => {
     const [todays, due, dueTotal, doctors, tasks, performance, daysOff] = await Promise.all([
       sql(
-        `SELECT v.id, v.doctor_id, d.full_name, d.area, v.visit_type, v.outcome, v.occurred_at, v.source
+        `SELECT v.id, v.doctor_id, d.full_name, d.area, v.visit_type, v.visit_slot, v.outcome,
+                v.occurred_at, v.source
            FROM crm.visits v JOIN crm.doctors d ON d.id = v.doctor_id
           WHERE v.deleted_at IS NULL
             AND v.executive_id = $1
@@ -449,7 +460,7 @@ export async function doctor360(crmUser, doctorId) {
       ),
       sql(`SELECT * FROM crm.v_doctor_kpis WHERE doctor_id = $1`, [doctorId]),
       sql(
-        `SELECT v.id, v.occurred_at, v.visit_type, v.purpose, v.outcome,
+        `SELECT v.id, v.occurred_at, v.visit_type, v.visit_slot, v.purpose, v.outcome,
                 v.discussion_notes, v.doctor_requirements, v.objections,
                 v.opportunities_identified, v.commitments,
                 v.follow_up_required, v.next_visit_date,
@@ -602,6 +613,10 @@ export async function editVisit(crmUser, visitId, body = {}) {
     if (type !== undefined && !VISIT_TYPE_VALUES.includes(type)) {
       throw new DoctorError("Choose a visit type from the list.");
     }
+    const slot = body.visit_slot ?? undefined;
+    if (slot !== undefined && !VISIT_SLOT_VALUES.includes(slot)) {
+      throw new DoctorError("Choose Morning or Evening.");
+    }
     let outcome = "outcome" in body ? body.outcome || null : visit.outcome;
     if (outcome && !VISIT_OUTCOME_VALUES.includes(outcome)) {
       throw new DoctorError("Choose an outcome from the list.");
@@ -650,6 +665,7 @@ export async function editVisit(crmUser, visitId, body = {}) {
       );
     }
     if (type !== undefined) add("visit_type = ?", type);
+    if (slot !== undefined) add("visit_slot = ?", slot);
     if ("purpose" in body) add("purpose = ?", String(body.purpose ?? "").trim() || null);
     if ("discussion_notes" in body) {
       add("discussion_notes = ?", String(body.discussion_notes ?? "").trim() || null);

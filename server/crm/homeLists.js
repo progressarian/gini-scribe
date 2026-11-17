@@ -4,6 +4,7 @@ import { ASSIGNABLE_ROLES, ASSIGNING_ROLES } from "./assignees.js";
 import {
   DOCTOR_PRIORITY_VALUES,
   REFERRAL_STATUS_VALUES,
+  VISIT_SLOT_VALUES,
   URGENCY_VALUES,
   VISIT_DUE_STATE_VALUES,
 } from "../../shared/crmVocab.js";
@@ -44,12 +45,17 @@ function builder() {
 const DOCTOR_FROM = `
   FROM crm.doctors d
   LEFT JOIN crm.territories t ON t.id = d.territory_id
-  LEFT JOIN vd_all vd ON vd.doctor_id = d.id`;
+  LEFT JOIN vd_all vd ON vd.doctor_id = d.id
+  LEFT JOIN LATERAL (
+    SELECT v.visit_slot FROM crm.visits v
+     WHERE v.doctor_id = d.id AND v.deleted_at IS NULL
+     ORDER BY v.occurred_at DESC LIMIT 1
+  ) lv ON TRUE`;
 
 const DOCTOR_COLUMNS = `d.id AS doctor_id, d.full_name, d.specialty, d.area, d.city, d.priority,
        d.relationship_stage, d.mobile, d.profile_complete, d.missing_fields,
        d.needs_verification, t.name AS territory_name,
-       vd.due_state, vd.last_visit_at, vd.next_due_on,
+       vd.due_state, vd.last_visit_at, vd.next_due_on, lv.visit_slot AS last_visit_slot,
        (SELECT u.full_name FROM crm.doctor_assignments a JOIN crm.users u ON u.id = a.executive_id
          WHERE a.doctor_id = d.id AND a.effective_to IS NULL LIMIT 1) AS owner_name`;
 
@@ -69,6 +75,9 @@ function doctorFilters(filters, { waitingOnly, pickOwner }) {
   if (waitingOnly) q.where.push(`vd.due_state = ANY(${q.bind(WAITING_STATES)}::text[])`);
   if (DOCTOR_PRIORITY_VALUES.includes(filters.priority)) {
     q.where.push(`d.priority = ${q.bind(filters.priority)}`);
+  }
+  if (VISIT_SLOT_VALUES.includes(filters.slot)) {
+    q.where.push(`lv.visit_slot = ${q.bind(filters.slot)}`);
   }
   if (textOf(filters.territory)) q.where.push(`t.name = ${q.bind(textOf(filters.territory))}`);
   if (filters.incomplete === "1" || filters.incomplete === true) {

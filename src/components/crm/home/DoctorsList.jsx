@@ -6,6 +6,7 @@ import ListPager from "../ListPager.jsx";
 import { SearchField, FilterSelect, ListStatus, ListBody } from "./ListToolbar.jsx";
 import {
   PRIORITY_OPTIONS,
+  SLOT_OPTIONS,
   DUE_OPTIONS,
   territoryOptions,
   staffOptions,
@@ -14,7 +15,7 @@ import {
 import { SELECTABLE_DOCTOR_PRIORITIES } from "../../../../shared/crmVocab.js";
 import { errorText } from "../import/importText.js";
 
-const FILTER_KEYS = ["q", "territory", "priority", "due", "incomplete", "owner"];
+const FILTER_KEYS = ["q", "territory", "priority", "slot", "due", "incomplete", "owner"];
 
 export default function DoctorsList({ filters, onChange, refreshKey, onChanged }) {
   const list = usePagedList(
@@ -31,7 +32,7 @@ export default function DoctorsList({ filters, onChange, refreshKey, onChanged }
     onChange({ ...filters, ...patch, page: 1 });
   };
   const clear = () =>
-    update({ q: "", territory: "", priority: "", due: "", incomplete: "", owner: "" });
+    update({ q: "", territory: "", priority: "", slot: "", due: "", incomplete: "", owner: "" });
   const active = hasFilters(filters, FILTER_KEYS);
 
   const classifyTerritory = async (priority) => {
@@ -75,6 +76,13 @@ export default function DoctorsList({ filters, onChange, refreshKey, onChanged }
           onChange={(priority) => update({ priority })}
           allLabel="All priorities"
           options={PRIORITY_OPTIONS}
+        />
+        <FilterSelect
+          label="Visit time"
+          value={filters.slot}
+          onChange={(slot) => update({ slot })}
+          allLabel="Any visit time"
+          options={SLOT_OPTIONS}
         />
         <FilterSelect
           label="Visit status"

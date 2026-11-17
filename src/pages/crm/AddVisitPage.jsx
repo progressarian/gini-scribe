@@ -3,8 +3,17 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import api from "../../services/api.js";
 import { useDictation } from "../../hooks/useDictation.js";
 import { enqueue, drain } from "../../crm/offlineQueue.js";
-import { VISIT_TYPES, VISIT_OUTCOMES, VISIT_FORM_STATUSES } from "../../../shared/crmVocab.js";
+import {
+  VISIT_TYPES,
+  VISIT_OUTCOMES,
+  VISIT_FORM_STATUSES,
+  VISIT_SLOTS,
+  SLOT_SPLIT_HOUR_IST,
+} from "../../../shared/crmVocab.js";
 import { istToday } from "../../components/crm/progress/progressText.js";
+
+const slotNow = () =>
+  new Date(Date.now() + 330 * 60_000).getUTCHours() < SLOT_SPLIT_HOUR_IST ? "morning" : "evening";
 
 const ddmmyyyy = (day) => (day ? day.split("-").reverse().join("-") : "");
 
@@ -42,6 +51,7 @@ export default function AddVisitPage() {
 
   const [doctor, setDoctor] = useState(null);
   const [visitType, setVisitType] = useState("in_person");
+  const [visitSlot, setVisitSlot] = useState(slotNow);
   const [purpose, setPurpose] = useState(null);
   const [outcome, setOutcome] = useState(null);
   const [notes, setNotes] = useState("");
@@ -173,6 +183,7 @@ export default function AddVisitPage() {
       id: visitId,
       doctor_id: doctorId,
       visit_type: visitType,
+      visit_slot: visitSlot,
       purpose,
       status,
       outcome: status === "doctor_unavailable" ? "doctor_unavailable" : outcome,
@@ -251,6 +262,14 @@ export default function AddVisitPage() {
                 ? "Today. Pick an earlier date to log a missed visit from this week or month."
                 : `Logging a past visit for ${ddmmyyyy(visitDate)}.`)}
           </span>
+        </Field>
+
+        <Field label="Time of visit">
+          <Chips
+            options={VISIT_SLOTS.map((v) => ({ value: v.value, label: v.label }))}
+            value={visitSlot}
+            onChange={setVisitSlot}
+          />
         </Field>
 
         <Field label="Visit type">

@@ -3,6 +3,7 @@ import { apiAs, loginAs } from "../helpers/auth.mjs";
 import { gotoReady } from "../helpers/browser.mjs";
 import { one, query } from "../helpers/db.mjs";
 import { assertTestDatabase } from "../setup/guard.mjs";
+import { pickDate, pickOption } from "../helpers/pickers.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 
@@ -377,11 +378,9 @@ test.describe("PH20 goods receipts post stock into batches", () => {
     await page.getByRole("button", { name: "New purchase" }).click();
     await expect(page.getByRole("heading", { level: 1 })).toContainText(/GRN\d{6}/);
 
-    await page
-      .getByRole("combobox", { name: "Vendor" })
-      .selectOption({ label: `${TAG} Distributors` });
+    await pickOption(page, "Vendor", new RegExp(`^${TAG} Distributors`));
     await page.getByRole("textbox", { name: "Invoice number" }).fill(`${TAG}-SCREEN`);
-    await page.getByLabel("Invoice date").fill(TODAY);
+    await pickDate(page, "Invoice date", TODAY);
 
     const picker = page.getByRole("combobox", { name: "Add a medicine" });
     await picker.fill(`${TAG} Cough`);
@@ -394,7 +393,7 @@ test.describe("PH20 goods receipts post stock into batches", () => {
     await expect(field("Batch")).toHaveAttribute("aria-invalid", "true");
 
     await field("Batch").fill("scr 9");
-    await field("Expiry").fill(FUTURE);
+    await pickDate(page, `Expiry for line 1, ${TAG} Cough Syrup`, FUTURE);
     await field("Qty").fill("4");
     await field("Purchase rate").fill("50");
     await field("GST %").fill("5");

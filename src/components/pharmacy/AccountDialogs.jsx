@@ -1,6 +1,7 @@
 import { useState } from "react";
 import MasterFormDialog from "./MasterFormDialog";
 import FormField from "../ui/FormField";
+import { SelectInput, optionsOf } from "./Fields";
 import { requestErrorOf } from "../billing/format";
 import { inr } from "./format";
 import { toast } from "../../stores/uiStore";
@@ -24,7 +25,8 @@ function useFields(initial) {
   const [values, setValues] = useState(initial);
   const set = (key, clean) => (e) =>
     setValues((v) => ({ ...v, [key]: clean ? clean(e.target.value) : e.target.value }));
-  return [values, set];
+  const pick = (key) => (value) => setValues((v) => ({ ...v, [key]: value }));
+  return [values, set, pick];
 }
 
 function AmountField({ value, onChange, error, label = "Amount (₹)", hint }) {
@@ -54,7 +56,13 @@ export function DepositDialog({ account, refund = false, onClose }) {
   const receive = useReceiveDeposit();
   const giveBack = useRefundDeposit();
   const mutation = refund ? giveBack : receive;
-  const [v, set] = useFields({ mode: "cash", amount: "", reference: "", upi_app: "", reason: "" });
+  const [v, set, pick] = useFields({
+    mode: "cash",
+    amount: "",
+    reference: "",
+    upi_app: "",
+    reason: "",
+  });
   const [touched, setTouched] = useState(false);
   const [error, setError] = useState("");
   const amount = toPaise(v.amount);
@@ -113,25 +121,20 @@ export function DepositDialog({ account, refund = false, onClose }) {
     >
       <div className="bill-form">
         <FormField label={refund ? "Refund by" : "Mode"} required>
-          <select className="jb-assign" value={v.mode} onChange={set("mode")}>
-            {PAYMENT_MODES.map((m) => (
-              <option key={m} value={m}>
-                {PAYMENT_MODE_LABEL[m]}
-              </option>
-            ))}
-          </select>
+          <SelectInput
+            value={v.mode}
+            onChange={pick("mode")}
+            options={PAYMENT_MODES.map((m) => ({ value: m, label: PAYMENT_MODE_LABEL[m] }))}
+          />
         </FormField>
         <AmountField value={v.amount} onChange={set("amount", moneyTyped)} error={errors.amount} />
         {v.mode === "upi" ? (
           <FormField label="UPI app" required error={errors.upi_app}>
-            <select className="jb-assign" value={v.upi_app} onChange={set("upi_app")}>
-              <option value="">Choose</option>
-              {Object.entries(UPI_APP_LABEL).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            <SelectInput
+              value={v.upi_app}
+              onChange={pick("upi_app")}
+              options={[{ value: "", label: "Choose" }, ...optionsOf(UPI_APP_LABEL)]}
+            />
           </FormField>
         ) : null}
         {v.mode !== "cash" ? (
@@ -158,7 +161,7 @@ export function DepositDialog({ account, refund = false, onClose }) {
 
 export function VoucherDialog({ account, onClose }) {
   const add = useAddVoucher();
-  const [v, set] = useFields({ kind: "credit", amount: "", reason: "" });
+  const [v, set, pick] = useFields({ kind: "credit", amount: "", reason: "" });
   const [touched, setTouched] = useState(false);
   const [error, setError] = useState("");
   const amount = toPaise(v.amount);
@@ -208,10 +211,14 @@ export function VoucherDialog({ account, onClose }) {
     >
       <div className="bill-form">
         <FormField label="Voucher type" required>
-          <select className="jb-assign" value={v.kind} onChange={set("kind")}>
-            <option value="credit">Credit (add to the account)</option>
-            <option value="debit">Debit (take from the account)</option>
-          </select>
+          <SelectInput
+            value={v.kind}
+            onChange={pick("kind")}
+            options={[
+              { value: "credit", label: "Credit (add to the account)" },
+              { value: "debit", label: "Debit (take from the account)" },
+            ]}
+          />
         </FormField>
         <AmountField value={v.amount} onChange={set("amount", moneyTyped)} error={errors.amount} />
         <ReasonField value={v.reason} onChange={set("reason")} error={errors.reason} />

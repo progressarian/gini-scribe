@@ -7,6 +7,8 @@ import { rupees } from "../../components/billing/format";
 import MasterListPage from "../../components/pharmacy/MasterListPage";
 import MedicineDialog from "../../components/pharmacy/MedicineDialog";
 import { useMedicineList, useSetMedicineActive } from "../../queries/hooks/usePharmacyMedicines";
+import { SelectInput, optionsOf } from "../../components/pharmacy/Fields";
+import { Pill } from "../../components/pharmacy/Pills";
 
 const hooks = { useList: useMedicineList, useSetActive: useSetMedicineActive };
 
@@ -119,46 +121,32 @@ export default function PharmacyMedicinesPage() {
       }}
       filterControls={
         <>
-          <label className="sr-only" htmlFor="phm-form-filter">
+          <label className="sr-only" htmlFor="phm-form-filter" id="phm-form-filter-label">
             Filter by form
           </label>
-          <select
+          <SelectInput
             id="phm-form-filter"
-            className="jb-assign phm-filter"
+            className="phm-filter"
             value={form}
-            onChange={(e) => setForm(e.target.value)}
-          >
-            <option value="">All forms</option>
-            {MEDICINE_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-          <label className="sr-only" htmlFor="phm-schedule-filter">
+            onChange={setForm}
+            options={[
+              { value: "", label: "All forms" },
+              ...MEDICINE_TYPES.map((t) => ({ value: t, label: t })),
+            ]}
+          />
+          <label className="sr-only" htmlFor="phm-schedule-filter" id="phm-schedule-filter-label">
             Filter by schedule
           </label>
-          <select
+          <SelectInput
             id="phm-schedule-filter"
-            className="jb-assign phm-filter"
+            className="phm-filter"
             value={schedule}
-            onChange={(e) => setSchedule(e.target.value)}
-          >
-            <option value="">All schedules</option>
-            {Object.entries(SCHEDULE_LABEL).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className={`phs-chip${review ? " on" : ""}`}
-            aria-pressed={review}
-            onClick={() => setReview((r) => !r)}
-          >
+            onChange={setSchedule}
+            options={[{ value: "", label: "All schedules" }, ...optionsOf(SCHEDULE_LABEL)]}
+          />
+          <Pill pressed={review} onClick={() => setReview((r) => !r)}>
             Needs review
-          </button>
+          </Pill>
         </>
       }
       statusMessages={{

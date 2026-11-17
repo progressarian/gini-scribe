@@ -271,12 +271,69 @@ test.describe("PH10 pharmacy vendors", () => {
     expect(stored).toEqual({ is_active: false, payment_terms_days: 15 });
   });
 
-  test("the pharmacist does not see the vendors page in the menu", async ({ page }) => {
+  const pharmacyMenu = (page) => page.getByRole("button", { name: "Pharmacy", exact: true });
+
+  const topEntries = (page) => page.locator(".tabs > .tab-btn, .tabs .tab-menu-btn");
+  const menu = (page, name) => page.getByRole("button", { name, exact: true });
+
+  test("the pharmacist sees daily pages as tabs and stock pages under Inventory, without vendors", async ({
+    page,
+  }) => {
     await loginAs(page, "pharmacy");
-    const group = () => page.getByRole("button", { name: /Pharmacy ▾|💊 Pharmacy$/ }).first();
-    await gotoReady(page, "/pharmacy/stock", group);
-    await group().click();
-    await expect(page.getByText("📦 Stock", { exact: true })).toBeVisible();
-    await expect(page.getByText("🏭 Vendors", { exact: true })).toHaveCount(0);
+    const bills = () => page.getByRole("link", { name: "Pharmacy Bills", exact: true });
+    await gotoReady(page, "/pharmacy/billing", bills);
+    await expect(bills()).toBeVisible();
+    await menu(page, "Inventory").click();
+    await expect(page.getByRole("menuitem", { name: "Stock", exact: true })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Expiry", exact: true })).toBeVisible();
+    await expect(page.getByText("Vendors", { exact: true })).toHaveCount(0);
+    await expect(menu(page, "Setup")).toHaveCount(0);
+    await expect(pharmacyMenu(page)).toHaveCount(0);
+  });
+
+  test("the pharmacy admin gets eight top-bar entries with related pages grouped", async ({
+    page,
+  }) => {
+    await loginAs(page, "pharmacy_admin");
+    const today = () => page.getByRole("link", { name: "Pharmacy Today", exact: true });
+    await gotoReady(page, "/pharmacy/dashboard", today);
+    await expect(topEntries(page)).toHaveText([
+      "Pharmacy Today",
+      /^Reports/,
+      "Pharmacy Bills",
+      "Pharmacy Credit",
+      /^Inventory/,
+      /^Setup/,
+      "Medicine Collection",
+      "Pharmacy Station",
+    ]);
+    await expect(page.locator(".tabs .tab-btn svg.tab-btn__icon")).toHaveCount(8);
+    await expect(page.locator(".tabs")).toHaveCSS("scrollbar-width", "none");
+    await expect(pharmacyMenu(page)).toHaveCount(0);
+
+    await menu(page, "Setup").click();
+    await expect(page.getByRole("menuitem")).toHaveText([
+      "Vendors",
+      "Medicines",
+      "Departments",
+      "Pharmacy Settings",
+    ]);
+    await page.getByRole("menuitem", { name: "Vendors", exact: true }).click();
+    await expect(page).toHaveURL(/\/pharmacy\/vendors$/);
+    await expect(page.locator(".tab-btn--active")).toHaveText([/^Setup/]);
+
+    await menu(page, "Reports").click();
+    await page.getByRole("menuitem", { name: "Top Selling Items", exact: true }).click();
+    await expect(page.locator(".tab-btn--active")).toHaveText([/^Reports/]);
+    await menu(page, "Reports").click();
+    await expect(page.locator(".tab-menu-item--active")).toHaveText(["Top Selling Items"]);
+  });
+
+  test("the main admin still gets the pharmacy pages folded under one menu", async ({ page }) => {
+    await loginAs(page, "admin");
+    await gotoReady(page, "/pharmacy/vendors", () => pharmacyMenu(page).first());
+    await expect(page.getByRole("link", { name: "Vendors", exact: true })).toHaveCount(0);
+    await pharmacyMenu(page).first().click();
+    await expect(page.getByRole("menuitem", { name: "Vendors", exact: true })).toBeVisible();
   });
 });

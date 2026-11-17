@@ -2,6 +2,7 @@ import { useState } from "react";
 import { requestErrorOf } from "../billing/format";
 import { toast } from "../../stores/uiStore";
 import FormField from "../ui/FormField";
+import { DateInput, SelectInput } from "./Fields";
 
 export default function useMasterForm({
   record,
@@ -22,6 +23,8 @@ export default function useMasterForm({
   const busy = create.isPending || update.isPending;
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
   const fieldErrors = touched ? validate(form, editing) : {};
+
+  const setValue = (field) => (value) => setForm((f) => ({ ...f, [field]: value }));
 
   const setField = (field, clean) => (e) => {
     const raw = e.target.type === "checkbox" ? e.target.checked : e.target.value;
@@ -80,15 +83,27 @@ export default function useMasterForm({
       error={fieldErrors[name]}
       className={extra.className}
     >
-      <select className="jb-assign" value={form[name]} onChange={setField(name)}>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
+      <SelectInput value={form[name]} options={options} onChange={setValue(name)} />
     </FormField>
   );
 
-  return { editing, form, setField, fieldErrors, error, busy, dirty, submit, input, select };
+  const date = (name, label, extra = {}) => (
+    <FormField
+      label={label}
+      hint={extra.hint}
+      required={extra.required}
+      error={fieldErrors[name]}
+      className={extra.className}
+    >
+      <DateInput
+        value={form[name]}
+        onChange={setValue(name)}
+        clearable={!extra.required}
+        minDate={extra.minDate}
+        maxDate={extra.maxDate}
+      />
+    </FormField>
+  );
+
+  return { editing, form, setField, fieldErrors, error, busy, dirty, submit, input, select, date };
 }

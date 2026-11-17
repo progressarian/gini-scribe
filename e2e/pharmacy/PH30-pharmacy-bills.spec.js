@@ -4,6 +4,7 @@ import { gotoReady } from "../helpers/browser.mjs";
 import { one, query } from "../helpers/db.mjs";
 import { financialYearOf } from "../../shared/billingVocab.js";
 import { assertTestDatabase } from "../setup/guard.mjs";
+import { pickOption } from "../helpers/pickers.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 
@@ -458,7 +459,7 @@ test.describe("PH30 pharmacy counter bills", () => {
     await page.getByRole("button", { name: "Split payment" }).click();
     const upi = page.getByRole("group", { name: "Payment 2" });
     await expect(upi.getByLabel("Amount (₹)")).toHaveValue("48.00");
-    await upi.getByLabel("UPI app").selectOption("bharatpe");
+    await pickOption(upi, "UPI app", "BharatPe (QR)");
     await upi.getByLabel("Reference").fill("UTR778899");
     await expect(page.getByText("Payments match the bill total")).toBeVisible();
 

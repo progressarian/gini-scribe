@@ -1,3 +1,4 @@
+import { ArrowDown, ArrowUp } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import Pagination from "../../components/ui/Pagination";
@@ -10,6 +11,7 @@ import "../billing/billingUi.css";
 import "./pharmacyStock.css";
 import "./pharmacyVendors.css";
 import "./pharmacyBills.css";
+import PillGroup from "../../components/pharmacy/Pills";
 
 const COLUMNS = [
   { key: "name", label: "Patient name" },
@@ -100,22 +102,15 @@ export default function PharmacyLedgerPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          <div className="phs-chips" role="group" aria-label="Filter patients">
-            {FILTERS.map((f) => (
-              <button
-                key={f.key}
-                type="button"
-                className={`phs-chip${only === f.key ? " on" : ""}`}
-                aria-pressed={only === f.key}
-                onClick={() => {
-                  setOnly(f.key);
-                  setPage(1);
-                }}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
+          <PillGroup
+            label="Filter patients"
+            value={only}
+            options={FILTERS}
+            onChange={(key) => {
+              setOnly(key);
+              setPage(1);
+            }}
+          />
         </div>
 
         {query.isError ? (
@@ -158,9 +153,13 @@ export default function PharmacyLedgerPage() {
                       >
                         <button type="button" className="psl-sort" onClick={() => sortBy(c.key)}>
                           {c.label}
-                          <span aria-hidden="true">
-                            {sort.key === c.key ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}
-                          </span>
+                          {sort.key === c.key ? (
+                            sort.dir === "asc" ? (
+                              <ArrowUp size={12} className="psl-sort__icon" aria-hidden="true" />
+                            ) : (
+                              <ArrowDown size={12} className="psl-sort__icon" aria-hidden="true" />
+                            )
+                          ) : null}
                         </button>
                       </th>
                     ))}

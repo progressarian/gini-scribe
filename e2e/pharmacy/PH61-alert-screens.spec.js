@@ -3,6 +3,7 @@ import { apiAs, loginAs } from "../helpers/auth.mjs";
 import { gotoReady } from "../helpers/browser.mjs";
 import { one, query } from "../helpers/db.mjs";
 import { assertTestDatabase } from "../setup/guard.mjs";
+import { pickOption } from "../helpers/pickers.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 
@@ -116,8 +117,8 @@ test.describe("PH61 the notifications bell and the expiry page", () => {
     await row.getByRole("checkbox").check();
     await page.getByRole("button", { name: "Return to vendor (1)" }).click();
     const dialog = page.getByRole("dialog", { name: "Return to vendor" });
-    await expect(dialog.getByRole("combobox", { name: /^Vendor/ })).toHaveValue(String(vendor.id));
-    await expect(dialog.getByRole("combobox", { name: /^Reason/ })).toHaveValue("expired");
+    await expect(dialog.getByRole("button", { name: /^Vendor/ })).toContainText(vendor.name);
+    await expect(dialog.getByRole("button", { name: /^Reason/ })).toContainText("Expired");
     await dialog.getByLabel("Vendor credit note / reference").fill("VCN-55");
     await dialog.getByRole("button", { name: "Return stock worth ₹14.00" }).click();
     await expect(dialog).toBeHidden();

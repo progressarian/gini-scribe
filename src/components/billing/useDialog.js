@@ -16,6 +16,7 @@ export default function useDialog(open, onDismiss) {
     focusables()[0]?.focus();
     const onKey = (e) => {
       if (e.key === "Escape") {
+        if (document.querySelector("[data-popover-layer]")) return;
         e.preventDefault();
         dismiss.current();
         return;

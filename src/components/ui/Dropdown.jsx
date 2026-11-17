@@ -13,6 +13,10 @@ export default function Dropdown({
   placeholder,
   disabled = false,
   title,
+  className = "",
+  id,
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
 }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef(null);
@@ -40,9 +44,12 @@ export default function Dropdown({
   const label = current?.label || placeholder || options[0]?.label;
 
   return (
-    <div className="doc-dd" ref={anchorRef}>
+    <div className={`doc-dd ${className}`.trim()} ref={anchorRef}>
       <button
         type="button"
+        id={id}
+        aria-invalid={ariaInvalid}
+        aria-describedby={ariaDescribedBy}
         className={
           variant === "color"
             ? `csel csel--${color || "gray"} doc-dd__btn`
@@ -54,8 +61,11 @@ export default function Dropdown({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={ariaLabel}
+        aria-labelledby={id && !ariaLabel ? `${id}-label ${id}-value` : undefined}
       >
-        <span className="doc-dd__label">{label}</span>
+        <span className="doc-dd__label" id={id ? `${id}-value` : undefined}>
+          {label}
+        </span>
         {current?.badge ? (
           <span
             className={`doc-dd__badge doc-dd__badge--${current.badgeTone || "low"}`}

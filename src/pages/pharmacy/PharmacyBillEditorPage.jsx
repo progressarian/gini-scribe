@@ -14,6 +14,7 @@ import { requestErrorOf } from "../../components/billing/format";
 import ConfirmModal from "../../components/ui/ConfirmModal";
 import MedicinePicker from "../../components/pharmacy/MedicinePicker";
 import BatchPickerDialog from "../../components/pharmacy/BatchPickerDialog";
+import { SelectInput } from "../../components/pharmacy/Fields";
 import BillPayments, {
   firstPayment,
   paymentProblems,
@@ -290,19 +291,20 @@ function BillDiscount({ bill, busy, onApply }) {
     <fieldset className="phb-fieldset phb-billdisc">
       <legend>Bill discount</legend>
       <div className="phb-billdisc__row">
-        <label className="sr-only" htmlFor="phb-disc-kind">
+        <label className="sr-only" htmlFor="phb-disc-kind" id="phb-disc-kind-label">
           Discount as
         </label>
-        <select
+        <SelectInput
           id="phb-disc-kind"
-          className="jb-assign"
+          className="phb-disc-kind"
           value={kind}
           disabled={busy}
-          onChange={(e) => setKind(e.target.value)}
-        >
-          <option value="percent">%</option>
-          <option value="amount">₹</option>
-        </select>
+          onChange={setKind}
+          options={[
+            { value: "percent", label: "%" },
+            { value: "amount", label: "₹" },
+          ]}
+        />
         <label className="sr-only" htmlFor="phb-disc-value">
           Bill discount
         </label>

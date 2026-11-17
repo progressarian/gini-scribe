@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Download } from "lucide-react";
 import FormField from "../../components/ui/FormField";
+import { DateInput, SelectInput } from "../../components/pharmacy/Fields";
 import { downloadFile } from "../../lib/downloadBlob";
 import { inr, localDate, showDate } from "../../components/pharmacy/format";
 import { toast } from "../../stores/uiStore";
@@ -123,37 +124,20 @@ export default function PharmacyReportsPage() {
       <section className="flow-card" aria-label="Choose report">
         <div className="bill-form phr-pick">
           <FormField label="Report">
-            <select
-              className="jb-assign"
+            <SelectInput
               value={key ?? ""}
-              onChange={(e) => setParams({ report: e.target.value }, { replace: true })}
-            >
-              {reports.map((r) => (
-                <option key={r.key} value={r.key}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
+              onChange={(report) => setParams({ report }, { replace: true })}
+              options={reports.map((r) => ({ value: r.key, label: r.label }))}
+              placeholder="Loading reports…"
+            />
           </FormField>
           {chosen?.dated ? (
             <>
               <FormField label="From" error={badRange ? "From must be on or before To." : null}>
-                <input
-                  type="date"
-                  className="jb-assign"
-                  value={from}
-                  max={to}
-                  onChange={(e) => setFrom(e.target.value)}
-                />
+                <DateInput value={from} maxDate={to} onChange={setFrom} />
               </FormField>
               <FormField label="To">
-                <input
-                  type="date"
-                  className="jb-assign"
-                  value={to}
-                  max={localDate()}
-                  onChange={(e) => setTo(e.target.value)}
-                />
+                <DateInput value={to} maxDate={localDate()} onChange={setTo} />
               </FormField>
             </>
           ) : null}

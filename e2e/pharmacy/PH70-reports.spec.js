@@ -4,6 +4,7 @@ import { apiAs, loginAs } from "../helpers/auth.mjs";
 import { gotoReady } from "../helpers/browser.mjs";
 import { financialYearOf } from "../../shared/billingVocab.js";
 import { assertTestDatabase } from "../setup/guard.mjs";
+import { pickOption } from "../helpers/pickers.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 
@@ -205,13 +206,13 @@ test.describe("PH70 pharmacy reports and dashboard", () => {
     await expect(page.getByText("Net sales today")).toBeVisible();
     await expect(page.getByRole("table", { name: "Latest bills" })).toContainText(bill.bill_no);
 
-    await page.getByRole("link", { name: "Reports" }).click();
+    await page.getByRole("link", { name: "Reports", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Pharmacy reports" })).toBeVisible();
-    await page.getByRole("combobox", { name: "Report", exact: true }).selectOption("h1_register");
+    await pickOption(page, "Report", "Schedule H1 / X register");
     await expect(page.getByRole("table", { name: "Schedule H1 / X register" })).toContainText(
       `${TAG} Patient`,
     );
-    await page.getByRole("combobox", { name: "Report", exact: true }).selectOption("stock_value");
+    await pickOption(page, "Report", "Stock valuation");
     await expect(page.getByLabel("From", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("table", { name: "Stock valuation" })).toContainText(
       `${TAG} Clonazepam 0.5`,

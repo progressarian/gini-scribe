@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Download } from "lucide-react";
+import { ArrowDown, ArrowUp, Download } from "lucide-react";
 import api from "../../services/api";
 import FormField from "../../components/ui/FormField";
+import PillGroup from "../../components/pharmacy/Pills";
+import { DateInput, SelectInput, optionsOf } from "../../components/pharmacy/Fields";
 import Pagination from "../../components/ui/Pagination";
 import { downloadFile } from "../../lib/downloadBlob";
 import { inr, localDate, showDate } from "../../components/pharmacy/format";
@@ -18,6 +20,11 @@ import "../billing/billingUi.css";
 import "./pharmacyStock.css";
 import "./pharmacyVendors.css";
 import "./pharmacyBills.css";
+
+const GROUPS = [
+  { key: "item", label: "Merge suppliers" },
+  { key: "vendor", label: "Split by supplier" },
+];
 
 const columnsFor = (split) => [
   { key: "medicine_name", label: "Item name" },
@@ -83,8 +90,8 @@ export default function PharmacyTopItemsPage() {
   );
   const rows = query.data?.rows ?? [];
   const columns = columnsFor(group === "vendor");
-  const change = (setter) => (e) => {
-    setter(e.target.value);
+  const change = (setter) => (value) => {
+    setter(value);
     setPage(1);
   };
 
@@ -146,64 +153,49 @@ export default function PharmacyTopItemsPage() {
       <section className="flow-card" aria-label="Filters">
         <div className="bill-form ptop-filters">
           <FormField label="From" error={badRange ? "From must be on or before To." : null}>
-            <input
-              type="date"
-              className="jb-assign"
-              value={from}
-              max={to}
-              onChange={change(setFrom)}
-            />
+            <DateInput value={from} maxDate={to} onChange={change(setFrom)} />
           </FormField>
           <FormField label="To">
-            <input
-              type="date"
-              className="jb-assign"
-              value={to}
-              max={localDate()}
-              onChange={change(setTo)}
-            />
+            <DateInput value={to} maxDate={localDate()} onChange={change(setTo)} />
           </FormField>
           <FormField label="Location">
-            <select className="jb-assign" value={locationId} onChange={change(setLocationId)}>
-              <option value="">All locations</option>
-              {(locations.data ?? []).map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name}
-                </option>
-              ))}
-            </select>
+            <SelectInput
+              value={locationId}
+              onChange={change(setLocationId)}
+              options={[
+                { value: "", label: "All locations" },
+                ...(locations.data ?? []).map((l) => ({ value: String(l.id), label: l.name })),
+              ]}
+            />
           </FormField>
           <FormField label="Sale type">
-            <select className="jb-assign" value={saleType} onChange={change(setSaleType)}>
-              <option value="">All sale types</option>
-              {Object.entries(SALE_TYPE_LABEL).map(([key, label]) => (
-                <option key={key} value={key}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            <SelectInput
+              value={saleType}
+              onChange={change(setSaleType)}
+              options={[{ value: "", label: "All sale types" }, ...optionsOf(SALE_TYPE_LABEL)]}
+            />
           </FormField>
           <FormField label="Item type">
-            <select className="jb-assign" value={form} onChange={change(setForm)}>
-              <option value="">All types</option>
-              {MEDICINE_TYPES.map((f) => (
-                <option key={f} value={f}>
-                  {f}
-                </option>
-              ))}
-            </select>
+            <SelectInput
+              value={form}
+              onChange={change(setForm)}
+              options={[
+                { value: "", label: "All types" },
+                ...MEDICINE_TYPES.map((f) => ({ value: f, label: f })),
+              ]}
+            />
           </FormField>
           <FormField label="Supplier">
-            <select className="jb-assign" value={vendorId} onChange={change(setVendorId)}>
-              <option value="">All suppliers</option>
-              {(vendors.data?.rows ?? []).map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name}
-                </option>
-              ))}
-            </select>
+            <SelectInput
+              value={vendorId}
+              onChange={change(setVendorId)}
+              options={[
+                { value: "", label: "All suppliers" },
+                ...(vendors.data?.rows ?? []).map((v) => ({ value: String(v.id), label: v.name })),
+              ]}
+            />
           </FormField>
-          <FormField label="Search">
+          <FormField label="Search" className="ptop-search">
             <input
               type="search"
               className="jb-assign"
@@ -212,30 +204,18 @@ export default function PharmacyTopItemsPage() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </FormField>
-        </div>
-        <div
-          className="phs-chips"
-          role="radiogroup"
-          aria-label="Same item from different suppliers"
-        >
-          {[
-            { key: "item", label: "Merge suppliers" },
-            { key: "vendor", label: "Split by supplier" },
-          ].map((g) => (
-            <label key={g.key} className={`phs-chip${group === g.key ? " on" : ""}`}>
-              <input
-                type="radio"
-                name="ptop-group"
-                className="sr-only"
-                checked={group === g.key}
-                onChange={() => {
-                  setGroup(g.key);
-                  setPage(1);
-                }}
-              />
-              {g.label}
-            </label>
-          ))}
+          <div className="fset__field ptop-group">
+            <span aria-hidden="true">Suppliers</span>
+            <PillGroup
+              label="Same item from different suppliers"
+              value={group}
+              options={GROUPS}
+              onChange={(key) => {
+                setGroup(key);
+                setPage(1);
+              }}
+            />
+          </div>
         </div>
       </section>
 
@@ -291,9 +271,13 @@ export default function PharmacyTopItemsPage() {
                       >
                         <button type="button" className="psl-sort" onClick={() => sortBy(c.key)}>
                           {c.label}
-                          <span aria-hidden="true">
-                            {sort.key === c.key ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}
-                          </span>
+                          {sort.key === c.key ? (
+                            sort.dir === "asc" ? (
+                              <ArrowUp size={12} className="psl-sort__icon" aria-hidden="true" />
+                            ) : (
+                              <ArrowDown size={12} className="psl-sort__icon" aria-hidden="true" />
+                            )
+                          ) : null}
                         </button>
                       </th>
                     ))}

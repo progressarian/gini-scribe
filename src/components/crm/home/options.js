@@ -1,8 +1,16 @@
-import { SELECTABLE_DOCTOR_PRIORITIES, VISIT_DUE_STATES } from "../../../../shared/crmVocab.js";
+import {
+  SELECTABLE_DOCTOR_PRIORITIES,
+  VISIT_DUE_STATES,
+  VISIT_SLOTS,
+} from "../../../../shared/crmVocab.js";
 
 export const PRIORITY_OPTIONS = SELECTABLE_DOCTOR_PRIORITIES.map((p) => ({
   value: p.value,
   label: p.label,
+}));
+export const SLOT_OPTIONS = VISIT_SLOTS.map((s) => ({
+  value: s.value,
+  label: `${s.label} visits`,
 }));
 export const DUE_OPTIONS = VISIT_DUE_STATES.map((s) => ({ value: s.value, label: s.label }));
 export const territoryOptions = (data) =>

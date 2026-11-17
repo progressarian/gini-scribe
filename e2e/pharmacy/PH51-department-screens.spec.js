@@ -5,6 +5,7 @@ import { one, query } from "../helpers/db.mjs";
 import { USERS } from "../fixtures/data.mjs";
 import { financialYearOf } from "../../shared/billingVocab.js";
 import { assertTestDatabase } from "../setup/guard.mjs";
+import { pickOption } from "../helpers/pickers.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 
@@ -115,7 +116,7 @@ test.describe("PH51 transfer, indent and reception screens", () => {
       () => page.getByRole("heading", { name: "Stock transfers" }),
       { timeout: 30000 },
     );
-    await page.getByRole("combobox", { name: /^To/ }).selectOption({ label: `${TAG} Ward` });
+    await pickOption(page, "To", `${TAG} Ward`);
     await page.getByRole("combobox", { name: "Add medicine" }).fill(TAG);
     await page.getByRole("option", { name: new RegExp(`${TAG} Ceftriaxone`) }).click();
     const picker = page.getByRole("dialog", { name: /Choose batches/ });
@@ -143,9 +144,7 @@ test.describe("PH51 transfer, indent and reception screens", () => {
       () => page.getByRole("heading", { name: "Department indents" }),
       { timeout: 30000 },
     );
-    await page
-      .getByRole("combobox", { name: /^Department/ })
-      .selectOption({ label: `${TAG} Ward` });
+    await pickOption(page, "Department", `${TAG} Ward`);
     await page.getByLabel("IPD number").fill("IPD-909");
     await page.getByLabel("Find patient").fill(TAG);
     await page.getByRole("radio", { name: new RegExp(`${TAG} Ward Patient`) }).check();

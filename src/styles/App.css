@@ -934,6 +934,15 @@
   display: none;
 }
 
+.tab-btn__icon {
+  flex-shrink: 0;
+  margin-right: 5px;
+}
+.tab-menu-item > span:first-child {
+  display: inline-flex;
+  align-items: center;
+}
+
 .tab-btn {
   flex: 0 0 auto;
   padding: 8px 10px;

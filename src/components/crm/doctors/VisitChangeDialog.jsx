@@ -2,7 +2,12 @@ import { useEffect, useState } from "react";
 import api from "../../../services/api.js";
 import ConfirmModal from "../../ui/ConfirmModal.jsx";
 import { errorText } from "../import/importText.js";
-import { VISIT_FORM_STATUSES, VISIT_OUTCOMES, VISIT_TYPES } from "../../../../shared/crmVocab.js";
+import {
+  VISIT_FORM_STATUSES,
+  VISIT_OUTCOMES,
+  VISIT_SLOTS,
+  VISIT_TYPES,
+} from "../../../../shared/crmVocab.js";
 
 const ddmmyyyy = (day) => (day ? day.split("-").reverse().join("-") : "");
 
@@ -24,6 +29,7 @@ export default function VisitChangeDialog({ mode, visit, doctor, viewerId, onClo
       status: visit.outcome === "doctor_unavailable" ? "doctor_unavailable" : "completed",
       visit_date: visit.visit_day,
       visit_type: visit.visit_type || "in_person",
+      visit_slot: visit.visit_slot || "",
       outcome: visit.outcome === "doctor_unavailable" ? "" : visit.outcome || "",
       discussion_notes: visit.discussion_notes || "",
       next_visit_date: visit.next_visit_date || "",
@@ -49,6 +55,7 @@ export default function VisitChangeDialog({ mode, visit, doctor, viewerId, onClo
           status: form.status,
           visit_date: form.visit_date !== visit.visit_day ? form.visit_date : undefined,
           visit_type: form.visit_type,
+          visit_slot: form.visit_slot || undefined,
           outcome: form.status === "doctor_unavailable" ? null : form.outcome || null,
           discussion_notes: form.discussion_notes,
           next_visit_date:
@@ -147,6 +154,17 @@ export default function VisitChangeDialog({ mode, visit, doctor, viewerId, onClo
             <span className="dfm__label">Visit type</span>
             <select className="rep__input" value={form.visit_type} onChange={set("visit_type")}>
               {VISIT_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="dfm__field">
+            <span className="dfm__label">Time of visit</span>
+            <select className="rep__input" value={form.visit_slot} onChange={set("visit_slot")}>
+              {!form.visit_slot && <option value="">Not recorded</option>}
+              {VISIT_SLOTS.map((t) => (
                 <option key={t.value} value={t.value}>
                   {t.label}
                 </option>

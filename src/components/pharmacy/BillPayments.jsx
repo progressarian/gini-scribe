@@ -4,6 +4,7 @@ import { inr } from "./format";
 import { toPaise, toRupees } from "../../../shared/pharmacyMoney";
 import { UPI_APP_LABEL } from "../../../shared/billingVocab";
 import { PAYMENTS_AT_ONCE, PAYMENT_MODE_LABEL, PAYMENT_MODES } from "../../../shared/pharmacyVocab";
+import { SelectInput, optionsOf } from "./Fields";
 
 export const firstPayment = (net) => [
   { mode: "cash", amount: toRupees(toPaise(net)), reference: "", upi_app: "" },
@@ -85,19 +86,17 @@ export default function BillPayments({
         return (
           <div className="phb-pay__row" key={i} role="group" aria-label={`Payment ${i + 1}`}>
             <FormField label="Mode">
-              <select
-                className="jb-assign"
+              <SelectInput
                 value={p.mode}
-                onChange={(e) => update(i, { mode: e.target.value })}
-              >
-                {modes.map((m) => (
-                  <option key={m} value={m}>
-                    {m === "deposit"
+                onChange={(mode) => update(i, { mode })}
+                options={modes.map((m) => ({
+                  value: m,
+                  label:
+                    m === "deposit"
                       ? `From deposit (${inr(depositBalance)} left)`
-                      : PAYMENT_MODE_LABEL[m]}
-                  </option>
-                ))}
-              </select>
+                      : PAYMENT_MODE_LABEL[m],
+                }))}
+              />
             </FormField>
             <FormField label="Amount (₹)" required error={errors.amount}>
               <input
@@ -110,18 +109,11 @@ export default function BillPayments({
             </FormField>
             {p.mode === "upi" ? (
               <FormField label="UPI app" required error={errors.upi_app}>
-                <select
-                  className="jb-assign"
+                <SelectInput
                   value={p.upi_app}
-                  onChange={(e) => update(i, { upi_app: e.target.value })}
-                >
-                  <option value="">Choose</option>
-                  {Object.entries(UPI_APP_LABEL).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(upi_app) => update(i, { upi_app })}
+                  options={[{ value: "", label: "Choose" }, ...optionsOf(UPI_APP_LABEL)]}
+                />
               </FormField>
             ) : null}
             {p.mode !== "cash" && p.mode !== "deposit" ? (

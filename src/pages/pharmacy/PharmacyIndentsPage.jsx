@@ -8,6 +8,7 @@ import { requestErrorOf } from "../../components/billing/format";
 import { toast } from "../../stores/uiStore";
 import { useStockLocations } from "../../queries/hooks/usePharmacyBatches";
 import ReturnDialog from "../../components/pharmacy/ReturnDialog";
+import { SelectInput } from "../../components/pharmacy/Fields";
 import {
   useCreateIndent,
   useIndent,
@@ -163,21 +164,17 @@ function NewIndent({ departments }) {
       ) : null}
       <div className="bill-form">
         <FormField label="Department" required error={errors.department}>
-          <select
-            className="jb-assign"
+          <SelectInput
             value={locationId}
-            onChange={(e) => {
-              setLocationId(e.target.value);
+            onChange={(value) => {
+              setLocationId(value);
               setLines([]);
             }}
-          >
-            <option value="">Choose</option>
-            {departments.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: "", label: "Choose" },
+              ...departments.map((d) => ({ value: String(d.id), label: d.name })),
+            ]}
+          />
         </FormField>
         <FormField label="IPD number">
           <input
@@ -302,25 +299,22 @@ function IndentList({ departments }) {
         <span className="fset__count">{query.data?.total ?? 0}</span>
       </div>
       <div className="phs-filters">
-        <label className="sr-only" htmlFor="pin-filter">
+        <label className="sr-only" htmlFor="pin-filter" id="pin-filter-label">
           Show indents for department
         </label>
-        <select
+        <SelectInput
           id="pin-filter"
-          className="jb-assign phb-filter-select"
+          className="phb-filter-select"
           value={locationId}
-          onChange={(e) => {
-            setLocationId(e.target.value);
+          onChange={(value) => {
+            setLocationId(value);
             setPage(1);
           }}
-        >
-          <option value="">All departments</option>
-          {departments.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: "", label: "All departments" },
+            ...departments.map((d) => ({ value: String(d.id), label: d.name })),
+          ]}
+        />
       </div>
       {query.isError ? (
         <div className="phs-empty" role="alert">

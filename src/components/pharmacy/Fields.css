@@ -1,0 +1,64 @@
+.fset.bill-ui .doc-dd.ph-dd {
+  width: 100%;
+  min-width: 0;
+}
+
+.fset.bill-ui .ph-dd .doc-dd__btn {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ui-ink);
+  background: #fff;
+  border: 1px solid var(--ui-field);
+  border-radius: 8px;
+  transition:
+    border-color 0.12s,
+    box-shadow 0.12s;
+}
+
+.fset.bill-ui .ph-dd .doc-dd__btn:hover {
+  border-color: #b8c3d1;
+}
+
+.fset.bill-ui .ph-dd .doc-dd__btn:focus-visible,
+.fset.bill-ui .ph-dd .doc-dd__btn[aria-expanded="true"] {
+  outline: none;
+  border-color: var(--ui-accent);
+  box-shadow: 0 0 0 3px var(--ui-ring);
+}
+
+.fset.bill-ui .ph-dd .doc-dd__btn:disabled {
+  cursor: not-allowed;
+  background: #f8fafc;
+  color: #94a3b8;
+}
+
+.fset.bill-ui .ph-dd .doc-dd__label {
+  text-align: left;
+}
+
+.fset.bill-ui .ph-dd--cell .doc-dd__btn {
+  height: 32px;
+  padding: 0 8px;
+}
+
+.fset.bill-ui .doc-dd.ph-dd.phb-filter-select {
+  flex: 0 1 260px;
+  width: auto;
+  min-width: 180px;
+  max-width: 260px;
+}
+
+.fset.bill-ui .doc-dd.ph-dd.phm-filter {
+  width: auto;
+  min-width: 150px;
+}
+
+.fset.bill-ui .doc-dd.ph-dd.phb-disc-kind {
+  flex: 0 0 72px;
+  width: 72px;
+}

@@ -10,6 +10,8 @@ import useAuthStore from "../../stores/authStore";
 import { CAPABILITIES, hasCapability } from "../../../shared/permissions";
 import { useStockLocations } from "../../queries/hooks/usePharmacyBatches";
 import { useVendorList } from "../../queries/hooks/usePharmacyVendors";
+import { SelectInput, optionsOf } from "../../components/pharmacy/Fields";
+import PillGroup from "../../components/pharmacy/Pills";
 import {
   useCreateVendorReturn,
   useExpiryList,
@@ -109,27 +111,21 @@ function ReturnDialog({ rows, onClose, onDone }) {
     >
       <div className="bill-form">
         <FormField label="Vendor" required error={errors.vendor}>
-          <select
-            className="jb-assign"
+          <SelectInput
             value={vendorId}
-            onChange={(e) => setVendorId(e.target.value)}
-          >
-            <option value="">Choose</option>
-            {(vendors.data?.rows ?? []).map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.name}
-              </option>
-            ))}
-          </select>
+            onChange={setVendorId}
+            options={[
+              { value: "", label: "Choose" },
+              ...(vendors.data?.rows ?? []).map((v) => ({ value: String(v.id), label: v.name })),
+            ]}
+          />
         </FormField>
         <FormField label="Reason" required>
-          <select className="jb-assign" value={reason} onChange={(e) => setReason(e.target.value)}>
-            {Object.entries(VENDOR_RETURN_REASON_LABEL).map(([key, label]) => (
-              <option key={key} value={key}>
-                {label}
-              </option>
-            ))}
-          </select>
+          <SelectInput
+            value={reason}
+            onChange={setReason}
+            options={optionsOf(VENDOR_RETURN_REASON_LABEL)}
+          />
         </FormField>
         <FormField label="Vendor credit note / reference">
           <input
@@ -315,22 +311,19 @@ export default function PharmacyExpiryPage() {
           ) : null}
         </div>
         <div className="phs-filters">
-          <label className="sr-only" htmlFor="pex-location">
+          <label className="sr-only" htmlFor="pex-location" id="pex-location-label">
             Location
           </label>
-          <select
+          <SelectInput
             id="pex-location"
-            className="jb-assign phb-filter-select"
+            className="phb-filter-select"
             value={locationId}
-            onChange={(e) => setLocationId(e.target.value)}
-          >
-            <option value="">All locations</option>
-            {(locations.data ?? []).map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
+            onChange={setLocationId}
+            options={[
+              { value: "", label: "All locations" },
+              ...(locations.data ?? []).map((l) => ({ value: String(l.id), label: l.name })),
+            ]}
+          />
           <label className="sr-only" htmlFor="pex-search">
             Search batches
           </label>
@@ -342,19 +335,12 @@ export default function PharmacyExpiryPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          <div className="phs-chips" role="group" aria-label="Filter by expiry">
-            {BUCKETS.map((b) => (
-              <button
-                key={b.key}
-                type="button"
-                className={`phs-chip${bucket === b.key ? " on" : ""}`}
-                aria-pressed={bucket === b.key}
-                onClick={() => setBucket(b.key)}
-              >
-                {b.label}
-              </button>
-            ))}
-          </div>
+          <PillGroup
+            label="Filter by expiry"
+            value={bucket}
+            options={BUCKETS}
+            onChange={(key) => setBucket(key)}
+          />
         </div>
         {query.isError ? (
           <div className="phs-empty" role="alert">

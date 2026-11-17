@@ -10,6 +10,7 @@ import { pharmacyBillTotals, pharmacyReturnAmounts } from "../../../shared/pharm
 import { toPaise, toRupees } from "../../../shared/pharmacyMoney";
 import { UPI_APP_LABEL } from "../../../shared/billingVocab";
 import { PAYMENT_MODE_LABEL, PAYMENT_MODES } from "../../../shared/pharmacyVocab";
+import { SelectInput, optionsOf } from "./Fields";
 
 export default function ReturnDialog({ bill, returned, onDone, onClose, indentId = null }) {
   const billReturn = useCreateReturn();
@@ -193,35 +194,22 @@ export default function ReturnDialog({ bill, returned, onDone, onClose, indentId
         </FormField>
         {needsRefund ? (
           <FormField label="Refund by" required>
-            <select
-              className="jb-assign"
+            <SelectInput
               value={mode}
               disabled={confirming}
-              onChange={(e) => setMode(e.target.value)}
-            >
-              {PAYMENT_MODES.map((m) => (
-                <option key={m} value={m}>
-                  {PAYMENT_MODE_LABEL[m]}
-                </option>
-              ))}
-            </select>
+              onChange={setMode}
+              options={PAYMENT_MODES.map((m) => ({ value: m, label: PAYMENT_MODE_LABEL[m] }))}
+            />
           </FormField>
         ) : null}
         {needsRefund && mode === "upi" ? (
           <FormField label="UPI app" required error={errors.upiApp}>
-            <select
-              className="jb-assign"
+            <SelectInput
               value={upiApp}
               disabled={confirming}
-              onChange={(e) => setUpiApp(e.target.value)}
-            >
-              <option value="">Choose</option>
-              {Object.entries(UPI_APP_LABEL).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
+              onChange={setUpiApp}
+              options={[{ value: "", label: "Choose" }, ...optionsOf(UPI_APP_LABEL)]}
+            />
           </FormField>
         ) : null}
         {needsRefund && mode !== "cash" ? (

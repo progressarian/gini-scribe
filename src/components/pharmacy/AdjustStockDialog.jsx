@@ -1,3 +1,4 @@
+import { ArrowRight } from "lucide-react";
 import { useState } from "react";
 import FormField from "../ui/FormField";
 import MasterFormDialog from "./MasterFormDialog";
@@ -6,6 +7,7 @@ import { packUnits, showDate } from "./format";
 import { toast } from "../../stores/uiStore";
 import { useAdjustStock } from "../../queries/hooks/usePharmacyBatches";
 import { ADJUSTMENT_REASON_LABEL } from "../../../shared/pharmacyVocab";
+import { SelectInput, optionsOf } from "./Fields";
 
 const REDUCING = ["damaged", "expired", "lost"];
 
@@ -91,13 +93,11 @@ export default function AdjustStockDialog({ medicine, batch, location, onClose }
     >
       <div className="bill-form">
         <FormField label="Reason" required>
-          <select className="jb-assign" value={reason} onChange={(e) => setReason(e.target.value)}>
-            {Object.entries(ADJUSTMENT_REASON_LABEL).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
+          <SelectInput
+            value={reason}
+            onChange={setReason}
+            options={optionsOf(ADJUSTMENT_REASON_LABEL)}
+          />
         </FormField>
         <FormField
           label={`New stock (${medicine.unit_label})`}
@@ -125,7 +125,9 @@ export default function AdjustStockDialog({ medicine, batch, location, onClose }
       </div>
       {delta ? (
         <p className="adj-change" role="status">
-          {current} → {target} {medicine.unit_label} ({delta > 0 ? "+" : "−"}
+          {current} <ArrowRight size={13} className="adj-change__arrow" aria-hidden="true" />
+          <span className="sr-only">to</span> {target} {medicine.unit_label} (
+          {delta > 0 ? "+" : "−"}
           {Math.abs(delta)}).{" "}
           {reason === "expired"
             ? "Recorded as an expiry write-off."

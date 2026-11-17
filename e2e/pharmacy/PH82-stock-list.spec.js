@@ -3,6 +3,7 @@ import ExcelJS from "exceljs";
 import { apiAs, loginAs } from "../helpers/auth.mjs";
 import { gotoReady } from "../helpers/browser.mjs";
 import { assertTestDatabase } from "../setup/guard.mjs";
+import { pickOption } from "../helpers/pickers.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 
@@ -164,7 +165,7 @@ test.describe("PH82 the stock list with PTR, LP and margin", () => {
       "descending",
     );
     await expect(table.getByRole("row").nth(1)).toContainText("CFT1");
-    await page.getByLabel("Item type").selectOption("TAB");
+    await pickOption(page, "Item type", "TAB");
     await expect(table.getByRole("row")).toHaveCount(2);
   });
 });

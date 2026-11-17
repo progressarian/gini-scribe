@@ -76,6 +76,13 @@ export const VISIT_OUTCOMES = [
 ];
 export const VISIT_OUTCOME_VALUES = VISIT_OUTCOMES.map((v) => v.value);
 
+export const VISIT_SLOTS = [
+  { value: "morning", label: "Morning" },
+  { value: "evening", label: "Evening" },
+];
+export const VISIT_SLOT_VALUES = VISIT_SLOTS.map((v) => v.value);
+export const SLOT_SPLIT_HOUR_IST = 16;
+
 export const VISIT_SOURCES = [
   { value: "app", label: "Logged in the app" },
   { value: "sheet", label: "From sheet" },
@@ -313,6 +320,7 @@ export const doctorPriorityMeta = metaFinder(DOCTOR_PRIORITIES);
 export const relationshipStageLabel = labeller(RELATIONSHIP_STAGES);
 export const visitTypeMeta = metaFinder(VISIT_TYPES);
 export const visitOutcomeMeta = metaFinder(VISIT_OUTCOMES);
+export const visitSlotMeta = metaFinder(VISIT_SLOTS);
 export const visitDueStateMeta = metaFinder(VISIT_DUE_STATES);
 export const referralSourceLabel = labeller(REFERRAL_SOURCES);
 export const referralAnswerTypeLabel = labeller(REFERRAL_ANSWER_TYPES);

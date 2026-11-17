@@ -1,3 +1,4 @@
+import { ArrowRight } from "lucide-react";
 import { useState } from "react";
 import FormField from "../../components/ui/FormField";
 import ConfirmModal from "../../components/ui/ConfirmModal";
@@ -15,6 +16,7 @@ import "../billing/billingUi.css";
 import "./pharmacyStock.css";
 import "./pharmacyVendors.css";
 import "./pharmacyBills.css";
+import { SelectInput } from "../../components/pharmacy/Fields";
 
 const when = (value) =>
   new Date(value).toLocaleString("en-IN", {
@@ -85,26 +87,26 @@ function NewTransfer({ locations }) {
       </h2>
       <div className="bill-form">
         <FormField label="From" required error={errors.from}>
-          <select className="jb-assign" value={fromId} onChange={(e) => changeFrom(e.target.value)}>
-            <option value="">Choose</option>
-            {locations.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
+          <SelectInput
+            value={fromId}
+            onChange={changeFrom}
+            options={[
+              { value: "", label: "Choose" },
+              ...locations.map((l) => ({ value: String(l.id), label: l.name })),
+            ]}
+          />
         </FormField>
         <FormField label="To" required error={errors.to}>
-          <select className="jb-assign" value={toId} onChange={(e) => setToId(e.target.value)}>
-            <option value="">Choose</option>
-            {locations
-              .filter((l) => String(l.id) !== fromId)
-              .map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name}
-                </option>
-              ))}
-          </select>
+          <SelectInput
+            value={toId}
+            onChange={setToId}
+            options={[
+              { value: "", label: "Choose" },
+              ...locations
+                .filter((l) => String(l.id) !== fromId)
+                .map((l) => ({ value: String(l.id), label: l.name })),
+            ]}
+          />
         </FormField>
         <FormField label="Note" className="phv-span-all">
           <input
@@ -185,25 +187,22 @@ function TransferList({ locations }) {
         <span className="fset__count">{query.data?.total ?? 0}</span>
       </div>
       <div className="phs-filters">
-        <label className="sr-only" htmlFor="ptr-filter">
+        <label className="sr-only" htmlFor="ptr-filter" id="ptr-filter-label">
           Show transfers for location
         </label>
-        <select
+        <SelectInput
           id="ptr-filter"
-          className="jb-assign phb-filter-select"
+          className="phb-filter-select"
           value={locationId}
-          onChange={(e) => {
-            setLocationId(e.target.value);
+          onChange={(value) => {
+            setLocationId(value);
             setPage(1);
           }}
-        >
-          <option value="">All locations</option>
-          {locations.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.name}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: "", label: "All locations" },
+            ...locations.map((l) => ({ value: String(l.id), label: l.name })),
+          ]}
+        />
       </div>
       {query.isError ? (
         <div className="phs-empty" role="alert">
@@ -225,7 +224,7 @@ function TransferList({ locations }) {
               <thead>
                 <tr>
                   <th>Transfer</th>
-                  <th>From → to</th>
+                  <th>From and to</th>
                   <th className="phs-num">Medicines</th>
                   <th className="phs-num">Units</th>
                   <th>Note</th>
@@ -241,8 +240,13 @@ function TransferList({ locations }) {
                         {r.issued_by_name ? ` by ${r.issued_by_name}` : ""}
                       </span>
                     </td>
-                    <td data-label="From → to">
-                      {r.from_location_name} → {r.to_location_name}
+                    <td data-label="From and to">
+                      <span className="ptr-route">
+                        {r.from_location_name}
+                        <ArrowRight size={13} aria-hidden="true" />
+                        <span className="sr-only">to</span>
+                        {r.to_location_name}
+                      </span>
                     </td>
                     <td data-label="Medicines" className="phs-num">
                       {r.line_count}

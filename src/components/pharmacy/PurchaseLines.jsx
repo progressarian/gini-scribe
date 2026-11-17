@@ -1,6 +1,7 @@
 import { Trash2 } from "lucide-react";
 import { digitsTyped, moneyTyped } from "../billing/format";
-import { inr, showDate } from "./format";
+import { inr, localDate, showDate } from "./format";
+import { DateInput } from "./Fields";
 import { purchaseLineAmounts, receivedUnits, toRupees } from "../../../shared/pharmacyMoney";
 import { splitUnits } from "../../../shared/pharmacyVocab";
 
@@ -79,26 +80,37 @@ export function PurchaseLinesEditor({ lines, errors, onChange, onRemove }) {
                   const invalid = Boolean(errors[`${line.key}.${c.field}`]);
                   return (
                     <td key={c.field} data-label={c.label}>
-                      <label className="sr-only" htmlFor={id}>
+                      <label className="sr-only" htmlFor={id} id={`${id}-label`}>
                         {c.label} for line {i + 1}, {line.medicine.name}
                       </label>
-                      <input
-                        id={id}
-                        className="jb-assign pur-input"
-                        style={{ width: c.width }}
-                        type={c.type ?? "text"}
-                        inputMode={c.numeric ? "decimal" : undefined}
-                        maxLength={c.max}
-                        aria-invalid={invalid || undefined}
-                        value={line[c.field]}
-                        onChange={(e) =>
-                          onChange(
-                            line.key,
-                            c.field,
-                            c.clean ? c.clean(e.target.value) : e.target.value,
-                          )
-                        }
-                      />
+                      {c.type === "date" ? (
+                        <DateInput
+                          id={id}
+                          value={line[c.field]}
+                          minDate={localDate(1)}
+                          aria-invalid={invalid || undefined}
+                          style={{ width: c.width }}
+                          onChange={(value) => onChange(line.key, c.field, value)}
+                        />
+                      ) : (
+                        <input
+                          id={id}
+                          className="jb-assign pur-input"
+                          style={{ width: c.width }}
+                          type={c.type ?? "text"}
+                          inputMode={c.numeric ? "decimal" : undefined}
+                          maxLength={c.max}
+                          aria-invalid={invalid || undefined}
+                          value={line[c.field]}
+                          onChange={(e) =>
+                            onChange(
+                              line.key,
+                              c.field,
+                              c.clean ? c.clean(e.target.value) : e.target.value,
+                            )
+                          }
+                        />
+                      )}
                     </td>
                   );
                 })}

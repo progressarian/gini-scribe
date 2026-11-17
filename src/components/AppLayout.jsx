@@ -1,4 +1,28 @@
 import { useEffect, useRef } from "react";
+import {
+  ArrowLeftRight,
+  BookOpen,
+  Building2,
+  ClipboardCheck,
+  CreditCard,
+  Factory,
+  FileBarChart,
+  Hourglass,
+  LayoutDashboard,
+  Package,
+  PackageCheck,
+  PackagePlus,
+  Pill,
+  ReceiptText,
+  Repeat,
+  Settings,
+  SlidersHorizontal,
+  Stethoscope,
+  Store,
+  TrendingUp,
+  Warehouse,
+  TriangleAlert,
+} from "lucide-react";
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import api from "../services/api";
@@ -34,8 +58,16 @@ const C = PAGE_CAPABILITIES;
 const isLabDesk = (role) => role === ROLES.LAB || role === ROLES.TECH;
 const isPharmacyDesk = (role) => role === ROLES.PHARMACY || role === ROLES.PHARMACY_ADMIN;
 
+const NAV_GROUP_ICONS = { pharmacy: Pill };
+
+const DESK_GROUPS = {
+  reports: { label: "Reports", icon: FileBarChart },
+  inventory: { label: "Inventory", icon: Warehouse },
+  setup: { label: "Setup", icon: SlidersHorizontal },
+};
+
 const NAV_GROUPS = {
-  pharmacy: "💊 Pharmacy",
+  pharmacy: "Pharmacy",
   inbox: "💬 Inbox",
   flow: "🧭 Gini Flow",
   billing: "💰 Billing",
@@ -109,119 +141,149 @@ const NAV_ITEMS = [
   {
     path: "/refills",
     group: "pharmacy",
-    label: "💊 Refills",
+    label: "Refills",
+    icon: Repeat,
     cap: C["/refills"],
     show: () => true,
   },
   {
     path: "/pharmacy/dashboard",
     group: "pharmacy",
-    label: "📊 Pharmacy Today",
+    label: "Pharmacy Today",
+    icon: LayoutDashboard,
     cap: C["/pharmacy/dashboard"],
     show: () => true,
   },
   {
     path: "/pharmacy/reports/top-items",
+    deskGroup: "reports",
     group: "pharmacy",
-    label: "🏆 Top Selling Items",
+    label: "Top Selling Items",
+    icon: TrendingUp,
     cap: C["/pharmacy/reports"],
     show: () => true,
   },
   {
     path: "/pharmacy/ledger",
+    deskGroup: "reports",
     group: "pharmacy",
-    label: "📒 Patient Ledger",
+    label: "Patient Ledger",
+    icon: BookOpen,
     cap: C["/pharmacy/ledger"],
     show: () => true,
   },
   {
     path: "/pharmacy/reports",
+    deskGroup: "reports",
     group: "pharmacy",
-    label: "📑 Pharmacy Reports",
+    label: "Pharmacy Reports",
+    icon: FileBarChart,
     cap: C["/pharmacy/reports"],
+    match: (pathname) => pathname === "/pharmacy/reports",
     show: () => true,
   },
   {
     path: "/pharmacy/billing",
     group: "pharmacy",
-    label: "🧾 Pharmacy Bills",
+    label: "Pharmacy Bills",
+    icon: ReceiptText,
     cap: C["/pharmacy/billing"],
     show: () => true,
   },
   {
     path: "/pharmacy/credit",
     group: "pharmacy",
-    label: "💳 Pharmacy Credit",
+    label: "Pharmacy Credit",
+    icon: CreditCard,
     cap: C["/pharmacy/credit"],
     show: () => true,
   },
   {
     path: "/pharmacy/stock",
+    deskGroup: "inventory",
     group: "pharmacy",
-    label: "📦 Stock",
+    label: "Stock",
+    icon: Package,
     cap: C["/pharmacy/stock"],
     show: () => true,
   },
   {
     path: "/pharmacy/purchases",
+    deskGroup: "inventory",
     group: "pharmacy",
-    label: "📥 Goods Receipts",
+    label: "Goods Receipts",
+    icon: PackagePlus,
     cap: C["/pharmacy/purchases"],
     show: () => true,
   },
   {
     path: "/pharmacy/expiry",
+    deskGroup: "inventory",
     group: "pharmacy",
-    label: "⏳ Expiry",
+    label: "Expiry",
+    icon: Hourglass,
     cap: C["/pharmacy/expiry"],
     show: () => true,
   },
   {
     path: "/pharmacy/transfers",
+    deskGroup: "inventory",
     group: "pharmacy",
-    label: "🔁 Stock Transfers",
+    label: "Stock Transfers",
+    icon: ArrowLeftRight,
     cap: C["/pharmacy/transfers"],
     show: () => true,
   },
   {
     path: "/pharmacy/indents",
+    deskGroup: "inventory",
     group: "pharmacy",
-    label: "🩺 Department Indents",
+    label: "Department Indents",
+    icon: Stethoscope,
     cap: C["/pharmacy/indents"],
     show: () => true,
   },
   {
     path: "/pharmacy/vendors",
+    deskGroup: "setup",
     group: "pharmacy",
-    label: "🏭 Vendors",
+    label: "Vendors",
+    icon: Factory,
     cap: C["/pharmacy/vendors"],
     show: () => true,
   },
   {
     path: "/pharmacy/medicines",
+    deskGroup: "setup",
     group: "pharmacy",
-    label: "💊 Medicines",
+    label: "Medicines",
+    icon: Pill,
     cap: C["/pharmacy/medicines"],
     show: () => true,
   },
   {
     path: "/pharmacy/departments",
+    deskGroup: "setup",
     group: "pharmacy",
-    label: "🏥 Departments",
+    label: "Departments",
+    icon: Building2,
     cap: C["/pharmacy/departments"],
     show: () => true,
   },
   {
     path: "/pharmacy/settings",
+    deskGroup: "setup",
     group: "pharmacy",
-    label: "⚙️ Pharmacy Settings",
+    label: "Pharmacy Settings",
+    icon: Settings,
     cap: C["/pharmacy/settings"],
     show: () => true,
   },
   {
     path: "/dose-change-requests",
     group: "pharmacy",
-    label: "⚕️ Dose Reviews",
+    label: "Dose Reviews",
+    icon: ClipboardCheck,
     cap: C["/dose-change-requests"],
     show: () => true,
   },
@@ -236,7 +298,8 @@ const NAV_ITEMS = [
   {
     path: "/side-effects",
     group: "pharmacy",
-    label: "💊 Side FX",
+    label: "Side FX",
+    icon: TriangleAlert,
     cap: C["/side-effects"],
     show: () => true,
   },
@@ -304,7 +367,8 @@ const NAV_ITEMS = [
   {
     path: "/medicine-collection",
     group: "pharmacy",
-    label: "💊 Medicine Collection",
+    label: "Medicine Collection",
+    icon: PackageCheck,
     cap: C["/medicine-collection"],
     show: () => true,
   },
@@ -326,7 +390,8 @@ const NAV_ITEMS = [
   },
   {
     path: "/giniflow/station/pharmacy",
-    label: "💊 Pharmacy Station",
+    label: "Pharmacy Station",
+    icon: Store,
     cap: C["/giniflow/station/pharmacy"],
     show: (s) => isPharmacyDesk(s.role),
   },
@@ -435,6 +500,8 @@ export default function AppLayout() {
   const navigate = useNavigate();
   const navClick = makeNavClick(navigate);
   const location = useLocation();
+  const tabsRef = useRef(null);
+
   const currentDoctor = useAuthStore((s) => s.currentDoctor);
   const handleLogout = useAuthStore((s) => s.handleLogout);
   const { patient, dbPatientId, duplicateWarning, setDuplicateWarning, loadPatientDB, newPatient } =
@@ -501,6 +568,20 @@ export default function AppLayout() {
   const isFollowUp = usePatientStore((s) => s.getIsFollowUp());
   const role = currentDoctor?.role;
   const hasPatient = !!dbPatientId || !!patient.name;
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const bar = tabsRef.current;
+      const tab = bar?.querySelector(".tab-btn--active");
+      if (!bar || !tab || bar.scrollWidth <= bar.clientWidth) return;
+      const barBox = bar.getBoundingClientRect();
+      const tabBox = tab.getBoundingClientRect();
+      bar.scrollTo({
+        left: bar.scrollLeft + tabBox.left - barBox.left - (barBox.width - tabBox.width) / 2,
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [location.pathname, role, hasPatient]);
   const navAllowlist = navAllowlistForRole(role);
   const navHidden = navHiddenForRole(role);
 
@@ -670,8 +751,9 @@ export default function AppLayout() {
 
       {/* Navigation */}
       {!(duplicateWarning && !dbPatientId) && (
-        <div className="tabs">
+        <div ref={tabsRef} className="tabs">
           {(() => {
+            const flat = isPharmacyDesk(role);
             const capable = NAV_ITEMS.filter(
               // t.cap may be one capability or an array (any-of).
               (t) =>
@@ -695,6 +777,7 @@ export default function AppLayout() {
                   return `tab-btn ${on ? "tab-btn--active" : "tab-btn--inactive"}`;
                 }}
               >
+                {t.icon ? <t.icon size={14} className="tab-btn__icon" aria-hidden="true" /> : null}
                 {t.label}
                 {t.count && t.count(navState) > 0 && (
                   <span
@@ -721,20 +804,24 @@ export default function AppLayout() {
               } else if (!sec && lastSection) {
                 lastSection = null;
               }
-              if (!t.group) {
+              const groupKey = flat ? t.deskGroup : t.group;
+              if (!groupKey) {
                 rendered.push(tabOf(t));
                 continue;
               }
-              if (grouped.has(t.group)) continue;
-              grouped.add(t.group);
-              const members = visible.filter((item) => item.group === t.group);
+              if (grouped.has(groupKey)) continue;
+              grouped.add(groupKey);
+              const members = visible.filter(
+                (item) => (flat ? item.deskGroup : item.group) === groupKey,
+              );
               rendered.push(
                 members.length === 1 ? (
                   tabOf(t)
                 ) : (
                   <NavMenu
-                    key={`group-${t.group}`}
-                    label={NAV_GROUPS[t.group]}
+                    key={`group-${groupKey}`}
+                    label={flat ? DESK_GROUPS[groupKey].label : NAV_GROUPS[groupKey]}
+                    icon={flat ? DESK_GROUPS[groupKey].icon : NAV_GROUP_ICONS[groupKey]}
                     items={members}
                     navState={navState}
                     pathname={location.pathname}

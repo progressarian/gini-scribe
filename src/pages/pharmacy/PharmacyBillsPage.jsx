@@ -14,6 +14,7 @@ import "../billing/billingUi.css";
 import "./pharmacyStock.css";
 import "./pharmacyVendors.css";
 import "./pharmacyBills.css";
+import PillGroup from "../../components/pharmacy/Pills";
 
 const STATUSES = [
   { key: "all", label: "All" },
@@ -88,22 +89,15 @@ export default function PharmacyBillsPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          <div className="phs-chips" role="group" aria-label="Filter bills by status">
-            {STATUSES.map((s) => (
-              <button
-                key={s.key}
-                type="button"
-                className={`phs-chip${status === s.key ? " on" : ""}`}
-                aria-pressed={status === s.key}
-                onClick={() => {
-                  setStatus(s.key);
-                  setPage(1);
-                }}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
+          <PillGroup
+            label="Filter bills by status"
+            value={status}
+            options={STATUSES}
+            onChange={(key) => {
+              setStatus(key);
+              setPage(1);
+            }}
+          />
         </div>
 
         {list.isError ? (

@@ -28,6 +28,7 @@ const tabButtonClass = (active) =>
 
 export default function NavMenu({
   label,
+  icon: Icon,
   items,
   navState = {},
   pathname,
@@ -145,6 +146,7 @@ export default function NavMenu({
           }
         }}
       >
+        {Icon ? <Icon size={14} className="tab-btn__icon" aria-hidden="true" /> : null}
         {label}
         <Count value={total} alert={alert} label={alert ? `${total} waiting` : undefined} />
         <span className="tab-menu-caret" aria-hidden="true">
@@ -180,7 +182,12 @@ export default function NavMenu({
               aria-current={isOnPath(item, pathname) ? "page" : undefined}
               onClick={() => setOpen(false)}
             >
-              <span>{item.label}</span>
+              <span>
+                {item.icon ? (
+                  <item.icon size={14} className="tab-btn__icon" aria-hidden="true" />
+                ) : null}
+                {item.label}
+              </span>
               <Count
                 value={counts[index]}
                 alert={Boolean(item.countLabel)}

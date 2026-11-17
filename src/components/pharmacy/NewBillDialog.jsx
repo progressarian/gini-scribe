@@ -5,6 +5,7 @@ import MasterFormDialog from "./MasterFormDialog";
 import { digitsTyped, requestErrorOf } from "../billing/format";
 import { toast } from "../../stores/uiStore";
 import { inr } from "./format";
+import { SelectInput } from "./Fields";
 import {
   useBillPatientSearch,
   useCreateBill,
@@ -155,16 +156,16 @@ export default function NewBillDialog({ onCreated, onClose }) {
               />
             </FormField>
             <FormField label="Sex">
-              <select
-                className="jb-assign"
+              <SelectInput
                 value={walkin.sex}
-                onChange={(e) => setWalkin({ ...walkin, sex: e.target.value })}
-              >
-                <option value="">Not given</option>
-                <option>Male</option>
-                <option>Female</option>
-                <option>Other</option>
-              </select>
+                onChange={(sex) => setWalkin({ ...walkin, sex })}
+                options={[
+                  { value: "", label: "Not given" },
+                  { value: "Male", label: "Male" },
+                  { value: "Female", label: "Female" },
+                  { value: "Other", label: "Other" },
+                ]}
+              />
             </FormField>
           </div>
           <button

@@ -5,6 +5,8 @@ import Pagination from "../ui/Pagination";
 import AdjustStockDialog from "./AdjustStockDialog";
 import BatchHistoryDialog from "./BatchHistoryDialog";
 import { inr, packUnits, showDate } from "./format";
+import { SelectInput } from "./Fields";
+import PillGroup from "./Pills";
 import {
   useBatchStock,
   useBatchSummary,
@@ -182,26 +184,24 @@ export default function BatchStockPanel({ withCost, canAdjust }) {
   return (
     <div className="phs-panel">
       <div className="bst-location">
-        <label htmlFor="bst-location">Stock at</label>
-        <select
+        <label htmlFor="bst-location" id="bst-location-label">
+          Stock at
+        </label>
+        <SelectInput
           id="bst-location"
-          className="jb-assign"
           value={locationId}
-          onChange={(e) => {
-            setLocationId(e.target.value);
+          onChange={(value) => {
+            setLocationId(value);
             setPage(1);
             setOpen(new Set());
           }}
-        >
-          <option value="">Main pharmacy</option>
-          {(locations.data ?? [])
-            .filter((l) => l.kind !== "main")
-            .map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-        </select>
+          options={[
+            { value: "", label: "Main pharmacy" },
+            ...(locations.data ?? [])
+              .filter((l) => l.kind !== "main")
+              .map((l) => ({ value: String(l.id), label: l.name })),
+          ]}
+        />
       </div>
 
       <Summary summary={summary.data} withCost={withCost} />
@@ -225,22 +225,15 @@ export default function BatchStockPanel({ withCost, canAdjust }) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          <div className="phs-chips" role="group" aria-label="Filter stock">
-            {FILTERS.map((f) => (
-              <button
-                key={f.key}
-                type="button"
-                className={`phs-chip${filter === f.key ? " on" : ""}`}
-                aria-pressed={filter === f.key}
-                onClick={() => {
-                  setFilter(f.key);
-                  setPage(1);
-                }}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
+          <PillGroup
+            label="Filter stock"
+            value={filter}
+            options={FILTERS}
+            onChange={(key) => {
+              setFilter(key);
+              setPage(1);
+            }}
+          />
         </div>
 
         {stock.isError ? (

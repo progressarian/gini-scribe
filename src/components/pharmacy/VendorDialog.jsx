@@ -135,7 +135,7 @@ export default function VendorDialog({ record: vendor, onClose }) {
         )}
         {f.input("pan", "PAN", { maxLength: 10, placeholder: "ABCDE1234F" }, { clean: upper })}
         {f.input("drug_license_no", "Drug licence number", { maxLength: 80 })}
-        {f.input("drug_license_expiry", "Drug licence expiry", { type: "date" })}
+        {f.date("drug_license_expiry", "Drug licence expiry")}
       </div>
 
       <h3 className="phv-section">Payment</h3>

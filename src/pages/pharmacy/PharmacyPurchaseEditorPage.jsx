@@ -6,6 +6,7 @@ import { requestErrorOf } from "../../components/billing/format";
 import FormField from "../../components/ui/FormField";
 import ConfirmModal from "../../components/ui/ConfirmModal";
 import MedicinePicker from "../../components/pharmacy/MedicinePicker";
+import { DateInput, SelectInput } from "../../components/pharmacy/Fields";
 import {
   PurchaseLinesEditor,
   PurchaseLinesView,
@@ -173,6 +174,7 @@ function DraftReceipt({ purchase: loaded }) {
     vendors.data?.rows.find((v) => String(v.id) === form.vendor_id)?.name ?? purchase.vendor_name;
 
   const setHeader = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
+  const pickHeader = (field) => (value) => setForm((f) => ({ ...f, [field]: value }));
   const setLine = (key, field, value) =>
     setForm((f) => ({
       ...f,
@@ -288,23 +290,21 @@ function DraftReceipt({ purchase: loaded }) {
           </h2>
           <div className="bill-form">
             <FormField label="Vendor" required error={errors.vendor_id} className="phv-span2">
-              <select
-                className="jb-assign"
+              <SelectInput
                 value={form.vendor_id}
-                onChange={setHeader("vendor_id")}
-              >
-                <option value="">Choose a vendor</option>
-                {purchase.vendor_id &&
-                !vendors.data?.rows.some((v) => v.id === purchase.vendor_id) ? (
-                  <option value={purchase.vendor_id}>{purchase.vendor_name}</option>
-                ) : null}
-                {(vendors.data?.rows ?? []).map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.name}
-                    {v.city ? ` · ${v.city}` : ""}
-                  </option>
-                ))}
-              </select>
+                onChange={pickHeader("vendor_id")}
+                options={[
+                  { value: "", label: "Choose a vendor" },
+                  ...(purchase.vendor_id &&
+                  !vendors.data?.rows.some((v) => v.id === purchase.vendor_id)
+                    ? [{ value: String(purchase.vendor_id), label: purchase.vendor_name }]
+                    : []),
+                  ...(vendors.data?.rows ?? []).map((v) => ({
+                    value: String(v.id),
+                    label: v.city ? `${v.name} · ${v.city}` : v.name,
+                  })),
+                ]}
+              />
             </FormField>
             <FormField label="Invoice number" required error={errors.invoice_no}>
               <input
@@ -315,12 +315,10 @@ function DraftReceipt({ purchase: loaded }) {
               />
             </FormField>
             <FormField label="Invoice date" required error={errors.invoice_date}>
-              <input
-                className="jb-assign"
-                type="date"
-                max={localDate()}
+              <DateInput
+                maxDate={localDate()}
                 value={form.invoice_date}
-                onChange={setHeader("invoice_date")}
+                onChange={pickHeader("invoice_date")}
               />
             </FormField>
           </div>

@@ -8,6 +8,7 @@ import StockUploadPreview from "../../components/pharmacy/StockUploadPreview";
 import StockLinkDialog from "../../components/pharmacy/StockLinkDialog";
 import NeededStock from "../../components/pharmacy/NeededStock";
 import Pagination from "../../components/ui/Pagination";
+import PillGroup from "./Pills";
 import {
   useCreateStockUpload,
   useStockList,
@@ -294,22 +295,15 @@ export default function DarpanStockPanel() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          <div className="phs-chips" role="group" aria-label="Filter stock">
-            {FILTERS.filter((f) => canUpload || f.key !== "not_linked").map((f) => (
-              <button
-                key={f.key}
-                type="button"
-                className={`phs-chip${filter === f.key ? " on" : ""}`}
-                aria-pressed={filter === f.key}
-                onClick={() => {
-                  setFilter(f.key);
-                  setPage(1);
-                }}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
+          <PillGroup
+            label="Filter stock"
+            value={filter}
+            options={FILTERS.filter((f) => canUpload || f.key !== "not_linked")}
+            onChange={(key) => {
+              setFilter(key);
+              setPage(1);
+            }}
+          />
         </div>
 
         {list.isError ? (

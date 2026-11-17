@@ -4,6 +4,7 @@ import { gotoReady } from "../helpers/browser.mjs";
 import { one } from "../helpers/db.mjs";
 import { financialYearOf } from "../../shared/billingVocab.js";
 import { assertTestDatabase } from "../setup/guard.mjs";
+import { pickOption } from "../helpers/pickers.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 
@@ -297,7 +298,7 @@ test.describe("PH83 deposits, write-offs, vouchers and the patient ledger", () =
       { timeout: 30000 },
     );
     const pay = page.getByRole("group", { name: "Payment 1" });
-    await pay.getByLabel("Mode").selectOption("deposit");
+    await pickOption(pay, "Mode", /^From deposit/);
     await expect(pay.getByLabel("Reference")).toHaveCount(0);
     await page.getByRole("button", { name: "Finalise and collect ₹39.00" }).click();
     await page

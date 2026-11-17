@@ -2,7 +2,13 @@ import usePagedList from "./usePagedList.js";
 import DoctorRow from "./DoctorRow.jsx";
 import ListPager from "../ListPager.jsx";
 import { SearchField, FilterSelect, ListStatus, ListBody } from "./ListToolbar.jsx";
-import { PRIORITY_OPTIONS, territoryOptions, staffOptions, hasFilters } from "./options.js";
+import {
+  PRIORITY_OPTIONS,
+  SLOT_OPTIONS,
+  territoryOptions,
+  staffOptions,
+  hasFilters,
+} from "./options.js";
 
 const STATES = [
   { key: "", label: "All waiting", count: "all" },
@@ -10,7 +16,7 @@ const STATES = [
   { key: "due", label: "Due", count: "due" },
   { key: "never_visited", label: "Never visited", count: "never_visited" },
 ];
-const FILTER_KEYS = ["q", "priority", "territory", "owner"];
+const FILTER_KEYS = ["q", "priority", "slot", "territory", "owner"];
 
 export default function DueList({ filters, onChange, refreshKey }) {
   const list = usePagedList(
@@ -52,6 +58,13 @@ export default function DueList({ filters, onChange, refreshKey }) {
           onChange={(priority) => update({ priority })}
           allLabel="All priorities"
           options={PRIORITY_OPTIONS}
+        />
+        <FilterSelect
+          label="Visit time"
+          value={filters.slot}
+          onChange={(slot) => update({ slot })}
+          allLabel="Any visit time"
+          options={SLOT_OPTIONS}
         />
         <FilterSelect
           label="Territory"

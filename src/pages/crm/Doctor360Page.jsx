@@ -11,6 +11,7 @@ import {
   RELATIONSHIP_STAGES,
   visitDueStateMeta,
   visitTypeMeta,
+  visitSlotMeta,
   visitOutcomeMeta,
   referralStatusLabel,
   attributionStatusMeta,
@@ -385,7 +386,11 @@ export default function Doctor360Page() {
 }
 
 function labelFor(e) {
-  if (e.kind === "visit") return visitTypeMeta(e.visit_type)?.label || "Visit";
+  if (e.kind === "visit") {
+    const type = visitTypeMeta(e.visit_type)?.label || "Visit";
+    const slot = visitSlotMeta(e.visit_slot)?.label;
+    return slot ? `${type} · ${slot}` : type;
+  }
   if (e.kind === "referral") return "Referral";
   if (e.kind === "task") return "Task done";
   return "Stage change";

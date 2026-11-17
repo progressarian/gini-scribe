@@ -3,6 +3,7 @@ import { apiAs, loginAs } from "../helpers/auth.mjs";
 import { one, query } from "../helpers/db.mjs";
 import { gotoReady } from "../helpers/browser.mjs";
 import { assertTestDatabase } from "../setup/guard.mjs";
+import { pickOption } from "../helpers/pickers.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 
@@ -199,11 +200,11 @@ test.describe("PH11 pharmacy medicines", () => {
     await dialog
       .getByRole("textbox", { name: "Medicine name", exact: true })
       .fill(medName("Screen Syrup"));
-    await dialog.getByRole("combobox", { name: "Form" }).selectOption("SYP");
-    await dialog.getByRole("combobox", { name: "Pack" }).selectOption("bottle");
+    await pickOption(dialog, "Form", "SYP");
+    await pickOption(dialog, "Pack", "bottle");
     await dialog.getByRole("textbox", { name: "Units per pack" }).fill("1");
-    await dialog.getByRole("combobox", { name: "Unit", exact: true }).selectOption("unit");
-    await dialog.getByRole("combobox", { name: "GST rate" }).selectOption("custom");
+    await pickOption(dialog, "Unit", "unit");
+    await pickOption(dialog, "GST rate", "Custom rate");
     await dialog.getByRole("textbox", { name: "Custom GST rate (%)" }).fill("6");
     await dialog.getByRole("textbox", { name: /MRP per bottle/ }).fill("90");
     await dialog.getByRole("textbox", { name: /Sale rate per bottle/ }).fill("95");

@@ -14,6 +14,7 @@ import "../billing/billingUi.css";
 import "./pharmacyStock.css";
 import "./pharmacyVendors.css";
 import "./pharmacyBills.css";
+import PillGroup from "../../components/pharmacy/Pills";
 
 const TABS = [
   { key: "requests", label: "Credit requests" },
@@ -85,22 +86,15 @@ function RequestsPanel({ canApprove, myId }) {
         <span className="fset__count">{query.data?.total ?? 0}</span>
       </div>
       <div className="phs-filters">
-        <div className="phs-chips" role="group" aria-label="Filter credit requests by status">
-          {STATUS_FILTERS.map((s) => (
-            <button
-              key={s.key}
-              type="button"
-              className={`phs-chip${status === s.key ? " on" : ""}`}
-              aria-pressed={status === s.key}
-              onClick={() => {
-                setStatus(s.key);
-                setPage(1);
-              }}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
+        <PillGroup
+          label="Filter credit requests by status"
+          value={status}
+          options={STATUS_FILTERS}
+          onChange={(key) => {
+            setStatus(key);
+            setPage(1);
+          }}
+        />
       </div>
       <TableState
         query={query}

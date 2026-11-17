@@ -3,6 +3,7 @@ import { apiAs, loginAs } from "../helpers/auth.mjs";
 import { gotoReady } from "../helpers/browser.mjs";
 import { one, query } from "../helpers/db.mjs";
 import { assertTestDatabase } from "../setup/guard.mjs";
+import { pickOption } from "../helpers/pickers.mjs";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 
@@ -313,13 +314,13 @@ test.describe("PH21 batch stock view and adjustments", () => {
       .click();
     const dialog = page.getByRole("dialog", { name: `Adjust stock · ${TAG} Amlodipine 5` });
     await expect(dialog).toContainText("1 strip (10 tab)");
-    await dialog.getByRole("combobox", { name: "Reason" }).selectOption("damaged");
+    await pickOption(dialog, "Reason", "Damaged");
     await dialog.getByRole("textbox", { name: "New stock (tab)" }).fill("12");
     await dialog.getByRole("button", { name: "Save adjustment" }).click();
     await expect(dialog.getByText("Damaged can only reduce stock.")).toBeVisible();
     await dialog.getByRole("textbox", { name: "New stock (tab)" }).fill("8");
     await dialog.getByRole("textbox", { name: "What happened" }).fill("Two tablets crushed");
-    await expect(dialog.getByRole("status")).toContainText("10 → 8 tab (−2)");
+    await expect(dialog.getByRole("status")).toContainText("10 to 8 tab (−2)");
     await dialog.getByRole("button", { name: "Save adjustment" }).click();
     await expect(dialog).toBeHidden();
     await expect(batches.getByRole("row", { name: /LATER1/ })).toContainText("8 tab");

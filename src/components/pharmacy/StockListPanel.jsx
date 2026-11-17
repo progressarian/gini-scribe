@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { Download } from "lucide-react";
+import { ArrowDown, ArrowUp, Download } from "lucide-react";
 import Pagination from "../ui/Pagination";
 import { downloadFile } from "../../lib/downloadBlob";
 import { inr, packUnits, showDate } from "./format";
 import { toast } from "../../stores/uiStore";
 import { useStockList, useStockLocations } from "../../queries/hooks/usePharmacyBatches";
 import { useVendorList } from "../../queries/hooks/usePharmacyVendors";
+import { SelectInput } from "./Fields";
 
 const EXPIRY = [
   { key: "all", label: "Any expiry" },
@@ -34,22 +35,19 @@ function VendorFilter({ value, onChange }) {
   const vendors = useVendorList({ status: "all", limit: 200 });
   return (
     <>
-      <label className="sr-only" htmlFor="psl-vendor">
+      <label className="sr-only" htmlFor="psl-vendor" id="psl-vendor-label">
         Supplier
       </label>
-      <select
+      <SelectInput
         id="psl-vendor"
-        className="jb-assign phb-filter-select"
+        className="phb-filter-select"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">All suppliers</option>
-        {(vendors.data?.rows ?? []).map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.name}
-          </option>
-        ))}
-      </select>
+        onChange={onChange}
+        options={[
+          { value: "", label: "All suppliers" },
+          ...(vendors.data?.rows ?? []).map((v) => ({ value: String(v.id), label: v.name })),
+        ]}
+      />
     </>
   );
 }
@@ -192,54 +190,43 @@ export default function StockListPanel({ withCost }) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <label className="sr-only" htmlFor="psl-location">
+        <label className="sr-only" htmlFor="psl-location" id="psl-location-label">
           Location
         </label>
-        <select
+        <SelectInput
           id="psl-location"
-          className="jb-assign phb-filter-select"
+          className="phb-filter-select"
           value={locationId}
-          onChange={(e) => reset(setLocationId)(e.target.value)}
-        >
-          <option value="">All locations</option>
-          {(locations.data ?? []).map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.name}
-            </option>
-          ))}
-        </select>
-        <label className="sr-only" htmlFor="psl-type">
+          onChange={reset(setLocationId)}
+          options={[
+            { value: "", label: "All locations" },
+            ...(locations.data ?? []).map((l) => ({ value: String(l.id), label: l.name })),
+          ]}
+        />
+        <label className="sr-only" htmlFor="psl-type" id="psl-type-label">
           Item type
         </label>
-        <select
+        <SelectInput
           id="psl-type"
-          className="jb-assign phb-filter-select"
+          className="phb-filter-select"
           value={form}
-          onChange={(e) => reset(setForm)(e.target.value)}
-        >
-          <option value="">All types</option>
-          {(query.data?.forms ?? []).map((f) => (
-            <option key={f} value={f}>
-              {f}
-            </option>
-          ))}
-        </select>
+          onChange={reset(setForm)}
+          options={[
+            { value: "", label: "All types" },
+            ...(query.data?.forms ?? []).map((f) => ({ value: f, label: f })),
+          ]}
+        />
         {withCost ? <VendorFilter value={vendorId} onChange={reset(setVendorId)} /> : null}
-        <label className="sr-only" htmlFor="psl-expiry">
+        <label className="sr-only" htmlFor="psl-expiry" id="psl-expiry-label">
           Expiry
         </label>
-        <select
+        <SelectInput
           id="psl-expiry"
-          className="jb-assign phb-filter-select"
+          className="phb-filter-select"
           value={expiry}
-          onChange={(e) => reset(setExpiry)(e.target.value)}
-        >
-          {EXPIRY.map((x) => (
-            <option key={x.key} value={x.key}>
-              {x.label}
-            </option>
-          ))}
-        </select>
+          onChange={reset(setExpiry)}
+          options={EXPIRY.map((x) => ({ value: x.key, label: x.label }))}
+        />
         <label className="fset__check">
           <input
             type="checkbox"
@@ -286,9 +273,13 @@ export default function StockListPanel({ withCost }) {
                       ) : (
                         <button type="button" className="psl-sort" onClick={() => sortBy(c.key)}>
                           {c.label}
-                          <span aria-hidden="true">
-                            {sort.key === c.key ? (sort.dir === "asc" ? " ▲" : " ▼") : ""}
-                          </span>
+                          {sort.key === c.key ? (
+                            sort.dir === "asc" ? (
+                              <ArrowUp size={12} className="psl-sort__icon" aria-hidden="true" />
+                            ) : (
+                              <ArrowDown size={12} className="psl-sort__icon" aria-hidden="true" />
+                            )
+                          ) : null}
                         </button>
                       )}
                     </th>
