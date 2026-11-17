@@ -50,7 +50,14 @@ function sheetColumns(data) {
     ...data.columns.charges.map((column) =>
       money("Charges", column.label, (row) => row.charges[column.key] ?? 0),
     ),
-    { group: "Charges", header: "Pharmacy Charges (not in Scribe)", width: 16, value: () => null },
+    data.columns.pharmacy.live
+      ? money("Charges", "Pharmacy Charges (not in net revenue)", (row) => row.pharmacy)
+      : {
+          group: "Charges",
+          header: "Pharmacy Charges (not in Scribe)",
+          width: 16,
+          value: () => null,
+        },
     money("Discounts", "Discount given", (row) => -row.discount),
     money("Discounts", "Discount on Consultation", (row) => -row.discount_consultation),
     money("Discounts", "Discount on Tests", (row) => -row.discount_tests),

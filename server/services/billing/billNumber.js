@@ -2,7 +2,7 @@ import { httpError, inTransaction } from "./transaction.js";
 import { writeAudit } from "./audit.js";
 import { auditFields } from "./common.js";
 import { indiaToday } from "./categoryResolver.js";
-import { BILL_SERIES, financialYear, formatNumber } from "./billSeries.js";
+import { BILL_SERIES, NUMBER_SERIES, financialYear, formatNumber } from "./billSeries.js";
 
 export { BILL_SERIES };
 
@@ -13,14 +13,20 @@ const SERIES_OF = { bill: "MAIN", receipt: "RCPT", credit_note: "CN" };
 export const seriesFor = (kind) => SERIES_OF[kind];
 
 const MISSING_SERIES = {
+  PH: (fy) =>
+    `The pharmacy bill number series (PH) for ${fy} isn't set up yet. The pharmacy admin adds it in Pharmacy settings, under Number series`,
+  PHR: (fy) =>
+    `The pharmacy receipt number series (PHR) for ${fy} isn't set up yet. The pharmacy admin adds it in Pharmacy settings, under Number series`,
+  PHCN: (fy) =>
+    `The pharmacy credit note number series (PHCN) for ${fy} isn't set up yet. The pharmacy admin adds it in Pharmacy settings, under Number series`,
   CN: (fy) =>
     `The credit note number series (CN) for ${fy} isn't set up yet — an admin adds it in Billing settings, under Number series, and then the refund can be approved`,
 };
 
 function cleanSeries(value) {
   const series = typeof value === "string" ? value.trim().toUpperCase() : "";
-  if (!BILL_SERIES.includes(series)) {
-    throw httpError(400, `Series must be one of: ${BILL_SERIES.join(", ")}`);
+  if (!NUMBER_SERIES.includes(series)) {
+    throw httpError(400, `Series must be one of: ${NUMBER_SERIES.join(", ")}`);
   }
   return series;
 }

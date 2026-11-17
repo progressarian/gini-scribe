@@ -43,7 +43,7 @@ const STATIONS = [
     key: "reception",
     icon: "🏥",
     name: "Reception",
-    desc: "Test orders from the Chief Endocrinologist · payment collection · trigger lab sample",
+    desc: "Check-ins, billing and refunds at the front desk",
     href: "/giniflow/station/reception",
   },
   {

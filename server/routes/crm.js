@@ -339,8 +339,8 @@ router.patch("/crm/doctors/:id", crm, express.json(), async (req, res) => {
 
 router.get("/crm/assignments", crm, importer, async (req, res) => {
   try {
-    const { owner, territory, q, page } = req.query;
-    res.json(await listAssignments(req.crmUser, { owner, territory, q, page }));
+    const { owner, territory, q, page, priority } = req.query;
+    res.json(await listAssignments(req.crmUser, { owner, territory, q, page, priority }));
   } catch (e) {
     importError(res, e, "Assignments");
   }
@@ -359,8 +359,8 @@ router.post("/crm/assignments", crm, importer, express.json(), async (req, res) 
 
 router.get("/crm/assignments/export.xlsx", crm, importer, async (req, res) => {
   try {
-    const { owner, territory, q } = req.query;
-    const { buffer } = await assignmentsWorkbook(req.crmUser, { owner, territory, q });
+    const { owner, territory, q, priority } = req.query;
+    const { buffer } = await assignmentsWorkbook(req.crmUser, { owner, territory, q, priority });
     const day = new Date().toISOString().slice(0, 10);
     res.setHeader("Content-Type", XLSX_TYPE);
     res.setHeader("Content-Disposition", `attachment; filename="crm-assignments-${day}.xlsx"`);

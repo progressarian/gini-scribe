@@ -5,6 +5,7 @@ import { errorText } from "../import/importText.js";
 import { DAY_OFF_STATUSES, dayOffStatusMeta } from "../../../../shared/crmVocab.js";
 import DayOffDialog from "./DayOffDialog.jsx";
 import { dayCount, datesText } from "./dayOffText.js";
+import { FilterSelect } from "../home/ListToolbar.jsx";
 
 const FILTERS = [{ value: "all", label: "All" }, ...DAY_OFF_STATUSES];
 
@@ -149,21 +150,13 @@ export default function DaysOffPanel({ onPendingChange, onChanged }) {
         </div>
         <div className="tsk__tools">
           {admin && (
-            <label className="asg__field asg__field--narrow">
-              <span className="asg__sr">Person</span>
-              <select
-                className={`rep__input ${person ? "home__select--on" : ""}`}
-                value={person}
-                onChange={(e) => setPerson(e.target.value)}
-              >
-                <option value="">Everyone</option>
-                {data.staff.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.full_name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <FilterSelect
+              label="Person"
+              value={person}
+              onChange={setPerson}
+              allLabel="Everyone"
+              options={data.staff.map((s) => ({ value: s.id, label: s.full_name }))}
+            />
           )}
           {admin && (
             <button

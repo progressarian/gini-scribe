@@ -268,9 +268,10 @@ export default function Doctor360Page() {
       <section className="d360__section">
         <span className="rep__label">Priority</span>
         <div className="rep__chips">
-          {DOCTOR_PRIORITIES.map((p) => (
+          {DOCTOR_PRIORITIES.filter((p) => !p.retired || p.value === d.priority).map((p) => (
             <button
               key={p.value}
+              type="button"
               className={`rep__chip ${d.priority === p.value ? "rep__chip--on" : ""}`}
               disabled={saving || removed}
               onClick={() => setPriority(p.value)}

@@ -275,6 +275,20 @@ export function useUploadLabCaseReport() {
   });
 }
 
+export function useRemoveLabReport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId }) =>
+      (await api.delete(`/api/giniflow/stations/lab/${orderId}/report`)).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "lab"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "board"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "mo"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "doctor"] });
+    },
+  });
+}
+
 // Taking a report back off a case, while the case is still open.
 export function useDeleteLabCaseReport() {
   const queryClient = useQueryClient();

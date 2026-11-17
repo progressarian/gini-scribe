@@ -303,6 +303,13 @@ export function shiftInPaise(shift, today) {
       refunded: paise(shift.healthray.refunded),
     },
     prepaid: { collected: paise(shift.prepaid.collected) },
+    pharmacy: {
+      count: shift.pharmacy.count,
+      collected: paise(shift.pharmacy.collected),
+      refunded: paise(shift.pharmacy.refunded),
+      cash_collected: paise(shift.pharmacy.cash_collected),
+      cash_refunded: paise(shift.pharmacy.cash_refunded),
+    },
     expected_cash: paise(shift.expected_cash),
     counted_cash: toPaise(shift.counted_cash),
     difference: toPaise(shift.difference),

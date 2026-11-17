@@ -57,6 +57,14 @@ export function OtherMoney({ shift, cleared }) {
     ["Deposits taken (in the modes above)", shift.deposits.received],
     ["Paid in HealthRay (marked here)", shift.healthray.collected - shift.healthray.refunded],
     ["Paid earlier / online", shift.prepaid.collected],
+    [
+      "Pharmacy cash (counted in the expected drawer)",
+      (shift.pharmacy?.cash_collected ?? 0) - (shift.pharmacy?.cash_refunded ?? 0),
+    ],
+    [
+      "Pharmacy card / UPI / NEFT",
+      (shift.pharmacy?.collected ?? 0) - (shift.pharmacy?.cash_collected ?? 0),
+    ],
     ["Cleared on Payments tab / fee changes (taken in HealthRay)", clearedTotal],
   ].filter(([, value]) => value);
   if (!rows.length)

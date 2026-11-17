@@ -42,6 +42,46 @@ export const SALE_TYPE_LABEL = {
 };
 export const SALE_TYPES = Object.keys(SALE_TYPE_LABEL);
 export const GST_FOLDED_SALE_TYPES = ["ipd", "indent"];
+export const COUNTER_SALE_TYPES = ["opd", "walkin", "ipd"];
+
+export const PAYMENT_MODE_LABEL = {
+  cash: "Cash",
+  card: "Card",
+  upi: "UPI",
+  neft: "NEFT / Cheque",
+};
+export const PAYMENT_MODES = Object.keys(PAYMENT_MODE_LABEL);
+export const DEPOSIT_MODE = "deposit";
+export const PAYMENT_MODE_TEXT = { ...PAYMENT_MODE_LABEL, deposit: "From deposit" };
+export const ACCOUNT_ENTRY_LABEL = {
+  bill: "Bill",
+  sales_return: "Sales return",
+  payment: "Payment",
+  refund_paid: "Refund paid",
+  deposit: "Deposit received",
+  deposit_refund: "Deposit refunded",
+  deposit_used: "Paid from deposit",
+  write_off: "Written off",
+  voucher_credit: "Voucher (credit)",
+  voucher_debit: "Voucher (debit)",
+};
+export const PAYMENTS_AT_ONCE = 5;
+
+export const BILL_STATUS_LABEL = {
+  draft: "Draft",
+  final: "Paid",
+  due: "Due",
+  cancelled: "Cancelled",
+};
+
+export const CREDIT_STATUS_LABEL = {
+  pending: "Waiting for approval",
+  approved: "Approved",
+  rejected: "Rejected",
+  withdrawn: "Withdrawn",
+  used: "Used on bill",
+};
+export const CREDIT_STATUSES = Object.keys(CREDIT_STATUS_LABEL);
 
 export const MOVEMENT_KIND_LABEL = {
   opening: "Opening stock",
@@ -103,6 +143,14 @@ export const ADJUSTMENT_REASON_LABEL = {
 export const ADJUSTMENT_REASONS = Object.keys(ADJUSTMENT_REASON_LABEL);
 
 export const NEAR_EXPIRY_WARN_DAYS = 30;
+
+export const VENDOR_RETURN_REASON_LABEL = {
+  expired: "Expired",
+  near_expiry: "Near expiry",
+  damaged: "Damaged",
+  other: "Other",
+};
+export const VENDOR_RETURN_REASONS = Object.keys(VENDOR_RETURN_REASON_LABEL);
 export const EXPIRY_BUCKETS = [
   { key: "expired", label: "Expired", min: null, max: -1 },
   { key: "30", label: "Within 30 days", min: 0, max: 30 },
@@ -135,12 +183,23 @@ export const PAN_PATTERN = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 export const HSN_PATTERN = /^[0-9]{4,8}$/;
 export const IFSC_PATTERN = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 
-export const isValidGstin = (v) =>
-  GSTIN_PATTERN.test(
-    String(v ?? "")
-      .trim()
-      .toUpperCase(),
-  );
+const GSTIN_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+export function gstinCheckCharacter(first14) {
+  let sum = 0;
+  for (let i = 0; i < 14; i += 1) {
+    const product = GSTIN_CHARS.indexOf(first14[i]) * (i % 2 === 0 ? 1 : 2);
+    sum += Math.floor(product / 36) + (product % 36);
+  }
+  return GSTIN_CHARS[(36 - (sum % 36)) % 36];
+}
+
+export const isValidGstin = (v) => {
+  const gstin = String(v ?? "")
+    .trim()
+    .toUpperCase();
+  return GSTIN_PATTERN.test(gstin) && gstinCheckCharacter(gstin.slice(0, 14)) === gstin[14];
+};
 export const isValidPan = (v) =>
   PAN_PATTERN.test(
     String(v ?? "")
@@ -155,7 +214,7 @@ export const isValidIfsc = (v) =>
       .toUpperCase(),
   );
 
-export const GSTIN_HINT = "Enter the 15-character GSTIN, for example 03ABCDE1234F1Z5.";
+export const GSTIN_HINT = "Enter the 15-character GSTIN and check it for typing mistakes.";
 export const PAN_HINT = "Enter the 10-character PAN, for example ABCDE1234F.";
 export const HSN_HINT = "Enter a 4 to 8 digit HSN code.";
 export const IFSC_HINT = "Enter the 11-character IFSC, for example HDFC0001234.";

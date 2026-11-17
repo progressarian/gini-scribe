@@ -27,7 +27,7 @@ export const stockItemKey = (name) =>
     .trim()
     .toUpperCase();
 
-const cellValue = (cell) => {
+export const cellValue = (cell) => {
   const v = cell?.value;
   if (v && typeof v === "object") {
     if ("result" in v) return v.result;
@@ -37,13 +37,13 @@ const cellValue = (cell) => {
   return v;
 };
 
-const text = (v) => {
+export const text = (v) => {
   if (v === null || v === undefined) return null;
   const s = String(v).replace(/\s+/g, " ").trim();
   return EMPTY_VALUES.has(s.toUpperCase()) ? null : s;
 };
 
-const number = (v) => {
+export const number = (v) => {
   if (v === null || v === undefined || v === "") return null;
   if (typeof v === "number") return Number.isFinite(v) ? v : NaN;
   const cleaned = String(v).replace(/[,₹\s]/g, "");

@@ -18,6 +18,7 @@ import {
   homeForRole,
 } from "../config/routes";
 import { hasAnyCapability, canViewAnalytics, ROLES } from "../../shared/permissions";
+import NotificationBell from "./NotificationBell";
 import { hydrateCategories } from "../../shared/patientCategories.js";
 
 import "../styles/App.css";
@@ -113,6 +114,48 @@ const NAV_ITEMS = [
     show: () => true,
   },
   {
+    path: "/pharmacy/dashboard",
+    group: "pharmacy",
+    label: "📊 Pharmacy Today",
+    cap: C["/pharmacy/dashboard"],
+    show: () => true,
+  },
+  {
+    path: "/pharmacy/reports/top-items",
+    group: "pharmacy",
+    label: "🏆 Top Selling Items",
+    cap: C["/pharmacy/reports"],
+    show: () => true,
+  },
+  {
+    path: "/pharmacy/ledger",
+    group: "pharmacy",
+    label: "📒 Patient Ledger",
+    cap: C["/pharmacy/ledger"],
+    show: () => true,
+  },
+  {
+    path: "/pharmacy/reports",
+    group: "pharmacy",
+    label: "📑 Pharmacy Reports",
+    cap: C["/pharmacy/reports"],
+    show: () => true,
+  },
+  {
+    path: "/pharmacy/billing",
+    group: "pharmacy",
+    label: "🧾 Pharmacy Bills",
+    cap: C["/pharmacy/billing"],
+    show: () => true,
+  },
+  {
+    path: "/pharmacy/credit",
+    group: "pharmacy",
+    label: "💳 Pharmacy Credit",
+    cap: C["/pharmacy/credit"],
+    show: () => true,
+  },
+  {
     path: "/pharmacy/stock",
     group: "pharmacy",
     label: "📦 Stock",
@@ -120,10 +163,59 @@ const NAV_ITEMS = [
     show: () => true,
   },
   {
+    path: "/pharmacy/purchases",
+    group: "pharmacy",
+    label: "📥 Goods Receipts",
+    cap: C["/pharmacy/purchases"],
+    show: () => true,
+  },
+  {
+    path: "/pharmacy/expiry",
+    group: "pharmacy",
+    label: "⏳ Expiry",
+    cap: C["/pharmacy/expiry"],
+    show: () => true,
+  },
+  {
+    path: "/pharmacy/transfers",
+    group: "pharmacy",
+    label: "🔁 Stock Transfers",
+    cap: C["/pharmacy/transfers"],
+    show: () => true,
+  },
+  {
+    path: "/pharmacy/indents",
+    group: "pharmacy",
+    label: "🩺 Department Indents",
+    cap: C["/pharmacy/indents"],
+    show: () => true,
+  },
+  {
     path: "/pharmacy/vendors",
     group: "pharmacy",
     label: "🏭 Vendors",
     cap: C["/pharmacy/vendors"],
+    show: () => true,
+  },
+  {
+    path: "/pharmacy/medicines",
+    group: "pharmacy",
+    label: "💊 Medicines",
+    cap: C["/pharmacy/medicines"],
+    show: () => true,
+  },
+  {
+    path: "/pharmacy/departments",
+    group: "pharmacy",
+    label: "🏥 Departments",
+    cap: C["/pharmacy/departments"],
+    show: () => true,
+  },
+  {
+    path: "/pharmacy/settings",
+    group: "pharmacy",
+    label: "⚙️ Pharmacy Settings",
+    cap: C["/pharmacy/settings"],
     show: () => true,
   },
   {
@@ -569,6 +661,7 @@ export default function AppLayout() {
               💾 Save & New
             </button>
           )}
+          <NotificationBell />
           <button onClick={onLogout} className="header__logout-btn">
             Logout
           </button>

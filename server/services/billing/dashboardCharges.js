@@ -14,6 +14,12 @@ export const PHARMACY_COLUMN = {
   label: "Pharmacy Charges",
   note: "Not in Scribe — pharmacy is billed in its own system",
 };
+export const PHARMACY_LIVE_COLUMN = {
+  key: "pharmacy",
+  label: "Pharmacy Charges",
+  note: "Pharmacy sales billed in Scribe, after returns. Shown for reference; not part of net revenue",
+  live: true,
+};
 
 export const LINE_KIND = `CASE WHEN si.kind = 'consultation' THEN 'consultation'
        WHEN l.lab_order_id IS NOT NULL OR si.kind = 'test' THEN 'test'

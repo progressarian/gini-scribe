@@ -1753,14 +1753,16 @@ const TAB = {
 
 const DESK_TAB_KEYS = Object.keys(DESK_TABS);
 
-function useReceptionTab(canBill, canApprove) {
+function useReceptionTab(canBill, canApprove, canCollectPharmacy) {
   const [params, setParams] = useSearchParams();
   const { data: deskSettings } = useDeskSettings({ enabled: canBill });
   const requested = params.get("tab") || TAB.arrivals;
   const isDesk = DESK_TAB_KEYS.includes(requested);
   const duesOff = deskSettings && !deskSettings.allow_pay_later;
   const tab =
-    (isDesk && !canBill) || (requested === DESK_TABS.requests.key && !canApprove)
+    (isDesk && !canBill) ||
+    (requested === DESK_TABS.requests.key && !canApprove) ||
+    (requested === DESK_TABS.pharmacy.key && !canCollectPharmacy)
       ? TAB.arrivals
       : requested === DESK_TABS.dues.key && duesOff
         ? DESK_TABS.bill.key
@@ -1774,6 +1776,7 @@ function useReceptionTab(canBill, canApprove) {
         DESK_TABS.shift,
         DESK_TABS.refunds,
         ...(canApprove ? [DESK_TABS.requests] : []),
+        ...(canCollectPharmacy ? [DESK_TABS.pharmacy] : []),
       ]
     : [];
 
@@ -1909,7 +1912,9 @@ function ReceptionTabs({
 export default function ReceptionStationPage() {
   const canBill = useCanBill();
   const approvals = useApprovalsWaiting();
-  const desk = useReceptionTab(canBill, approvals.any);
+  const role = useAuthStore((st) => st.currentDoctor?.role);
+  const canCollectPharmacy = hasCapability(role, CAPS.PHARMACY_COLLECT);
+  const desk = useReceptionTab(canBill, approvals.any, canCollectPharmacy);
   const { tab, setTab } = desk;
   const onDesk = DESK_TAB_KEYS.includes(tab);
   const sentPatient = useLocation().state?.duePatient ?? null;

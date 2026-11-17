@@ -71,6 +71,30 @@ const FindPage = lazyWithRetry(() => import("./pages/FindPage"));
 const RefillsPage = lazyWithRetry(() => import("./pages/RefillsPage"));
 const PharmacyStockPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyStockPage"));
 const PharmacyVendorsPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyVendorsPage"));
+const PharmacyMedicinesPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyMedicinesPage"));
+const PharmacyPurchasesPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyPurchasesPage"));
+const PharmacyPurchaseEditorPage = lazyWithRetry(
+  () => import("./pages/pharmacy/PharmacyPurchaseEditorPage"),
+);
+const PharmacySettingsPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacySettingsPage"));
+const PharmacyBillsPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyBillsPage"));
+const PharmacyCreditPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyCreditPage"));
+const PharmacyTransfersPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyTransfersPage"));
+const PharmacyIndentsPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyIndentsPage"));
+const PharmacyExpiryPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyExpiryPage"));
+const PharmacyReportsPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyReportsPage"));
+const PharmacyLedgerPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyLedgerPage"));
+const PharmacyTopItemsPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyTopItemsPage"));
+const PharmacyPatientAccountPage = lazyWithRetry(
+  () => import("./pages/pharmacy/PharmacyPatientAccountPage"),
+);
+const PharmacyDashboardPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyDashboardPage"));
+const PharmacyBillEditorPage = lazyWithRetry(
+  () => import("./pages/pharmacy/PharmacyBillEditorPage"),
+);
+const PharmacyDepartmentsPage = lazyWithRetry(
+  () => import("./pages/pharmacy/PharmacyDepartmentsPage"),
+);
 const DoseChangeRequestsPage = lazyWithRetry(() => import("./pages/DoseChangeRequestsPage"));
 const LabRequestsPage = lazyWithRetry(() => import("./pages/LabRequestsPage"));
 const SideEffectsPage = lazyWithRetry(() => import("./pages/SideEffectsPage"));
@@ -194,6 +218,25 @@ const router = createBrowserRouter([
               { path: "/refills", element: lazyEl(RefillsPage) },
               { path: "/pharmacy/stock", element: lazyEl(PharmacyStockPage) },
               { path: "/pharmacy/vendors", element: lazyEl(PharmacyVendorsPage) },
+              { path: "/pharmacy/medicines", element: lazyEl(PharmacyMedicinesPage) },
+              { path: "/pharmacy/departments", element: lazyEl(PharmacyDepartmentsPage) },
+              { path: "/pharmacy/settings", element: lazyEl(PharmacySettingsPage) },
+              { path: "/pharmacy/purchases", element: lazyEl(PharmacyPurchasesPage) },
+              { path: "/pharmacy/purchases/:id", element: lazyEl(PharmacyPurchaseEditorPage) },
+              { path: "/pharmacy/billing", element: lazyEl(PharmacyBillsPage) },
+              { path: "/pharmacy/billing/:id", element: lazyEl(PharmacyBillEditorPage) },
+              { path: "/pharmacy/credit", element: lazyEl(PharmacyCreditPage) },
+              { path: "/pharmacy/transfers", element: lazyEl(PharmacyTransfersPage) },
+              { path: "/pharmacy/indents", element: lazyEl(PharmacyIndentsPage) },
+              { path: "/pharmacy/expiry", element: lazyEl(PharmacyExpiryPage) },
+              { path: "/pharmacy/reports", element: lazyEl(PharmacyReportsPage) },
+              { path: "/pharmacy/reports/top-items", element: lazyEl(PharmacyTopItemsPage) },
+              { path: "/pharmacy/ledger", element: lazyEl(PharmacyLedgerPage) },
+              {
+                path: "/pharmacy/accounts/:patientId",
+                element: lazyEl(PharmacyPatientAccountPage),
+              },
+              { path: "/pharmacy/dashboard", element: lazyEl(PharmacyDashboardPage) },
               { path: "/dose-change-requests", element: lazyEl(DoseChangeRequestsPage) },
               { path: "/lab-requests", element: lazyEl(LabRequestsPage) },
               { path: "/side-effects", element: lazyEl(SideEffectsPage) },

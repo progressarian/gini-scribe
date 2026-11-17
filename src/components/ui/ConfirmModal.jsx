@@ -42,6 +42,7 @@ export default function ConfirmModal({
     <div
       role="dialog"
       aria-modal="true"
+      data-popover-layer=""
       onClick={onCancel}
       style={{
         position: "fixed",

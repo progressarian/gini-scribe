@@ -314,3 +314,87 @@
   font-size: 12px;
   color: var(--ink3, #64748b);
 }
+.phs-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.phs-title--sub {
+  font-size: 18px;
+}
+.bst-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--fbd);
+}
+.bst-tab {
+  padding: 8px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fink3);
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.bst-tab.on {
+  color: var(--fink);
+  border-bottom-color: var(--fnv);
+}
+.bst-tab:focus-visible {
+  outline: 2px solid var(--fsk);
+  outline-offset: 2px;
+}
+.bst-location {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fink2);
+}
+.bst-location select {
+  width: auto;
+  min-width: 200px;
+}
+.bst-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.bst-detail > td {
+  background: var(--fbg);
+  padding: 8px 12px 12px 32px;
+}
+.bst-batches {
+  width: 100%;
+}
+.bst-nobatch {
+  margin: 0;
+}
+.adj-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px 16px;
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  background: var(--fbg);
+  border: 1px solid var(--fbd);
+  border-radius: 8px;
+}
+.adj-facts dt {
+  font-size: 12px;
+  color: var(--fink3);
+}
+.adj-facts dd {
+  margin: 2px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fink);
+}
+.adj-change {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--fink2);
+}

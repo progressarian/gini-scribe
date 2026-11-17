@@ -19,6 +19,8 @@ import StationNotice from "../../components/giniflow/StationNotice";
 import useAuthStore from "../../stores/authStore";
 import { printRxHref } from "../../queries/hooks/useGiniflowRx";
 import { PdfButton } from "../../components/billing/counter/PdfViewer";
+import { useNavigate } from "react-router-dom";
+import { useCreateBill } from "../../queries/hooks/usePharmacyBills";
 import { hasCapability, CAPABILITIES } from "../../../shared/permissions";
 import { isPathHiddenForRole } from "../../config/routes";
 import useDismiss from "../../components/giniflow/lab/useDismiss";
@@ -401,6 +403,17 @@ function QueueCard({ card, now, onOpen, done }) {
 function PharmacyPane({ visitId, onClose, onToast }) {
   const role = useAuthStore((st) => st.currentDoctor?.role);
   const canPrintRx = hasCapability(role, CAPABILITIES.GINIFLOW_PRINT_RX);
+  const canBill = hasCapability(role, CAPABILITIES.PHARMACY_BILL);
+  const navigate = useNavigate();
+  const createBill = useCreateBill();
+  const onBill = () =>
+    createBill.mutate(
+      { patient_id: data.patientId, sale_type: "opd", visit_id: data.visitId },
+      {
+        onSuccess: (bill) => navigate(`/pharmacy/billing/${bill.id}`),
+        onError: (e) => onToast(e?.response?.data?.error || "Could not start the pharmacy bill"),
+      },
+    );
   const paneRef = useRef(null);
   const [confirming, setConfirming] = useState(false);
   const { data, isLoading } = usePharmacyPatient(visitId);
@@ -529,6 +542,11 @@ function PharmacyPane({ visitId, onClose, onToast }) {
               >
                 🖨 Print Rx
               </PdfButton>
+            )}
+            {canBill && data?.visitId && (
+              <button className="rbtn" disabled={createBill.isPending} onClick={onBill}>
+                🧾 {createBill.isPending ? "Opening bill…" : "Pharmacy bill"}
+              </button>
             )}
             {data && !data.finished && (
               <button

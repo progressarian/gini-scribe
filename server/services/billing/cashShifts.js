@@ -108,6 +108,18 @@ const DRAWER_SQL = `
    WHERE s.id = $1
    GROUP BY s.opening_cash`;
 
+const PHARMACY_DRAWER_SQL = `
+  SELECT COALESCE(SUM(CASE WHEN direction = 'in' THEN amount ELSE -amount END), 0) AS cash
+    FROM pharmacy_payments WHERE shift_id = $1 AND mode = $2`;
+
+async function drawerCash(client, shiftId) {
+  const [hospital, pharmacy] = await Promise.all([
+    client.query(DRAWER_SQL, [shiftId, DRAWER_MODE]),
+    client.query(PHARMACY_DRAWER_SQL, [shiftId, DRAWER_MODE]),
+  ]);
+  return (paise(hospital.rows[0].cash) + paise(pharmacy.rows[0].cash)) / 100;
+}
+
 export const SHIFT_SQL = `
   SELECT s.id, s.user_id, s.opened_at, s.closed_at, s.opening_cash, s.expected_cash,
          s.counted_cash, s.difference, s.note, s.updated_by, s.handover, s.denominations,
@@ -116,7 +128,9 @@ export const SHIFT_SQL = `
          ${TOTAL_COLUMNS},
          t.payment_count, t.bill_count, t.refund_count, t.credit_note_count,
          t.deposits_received, t.deposits_refunded, t.deposit_count,
-         hr.healthray_collected, hr.healthray_refunded, hr.prepaid_collected
+         hr.healthray_collected, hr.healthray_refunded, hr.prepaid_collected,
+         ph.pharmacy_collected, ph.pharmacy_refunded, ph.pharmacy_cash_in, ph.pharmacy_cash_out,
+         ph.pharmacy_count
     FROM cash_shifts s
     LEFT JOIN doctors u ON u.id = s.user_id
     LEFT JOIN LATERAL (
@@ -143,7 +157,18 @@ export const SHIFT_SQL = `
         FROM payments h
        WHERE h.mode IN ('${HEALTHRAY_MODE}', '${PREPAID_MODE}') AND h.received_by = s.user_id
          AND h.received_at >= s.opened_at AND h.received_at <= COALESCE(s.closed_at, NOW())
-    ) hr ON TRUE`;
+    ) hr ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(SUM(pp.amount) FILTER (WHERE pp.direction = 'in'), 0) AS pharmacy_collected,
+             COALESCE(SUM(pp.amount) FILTER (WHERE pp.direction = 'out'), 0) AS pharmacy_refunded,
+             COALESCE(SUM(pp.amount) FILTER (WHERE pp.direction = 'in' AND pp.mode = '${DRAWER_MODE}'), 0)
+               AS pharmacy_cash_in,
+             COALESCE(SUM(pp.amount) FILTER (WHERE pp.direction = 'out' AND pp.mode = '${DRAWER_MODE}'), 0)
+               AS pharmacy_cash_out,
+             COUNT(*) FILTER (WHERE pp.direction = 'in') AS pharmacy_count
+        FROM pharmacy_payments pp
+       WHERE pp.shift_id = s.id
+    ) ph ON TRUE`;
 
 const IST_DAY = `(s.opened_at AT TIME ZONE 'Asia/Kolkata')::date`;
 
@@ -187,7 +212,19 @@ export function shape(row) {
       refunded: money(row.healthray_refunded),
     },
     prepaid: { collected: money(row.prepaid_collected) },
-    expected_cash: isOpen ? drawerOf(openingCash, collected, refunded) : money(row.expected_cash),
+    pharmacy: {
+      count: Number(row.pharmacy_count ?? 0),
+      collected: money(row.pharmacy_collected),
+      refunded: money(row.pharmacy_refunded),
+      cash_collected: money(row.pharmacy_cash_in),
+      cash_refunded: money(row.pharmacy_cash_out),
+    },
+    expected_cash: isOpen
+      ? (paise(drawerOf(openingCash, collected, refunded)) +
+          paise(row.pharmacy_cash_in) -
+          paise(row.pharmacy_cash_out)) /
+        100
+      : money(row.expected_cash),
     counted_cash: row.counted_cash === null ? null : money(row.counted_cash),
     difference: row.difference === null ? null : money(row.difference),
     note: row.note ?? null,
@@ -210,8 +247,7 @@ export async function cashOutShift(client, userId) {
     [cleanUserId(userId)],
   );
   if (!rows.length) return null;
-  const drawer = await client.query(DRAWER_SQL, [rows[0].id, DRAWER_MODE]);
-  return { id: rows[0].id, cash: paise(drawer.rows[0].cash) };
+  return { id: rows[0].id, cash: paise(await drawerCash(client, rows[0].id)) };
 }
 
 export async function openShiftIdFor(client, userId) {
@@ -311,8 +347,7 @@ export async function listMyShifts(filters = {}, ctx, db = pool) {
 }
 
 async function expectedCashFor(client, id) {
-  const { rows } = await client.query(DRAWER_SQL, [id, DRAWER_MODE]);
-  const expected = money(rows[0].cash);
+  const expected = money(await drawerCash(client, id));
   if (expected < 0) {
     throw httpError(
       409,
@@ -417,6 +452,13 @@ async function handoverOf(client, shiftId, closedAt) {
     },
     healthray: inPaise(shift.healthray),
     prepaid: inPaise(shift.prepaid),
+    pharmacy: {
+      count: shift.pharmacy.count,
+      collected: paise(shift.pharmacy.collected),
+      refunded: paise(shift.pharmacy.refunded),
+      cash_collected: paise(shift.pharmacy.cash_collected),
+      cash_refunded: paise(shift.pharmacy.cash_refunded),
+    },
     cleared,
     payment_count: shift.payment_count,
     refund_count: shift.refund_count,

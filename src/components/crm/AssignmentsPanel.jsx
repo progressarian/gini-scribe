@@ -6,6 +6,10 @@ import { downloadFile } from "../../lib/downloadBlob.js";
 import ConfirmModal from "../ui/ConfirmModal.jsx";
 import ListPager from "./ListPager.jsx";
 import { errorText } from "./import/importText.js";
+import Dropdown from "../ui/Dropdown.jsx";
+import { FilterSelect } from "./home/ListToolbar.jsx";
+import { PRIORITY_OPTIONS } from "./home/options.js";
+import { doctorPriorityMeta } from "../../../shared/crmVocab.js";
 
 const dateText = (v) =>
   v
@@ -16,6 +20,7 @@ export default function AssignmentsPanel() {
   const navigate = useNavigate();
   const [owner, setOwner] = useState("unassigned");
   const [territory, setTerritory] = useState("");
+  const [priority, setPriority] = useState("");
   const [q, setQ] = useState("");
   const term = useDebounced(q, 300);
   const [page, setPage] = useState(1);
@@ -32,21 +37,21 @@ export default function AssignmentsPanel() {
   useEffect(() => {
     setPage(1);
     setSelected(new Set());
-  }, [owner, territory, term]);
+  }, [owner, territory, priority, term]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setErr(null);
     api
-      .get("/api/crm/assignments", { params: { owner, territory, q: term, page } })
+      .get("/api/crm/assignments", { params: { owner, territory, priority, q: term, page } })
       .then(({ data: body }) => !cancelled && setData(body))
       .catch((e) => !cancelled && setErr(errorText(e, "Unable to load the doctors.")))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [owner, territory, term, page, reload]);
+  }, [owner, territory, priority, term, page, reload]);
 
   const staff = data?.staff || [];
   const nameOf = (id) => staff.find((s) => s.id === id)?.full_name;
@@ -89,7 +94,7 @@ export default function AssignmentsPanel() {
     setBusy("export");
     setErr(null);
     try {
-      const params = new URLSearchParams({ owner, territory, q: term });
+      const params = new URLSearchParams({ owner, territory, priority, q: term });
       await downloadFile(
         `/api/crm/assignments/export.xlsx?${params}`,
         `crm-assignments-${new Date().toISOString().slice(0, 10)}.xlsx`,
@@ -136,21 +141,20 @@ export default function AssignmentsPanel() {
             placeholder="Search by doctor name, mobile, area or specialty"
           />
         </label>
-        <label className="asg__field asg__field--narrow">
-          <span className="asg__sr">Territory</span>
-          <select
-            className="rep__input"
-            value={territory}
-            onChange={(e) => setTerritory(e.target.value)}
-          >
-            <option value="">All territories</option>
-            {(data?.territories || []).map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </label>
+        <FilterSelect
+          label="Territory"
+          value={territory}
+          onChange={setTerritory}
+          allLabel="All territories"
+          options={(data?.territories || []).map((t) => ({ value: t, label: t }))}
+        />
+        <FilterSelect
+          label="Priority"
+          value={priority}
+          onChange={setPriority}
+          allLabel="All priorities"
+          options={PRIORITY_OPTIONS}
+        />
         <button
           type="button"
           className="rep__btn"
@@ -181,22 +185,18 @@ export default function AssignmentsPanel() {
           {selected.size > 100 && (
             <span className="rep__err asg__limit">Select at most 100 at a time</span>
           )}
-          <label className="asg__field asg__field--narrow">
-            <span className="asg__sr">Assign selected to</span>
-            <select
-              className="rep__input"
+          <div className="asg__field asg__field--narrow crm-dd">
+            <Dropdown
+              ariaLabel="Assign selected to"
               value={bulkTo}
-              onChange={(e) => setBulkTo(e.target.value)}
-            >
-              <option value="">Assign to…</option>
-              {staff.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.full_name}
-                </option>
-              ))}
-              <option value="none">Remove owner</option>
-            </select>
-          </label>
+              onChange={setBulkTo}
+              placeholder="Assign to…"
+              options={[
+                ...staff.map((s) => ({ value: s.id, label: s.full_name })),
+                { value: "none", label: "Remove owner" },
+              ]}
+            />
+          </div>
           <button
             type="button"
             className="rep__btn rep__btn--primary rep__btn--sm"
@@ -262,8 +262,17 @@ export default function AssignmentsPanel() {
                 </button>
               </strong>
               <span className="rep__row-sub">
-                {[r.specialty, r.area, r.territory, r.mobile].filter(Boolean).join(" · ") ||
-                  "No details yet"}
+                {[
+                  r.priority && r.priority !== "unclassified"
+                    ? doctorPriorityMeta(r.priority)?.label
+                    : null,
+                  r.specialty,
+                  r.area,
+                  r.territory,
+                  r.mobile,
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "No details yet"}
               </span>
               <span className="rep__row-sub">
                 {r.owner_id
@@ -271,48 +280,40 @@ export default function AssignmentsPanel() {
                   : "Not assigned"}
               </span>
             </div>
-            <label className="asg__owner">
-              <span className="asg__sr">Owner of {r.full_name}</span>
-              <select
-                className={`rep__input ${r.owner_id ? "" : "asg__owner--none"}`}
+            <div className={`asg__owner crm-dd ${r.owner_id ? "" : "crm-dd--warn"}`}>
+              <Dropdown
+                ariaLabel={`Owner of ${r.full_name}`}
                 value={r.owner_id || ""}
                 disabled={busy !== null}
-                onChange={(e) =>
-                  save(
-                    [r.doctor_id],
-                    e.target.value === "none" ? null : e.target.value,
-                    r.doctor_id,
-                  )
+                placeholder="Unassigned"
+                onChange={(next) =>
+                  next !== (r.owner_id || "") &&
+                  save([r.doctor_id], next === "none" ? null : next, r.doctor_id)
                 }
-              >
-                <option value="" disabled>
-                  Unassigned
-                </option>
-                {staff.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.full_name}
-                  </option>
-                ))}
-                {r.owner_id && <option value="none">Remove owner</option>}
-              </select>
+                options={[
+                  ...staff.map((s) => ({ value: s.id, label: s.full_name })),
+                  ...(r.owner_id ? [{ value: "none", label: "Remove owner" }] : []),
+                ]}
+              />
               {busy === r.doctor_id && <span className="rep__hint">Saving…</span>}
-            </label>
+            </div>
           </li>
         ))}
         {!loading && data?.rows.length === 0 && (
           <li className="rep__empty">
-            {term || territory
+            {term || territory || priority
               ? "No doctors match these filters."
               : owner === "unassigned"
                 ? "Every doctor has an owner."
                 : "No doctors here."}
-            {(term || territory) && (
+            {(term || territory || priority) && (
               <button
                 type="button"
                 className="asg__link"
                 onClick={() => {
                   setQ("");
                   setTerritory("");
+                  setPriority("");
                 }}
               >
                 Clear filters

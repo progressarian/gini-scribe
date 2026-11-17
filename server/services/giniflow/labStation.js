@@ -1287,7 +1287,14 @@ export async function storeReportObject({
 
 export async function uploadReport(
   orderId,
-  { base64, fileName, mediaType = "application/pdf", actorId = null, confirmAdditional = false },
+  {
+    base64,
+    fileName,
+    mediaType = "application/pdf",
+    actorId = null,
+    confirmAdditional = false,
+    replace = false,
+  },
   db = pool,
 ) {
   if (!base64) throw Object.assign(new Error("No file was sent"), { status: 400 });
@@ -1296,7 +1303,7 @@ export async function uploadReport(
   }
 
   const { rows } = await db.query(
-    `SELECT o.payment_status, o.sample_status, o.report_file_url, o.uploaded_at, o.kind,
+    `SELECT o.id, o.payment_status, o.sample_status, o.report_file_url, o.uploaded_at, o.kind,
             v.patient_id
        FROM giniflow_lab_orders o
        JOIN giniflow_visits v ON v.id = o.visit_id
@@ -1308,6 +1315,9 @@ export async function uploadReport(
     throw Object.assign(new Error("Payment is not cleared for this order"), { status: 409 });
   }
   assertSampleDrawn(rows[0]);
+  if (rows[0].report_file_url && rows[0].kind === "lab" && (replace || confirmAdditional)) {
+    return replaceOrderReport(rows[0], { base64, fileName, mediaType, actorId }, db);
+  }
   if (rows[0].report_file_url && !confirmAdditional) {
     throw Object.assign(new Error("A report is already on this order"), {
       status: 409,
@@ -1355,12 +1365,19 @@ async function replaceOrderReport(order, { base64, fileName, mediaType, actorId 
     [order.id, actorId],
   );
   await promoteLabReport(order.id, db);
+  const oldPath = String(order.report_file_url || "").split(`/${STORAGE_BUCKET}/`)[1];
+  if (oldPath && order.report_file_url !== url) {
+    await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${oldPath}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
+    }).catch(() => {});
+  }
   return { orderId: order.id, reportUrl: url, fileName: safeName, bytes, replaced: true };
 }
 
 export async function uploadOutsideReport(orderId, { replace = false, ...input }, db = pool) {
   const { rows } = await db.query(
-    `SELECT o.id, o.is_outsourced, o.sample_status, o.kind, v.patient_id
+    `SELECT o.id, o.is_outsourced, o.sample_status, o.kind, o.report_file_url, v.patient_id
        FROM giniflow_lab_orders o JOIN giniflow_visits v ON v.id = o.visit_id
       WHERE o.id = $1`,
     [orderId],
@@ -1378,6 +1395,92 @@ export async function uploadOutsideReport(orderId, { replace = false, ...input }
     return replaceOrderReport(rows[0], input, db);
   }
   return uploadReport(orderId, input, db);
+}
+
+export async function removeOrderReport(orderId, { actorId = null } = {}, db = pool) {
+  const client = await db.connect();
+  let storagePath = null;
+  let result;
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `SELECT o.kind, o.is_outsourced, o.sample_status, o.report_file_url, o.visit_id,
+              EXISTS (SELECT 1 FROM lab_results lr WHERE lr.lab_order_id = o.id) AS has_typed
+         FROM giniflow_lab_orders o WHERE o.id = $1 FOR UPDATE`,
+      [orderId],
+    );
+    if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
+    const order = rows[0];
+    if (order.kind !== "lab") {
+      throw Object.assign(new Error("That order belongs to the machine room, not the lab"), {
+        status: 409,
+      });
+    }
+    if (!order.report_file_url) {
+      throw Object.assign(new Error("There is no report on this order to remove"), {
+        status: 409,
+      });
+    }
+    storagePath = String(order.report_file_url).split(`/${STORAGE_BUCKET}/`)[1] || null;
+    const reopensOrder = order.sample_status === "uploaded" && !order.has_typed;
+    const backTo = reopensOrder ? (order.is_outsourced ? SENT_OUTSIDE : "results_ready") : null;
+
+    await client.query(`DELETE FROM documents WHERE giniflow_lab_order_id = $1`, [orderId]);
+    await client.query(
+      `UPDATE giniflow_lab_orders
+          SET report_file_url = NULL, promoted_at = NULL,
+              uploaded_at = CASE WHEN $2::text IS NULL THEN uploaded_at ELSE NULL END,
+              sample_status = COALESCE($2, sample_status), updated_at = NOW()
+        WHERE id = $1`,
+      [orderId, backTo],
+    );
+    await client.query(
+      `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id, meta)
+       VALUES ($1, 'sample', 'report_removed', 'lab', $2, $3)`,
+      [orderId, actorId, { reopened_to: backTo }],
+    );
+    if (backTo) {
+      await client.query(
+        `UPDATE giniflow_lab_order_tests SET status = $2 WHERE lab_order_id = $1`,
+        [orderId, backTo],
+      );
+      if (order.visit_id) {
+        await client.query(
+          `UPDATE giniflow_visits v
+              SET results_status = CASE
+                    WHEN EXISTS (
+                      SELECT 1 FROM giniflow_lab_orders o2
+                       WHERE o2.visit_id = v.id AND o2.urgency = 'today' AND o2.id <> $2
+                         AND o2.sample_status IN ('uploaded', 'reported')
+                    ) OR EXISTS (
+                      SELECT 1 FROM lab_cases lc
+                       WHERE lc.patient_id = v.patient_id AND lc.case_date = v.visit_date
+                         AND lc.pdf_storage_path IS NOT NULL
+                    ) THEN 'partial'
+                    ELSE 'none' END,
+                  updated_at = NOW()
+            WHERE v.id = $1 AND v.results_status <> 'none'`,
+          [order.visit_id, orderId],
+        );
+        await syncLabStepsFromLab(client, order.visit_id);
+      }
+    }
+    await client.query("COMMIT");
+    result = { orderId, removed: true, sampleStatus: backTo || order.sample_status };
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  if (storagePath) {
+    await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
+    }).catch(() => {});
+  }
+  return result;
 }
 
 export const CASE_ACTIONS = CASE_ACTION_VERBS;

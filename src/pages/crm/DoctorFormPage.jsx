@@ -528,7 +528,7 @@ export default function DoctorFormPage() {
             "priority",
             "Priority",
             <select {...inputProps("priority")}>
-              {DOCTOR_PRIORITIES.map((p) => (
+              {DOCTOR_PRIORITIES.filter((p) => !p.retired || p.value === form.priority).map((p) => (
                 <option key={p.value} value={p.value}>
                   {p.value === "unclassified" ? "Not set" : p.label}
                 </option>

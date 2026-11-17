@@ -5,6 +5,7 @@ import { errorText } from "../import/importText.js";
 import TaskRow from "./TaskRow.jsx";
 import TaskDialog from "./TaskDialog.jsx";
 import useTaskActions from "./useTaskActions.jsx";
+import { FilterSelect } from "../home/ListToolbar.jsx";
 
 const BUCKETS = [
   { key: "due", label: "Due now" },
@@ -74,21 +75,13 @@ export default function TasksPanel({ refreshKey, onChanged }) {
         </div>
         <div className="tsk__tools">
           {data?.can_assign && (
-            <label className="asg__field asg__field--narrow">
-              <span className="asg__sr">Owner</span>
-              <select
-                className={`rep__input ${owner !== "all" ? "home__select--on" : ""}`}
-                value={owner}
-                onChange={(e) => setOwner(e.target.value)}
-              >
-                <option value="all">Everyone</option>
-                {data.staff.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.full_name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <FilterSelect
+              label="Owner"
+              value={owner === "all" ? "" : owner}
+              onChange={(next) => setOwner(next || "all")}
+              allLabel="Everyone"
+              options={data.staff.map((s) => ({ value: s.id, label: s.full_name }))}
+            />
           )}
           <button
             type="button"

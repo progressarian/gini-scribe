@@ -4,20 +4,25 @@ import { indiaToday } from "./categoryResolver.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields, hasField, readNumber } from "./common.js";
 import { BILL_SERIES, financialYearOf } from "../../../shared/billingVocab.js";
+import { PHARMACY_SERIES } from "../../../shared/pharmacyVocab.js";
 
 const FY = /^([0-9]{4})-([0-9]{2})$/;
 
 export { BILL_SERIES };
+
+export const PHARMACY_BILL_SERIES = Object.values(PHARMACY_SERIES);
+
+export const NUMBER_SERIES = [...BILL_SERIES, ...PHARMACY_BILL_SERIES];
 
 export const financialYear = (date = indiaToday()) => financialYearOf(date);
 
 export const formatNumber = ({ prefix, number_width: width }, number) =>
   `${prefix}${String(number).padStart(width, "0")}`;
 
-function cleanSeries(value) {
+function cleanSeries(value, allowed = BILL_SERIES) {
   const series = typeof value === "string" ? value.trim().toUpperCase() : "";
-  if (!BILL_SERIES.includes(series)) {
-    throw httpError(400, `Series must be one of: ${BILL_SERIES.join(", ")}`);
+  if (!allowed.includes(series)) {
+    throw httpError(400, `Series must be one of: ${allowed.join(", ")}`);
   }
   return series;
 }
@@ -67,9 +72,25 @@ const BILL_ISSUED = {
   params: (series, fy) => [series, fy],
 };
 
+const PHARMACY_BILL_ISSUED = {
+  sql: `SELECT 1 FROM pharmacy_bills WHERE series = $1 AND fy = $2 AND bill_no IS NOT NULL LIMIT 1`,
+  params: (series, fy) => [series, fy],
+};
+
+const PHARMACY_RECEIPT_IST = `(pharmacy_payments.received_at AT TIME ZONE 'Asia/Kolkata')`;
+
 const ISSUED = {
   MAIN: BILL_ISSUED,
   CN: BILL_ISSUED,
+  [PHARMACY_SERIES.bill]: PHARMACY_BILL_ISSUED,
+  [PHARMACY_SERIES.credit_note]: PHARMACY_BILL_ISSUED,
+  [PHARMACY_SERIES.receipt]: {
+    sql: `SELECT 1 FROM pharmacy_payments WHERE receipt_no IS NOT NULL
+            AND to_char(${PHARMACY_RECEIPT_IST} - INTERVAL '3 months', 'YYYY')
+                || '-' || to_char(${PHARMACY_RECEIPT_IST} + INTERVAL '9 months', 'YY') = $1
+          LIMIT 1`,
+    params: (series, fy) => [fy],
+  },
   RCPT: {
     sql: `SELECT 1 FROM payments WHERE receipt_no IS NOT NULL AND ${RECEIPT_FY} = $1 LIMIT 1`,
     params: (series, fy) => [fy],
@@ -90,8 +111,11 @@ export function nextFinancialYear(fy) {
   return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
 }
 
-export async function listSeries(db = pool, today = indiaToday()) {
-  const { rows } = await db.query(`SELECT ${COLUMNS} FROM bill_series ORDER BY fy DESC, series`);
+export async function listSeries(db = pool, today = indiaToday(), only = BILL_SERIES) {
+  const { rows } = await db.query(
+    `SELECT ${COLUMNS} FROM bill_series WHERE series = ANY($1::text[]) ORDER BY fy DESC, series`,
+    [only],
+  );
   const list = rows.map(shape);
   const thisYear = financialYear(today);
   const coming = nextFinancialYear(thisYear);
@@ -100,16 +124,12 @@ export async function listSeries(db = pool, today = indiaToday()) {
   return list.map((row) => ({
     ...row,
     next_fy: nextFinancialYear(row.fy),
-    next_fy_missing:
-      march &&
-      row.fy === thisYear &&
-      BILL_SERIES.includes(row.series) &&
-      !have.has(`${row.series}:${coming}`),
+    next_fy_missing: march && row.fy === thisYear && !have.has(`${row.series}:${coming}`),
   }));
 }
 
-export async function saveSeries(input, ctx, db = pool) {
-  const series = cleanSeries(input?.series);
+export async function saveSeries(input, ctx, db = pool, allowed = BILL_SERIES) {
+  const series = cleanSeries(input?.series, allowed);
   const fy = cleanFy(input?.fy);
   const values = {};
   if (hasField(input, "prefix")) values.prefix = cleanPrefix(input.prefix);

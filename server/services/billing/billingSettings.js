@@ -3,20 +3,14 @@ import { writeAudit } from "./audit.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { auditFields, cleanFlag, hasField, INT_MAX, readNumber } from "./common.js";
 import { STACKING_MODES } from "../../../shared/billingVocab.js";
+import {
+  GSTIN_PATTERN as GSTIN_SHAPE,
+  gstinCheckCharacter,
+} from "../../../shared/pharmacyVocab.js";
 
 export { STACKING_MODES };
 
-const GSTIN_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-const GSTIN_SHAPE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
-
-export function gstinCheckCharacter(first14) {
-  let sum = 0;
-  for (let i = 0; i < 14; i += 1) {
-    const product = GSTIN_CHARS.indexOf(first14[i]) * (i % 2 === 0 ? 1 : 2);
-    sum += Math.floor(product / 36) + (product % 36);
-  }
-  return GSTIN_CHARS[(36 - (sum % 36)) % 36];
-}
+export { gstinCheckCharacter };
 
 export function cleanGstin(value) {
   if (value === undefined || value === null) return null;

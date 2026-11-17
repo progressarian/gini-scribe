@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import { Pencil, Power, PowerOff, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { BILL_SERIES, STACKING_MODES, financialYearOf } from "../../../shared/billingVocab.js";
+import { BILL_SERIES, STACKING_MODES } from "../../../shared/billingVocab.js";
 import {
   useBillingSettings,
   useBillingTaxCodes,
@@ -15,6 +15,7 @@ import {
 } from "../../queries/hooks/useBillingMaster";
 import { toast } from "../../stores/uiStore";
 import UsedInDialog from "../../components/billing/UsedInDialog";
+import SeriesCard from "../../components/billing/SeriesCard";
 import {
   codeTyped,
   digitsTyped,
@@ -34,11 +35,6 @@ const STACKING_LABEL = {
 const SERIES_LABEL = { MAIN: "Bills", RCPT: "Receipts", CN: "Credit notes" };
 
 const text = (v) => (v === null || v === undefined ? "" : String(v));
-const indiaToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-const nextYear = (fy) => {
-  const start = Number(fy.slice(0, 4)) + 1;
-  return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
-};
 const gstinTyped = (value) => value.toUpperCase().replace(/[^0-9A-Z]/g, "");
 const TYPED = {
   max_codes_per_bill: digitsTyped,
@@ -702,153 +698,6 @@ function TaxCodesCard({ onBlocked }) {
   );
 }
 
-function SeriesRow({ series, fy, row }) {
-  const initial = {
-    prefix: text(row?.prefix),
-    number_width: text(row?.number_width ?? 6),
-    next_no: text(row?.next_no ?? 1),
-  };
-  const [form, setForm] = useState(initial);
-  const [error, setError] = useState("");
-  const save = useSaveBillSeries();
-  const changes = row ? changedOnly(form, initial) : form;
-  const dirty = !row || Object.keys(changedOnly(form, initial)).length > 0;
-  const width = Number(form.number_width) || 0;
-  const preview =
-    width > 0 && /^\d+$/.test(form.next_no)
-      ? `${form.prefix.trim()}${form.next_no.padStart(width, "0")}`
-      : "—";
-  const set = (key) => (e) => setForm({ ...form, [key]: typed(key, e.target.value) });
-  const submit = async () => {
-    setError("");
-    try {
-      await save.mutateAsync({ series, fy, ...changes });
-      toast(`Saved the ${SERIES_LABEL[series] ?? series} series for ${fy}`, "success");
-    } catch (err) {
-      setError(errorOf(err, "Could not save the series"));
-    }
-  };
-  const label = SERIES_LABEL[series] ?? series;
-  return (
-    <tr>
-      <td data-label="Series">
-        {label}
-        {row ? null : <div className="flow-muted bill-items__sub">Not set up yet</div>}
-      </td>
-      <td data-label="Prefix">
-        <input
-          className="jb-assign"
-          aria-label={`${label} prefix`}
-          maxLength={30}
-          placeholder="None"
-          value={form.prefix}
-          onChange={set("prefix")}
-        />
-      </td>
-      <td data-label="Digits">
-        <input
-          className="jb-assign"
-          aria-label={`${label} digits`}
-          inputMode="numeric"
-          maxLength={2}
-          value={form.number_width}
-          onChange={set("number_width")}
-        />
-      </td>
-      <td data-label="Next number">
-        <input
-          className="jb-assign"
-          aria-label={`${label} next number`}
-          inputMode="numeric"
-          maxLength={12}
-          value={form.next_no}
-          onChange={set("next_no")}
-        />
-      </td>
-      <td data-label="Next looks like">
-        <code>{preview}</code>
-      </td>
-      <td data-label="" className="bill-items__actions">
-        <button
-          type="button"
-          className="flow-btn flow-btn-primary flow-btn-mini"
-          aria-label={`Save ${label} series`}
-          disabled={!dirty || save.isPending}
-          onClick={submit}
-        >
-          {row ? "Save" : "Set up"}
-        </button>
-        {error ? (
-          <p className="bill-dialog__error" role="alert">
-            {error}
-          </p>
-        ) : null}
-      </td>
-    </tr>
-  );
-}
-
-function SeriesCard() {
-  const { data: rows = [], isLoading, isError } = useBillSeries();
-  const current = financialYearOf(indiaToday());
-  const [fy, setFy] = useState(current);
-  const id = useId();
-  return (
-    <section className="flow-card bill-stack" aria-label="Number series">
-      <div className="fset__cardhead">
-        <h2 className="flow-sec-title">Number series</h2>
-      </div>
-      <div className="fset__cardsub">
-        Bill, receipt and credit note numbers start again each financial year (April–March). Set up
-        all three before the year starts — a refund can't be approved without a credit note series.
-        The next number can only go up, so a number is never used twice.
-      </div>
-      <div className="bill-form bill-set__fy">
-        <div className="fset__field fset__field--narrow bill-rates__asof">
-          <label htmlFor={id}>Financial year</label>
-          <select id={id} className="jb-assign" value={fy} onChange={(e) => setFy(e.target.value)}>
-            <option value={current}>{current}</option>
-            <option value={nextYear(current)}>{nextYear(current)}</option>
-          </select>
-        </div>
-      </div>
-      {isLoading ? (
-        <div className="fset__cardsub">Loading…</div>
-      ) : isError ? (
-        <div className="fset__cardsub">Could not load the number series.</div>
-      ) : (
-        <div className="fset__scroll">
-          <table className="flow-table" aria-label={`Number series ${fy}`}>
-            <thead>
-              <tr>
-                <th>Series</th>
-                <th>Prefix</th>
-                <th>Digits</th>
-                <th>Next number</th>
-                <th>Next looks like</th>
-                <th className="bill-items__actions-head">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {BILL_SERIES.map((series) => {
-                const row = rows.find((r) => r.series === series && r.fy === fy) ?? null;
-                return (
-                  <SeriesRow
-                    key={`${series}-${fy}-${row ? row.updated_at : "new"}`}
-                    series={series}
-                    fy={fy}
-                    row={row}
-                  />
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
-  );
-}
-
 export default function BillingSettingsPage() {
   const { data: settings, isLoading, isError } = useBillingSettings();
   const [blocked, setBlocked] = useState(null);
@@ -881,7 +730,13 @@ export default function BillingSettingsPage() {
           <GstCard settings={settings} />
           <CancelChargeCard settings={settings} />
           <TaxCodesCard onBlocked={setBlocked} />
-          <SeriesCard />
+          <SeriesCard
+            series={BILL_SERIES}
+            labels={SERIES_LABEL}
+            useSeries={useBillSeries}
+            useSave={useSaveBillSeries}
+            description="Bill, receipt and credit note numbers start again each financial year (April–March). Set up all three before the year starts — a refund can't be approved without a credit note series. The next number can only go up, so a number is never used twice."
+          />
         </div>
       )}
       <UsedInDialog

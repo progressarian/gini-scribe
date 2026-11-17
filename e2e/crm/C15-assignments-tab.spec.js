@@ -9,7 +9,7 @@ import {
   resetCrm,
 } from "../helpers/crm.mjs";
 import { gotoReady } from "../helpers/browser.mjs";
-import { one } from "../helpers/db.mjs";
+import { one, query } from "../helpers/db.mjs";
 
 test.describe("CRM home: Assignments tab", () => {
   let users;
@@ -155,8 +155,8 @@ test.describe("CRM home: Assignments tab", () => {
     );
 
     await region.getByRole("searchbox").fill("Dr Asg Free 30");
-    const owner = region.getByRole("combobox", { name: "Owner of Dr Asg Free 30" });
-    await owner.selectOption({ label: "Rajesh Sharma" });
+    await region.getByRole("button", { name: "Owner of Dr Asg Free 30" }).click();
+    await page.getByRole("option", { name: "Rajesh Sharma" }).click();
     await expect(region.getByRole("status")).toContainText(
       "1 doctor now assigned to Rajesh Sharma",
     );
@@ -165,9 +165,8 @@ test.describe("CRM home: Assignments tab", () => {
     await region.getByRole("searchbox").fill("Dr Asg Free 4");
     await expect(region.getByText(/^\d+ doctors?$/)).toHaveText("10 doctors");
     await region.getByRole("checkbox", { name: "Select this page" }).check();
-    await region.getByRole("combobox", { name: "Assign selected to" }).selectOption({
-      label: "Sandeep Sangroy",
-    });
+    await region.getByRole("button", { name: "Assign selected to" }).click();
+    await page.getByRole("option", { name: "Sandeep Sangroy" }).click();
     await region.getByRole("button", { name: "Apply" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toContainText("Assign 10 doctors to Sandeep Sangroy?");
@@ -176,6 +175,36 @@ test.describe("CRM home: Assignments tab", () => {
       "10 doctors now assigned to Sandeep Sangroy",
     );
     expect(await openOwner(doctors[42].id)).toBe("Sandeep Sangroy");
+  });
+
+  test("9. priority narrows the list, the per-member counts and the export", async ({ page }) => {
+    await query(`UPDATE crm.doctors SET priority = 'A' WHERE id = ANY($1::uuid[])`, [
+      [doctors[0].id, doctors[1].id, doctors[2].id],
+    ]);
+    const body = await list({ owner: "all", priority: "A" });
+    expect(body.total).toBe(3);
+    expect(body.rows.every((r) => r.priority === "A")).toBe(true);
+    expect(body.counts.total).toBe(3);
+    const owned = body.counts.by_owner.reduce((n, o) => n + o.n, 0);
+    expect(owned + body.counts.unassigned).toBe(3);
+    expect((await list({ owner: "all", priority: "Z" })).total).toBe(
+      (await list({ owner: "all" })).total,
+    );
+    const res = await api.get(`/api/crm/assignments/export.xlsx?owner=all&priority=A`);
+    const { headers, rows } = await readXlsx(await res.body());
+    expect(headers).toContain("Priority");
+    expect(rows).toHaveLength(3);
+
+    await loginCrm(page, api);
+    await gotoReady(page, "/crm/home", () => page.getByRole("button", { name: "Assignments" }));
+    await page.getByRole("button", { name: "Assignments" }).click();
+    const region = page.getByRole("region", { name: "Doctor assignments" });
+    await region.getByRole("button", { name: /^All \d+$/ }).click();
+    await region.getByRole("button", { name: "Priority" }).click();
+    const menu = page.getByRole("listbox");
+    await expect(menu.getByRole("option", { name: /^C/ })).toHaveCount(0);
+    await menu.getByRole("option", { name: "A — High value" }).click();
+    await expect(region.getByText(/^\d+ doctors?$/)).toHaveText("3 doctors");
   });
 
   test("8. growth executives do not see the tab", async ({ page }) => {

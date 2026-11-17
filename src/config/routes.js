@@ -99,6 +99,14 @@ export const PAGE_CAPABILITIES = {
   "/pharmacy/transfers": CAP.PHARMACY_DEPT_MANAGE,
   "/pharmacy/indents": [CAP.PHARMACY_INDENT, CAP.PHARMACY_DEPT_MANAGE],
   "/pharmacy/reports": CAP.PHARMACY_REPORTS,
+  "/pharmacy/dashboard": CAP.PHARMACY_REPORTS,
+  "/pharmacy/ledger": [CAP.PHARMACY_REPORTS, CAP.PHARMACY_CREDIT_APPROVE],
+  "/pharmacy/accounts": [
+    CAP.PHARMACY_BILL,
+    CAP.PHARMACY_COLLECT,
+    CAP.PHARMACY_CREDIT_APPROVE,
+    CAP.PHARMACY_REPORTS,
+  ],
   "/dose-change-requests": CAP.DOSE_REVIEWS,
   "/side-effects": CAP.SIDE_EFFECTS,
   // Reception / operations
@@ -268,7 +276,7 @@ export const ROLE_HOME = {
   [ROLES.CARE_COORDINATOR]: "/care-followups",
   [ROLES.RX]: "/giniflow/station/rx",
   [ROLES.PHARMACY]: "/giniflow/station/pharmacy",
-  [ROLES.PHARMACY_ADMIN]: "/pharmacy/stock",
+  [ROLES.PHARMACY_ADMIN]: "/pharmacy/dashboard",
   [ROLES.ECHO_TECH]: "/giniflow/station/echo",
   [ROLES.XRAY_TECH]: "/giniflow/station/xray",
   [ROLES.GROWTH_EXECUTIVE]: "/crm/home",

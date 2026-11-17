@@ -3,6 +3,7 @@ import { apiAs, loginAs } from "../helpers/auth.mjs";
 import { one, query } from "../helpers/db.mjs";
 import { gotoReady } from "../helpers/browser.mjs";
 import { assertTestDatabase } from "../setup/guard.mjs";
+import { gstinCheckCharacter } from "../../shared/pharmacyVocab.js";
 
 if (process.env.DATABASE_URL) assertTestDatabase(process.env.DATABASE_URL);
 
@@ -15,7 +16,8 @@ const gstin = (seed) => {
     .padEnd(5, "X")
     .slice(0, 5);
   const digits = String(Date.now() + seed.length).slice(-4);
-  return `03${letters}${digits}F1Z5`;
+  const first14 = `03${letters}${digits}F1Z`;
+  return `${first14}${gstinCheckCharacter(first14)}`;
 };
 
 const validVendor = (overrides = {}) => ({
@@ -103,6 +105,14 @@ test.describe("PH10 pharmacy vendors", () => {
     expect(error).toContain("Vendor name must be at least 2 characters");
     expect(error).toContain("Phone must be 10 to 12 digits");
     expect(error).toContain("GSTIN must be 15 characters");
+
+    const typo = await admin.post("/api/pharmacy/vendors", {
+      data: { name: vendorName("Typo"), phone: "9876543299", gstin: "03ABCDE1234F1Z5" },
+    });
+    expect(typo.status()).toBe(400);
+    expect((await typo.json()).error).toContain(
+      "GSTIN has a typing mistake: its last character does not match",
+    );
     expect(error).toContain("PAN must be 10 characters");
     expect(error).toContain("IFSC must be 11 characters");
   });
@@ -174,12 +184,12 @@ test.describe("PH10 pharmacy vendors", () => {
     const active = await (
       await admin.get("/api/pharmacy/vendors", { params: { q: TAG, status: "active" } })
     ).json();
-    expect(active.vendors.map((v) => v.name)).not.toContain(vendorName("Clean Input Traders"));
+    expect(active.rows.map((v) => v.name)).not.toContain(vendorName("Clean Input Traders"));
 
     const inactive = await (
       await admin.get("/api/pharmacy/vendors", { params: { q: TAG, status: "inactive" } })
     ).json();
-    expect(inactive.vendors.map((v) => v.name)).toEqual([vendorName("Clean Input Traders")]);
+    expect(inactive.rows.map((v) => v.name)).toEqual([vendorName("Clean Input Traders")]);
 
     const audit = await one(
       `SELECT count(*)::int AS n FROM billing_audit
@@ -194,7 +204,7 @@ test.describe("PH10 pharmacy vendors", () => {
       const body = await (
         await admin.get("/api/pharmacy/vendors", { params: { q, status: "all" } })
       ).json();
-      expect(body.vendors.length, q).toBeGreaterThan(0);
+      expect(body.rows.length, q).toBeGreaterThan(0);
     }
   });
 
@@ -263,7 +273,10 @@ test.describe("PH10 pharmacy vendors", () => {
 
   test("the pharmacist does not see the vendors page in the menu", async ({ page }) => {
     await loginAs(page, "pharmacy");
-    await gotoReady(page, "/giniflow/station/pharmacy", () => page.locator("nav").first());
-    await expect(page.getByRole("link", { name: /Vendors/ })).toHaveCount(0);
+    const group = () => page.getByRole("button", { name: /Pharmacy ▾|💊 Pharmacy$/ }).first();
+    await gotoReady(page, "/pharmacy/stock", group);
+    await group().click();
+    await expect(page.getByText("📦 Stock", { exact: true })).toBeVisible();
+    await expect(page.getByText("🏭 Vendors", { exact: true })).toHaveCount(0);
   });
 });

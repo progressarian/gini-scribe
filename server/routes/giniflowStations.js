@@ -156,6 +156,7 @@ import {
   markLabCaseAction,
   uploadLabCaseReport,
   deleteLabCaseReport,
+  removeOrderReport,
   uploadReport,
   uploadOutsideReport,
   markCaseSentOutside,
@@ -2425,6 +2426,16 @@ router.post(
   validate(giniflowReportSchema),
   reportUpload(uploadReport, "Gini Flow lab report upload"),
 );
+
+router.delete("/giniflow/stations/lab/:orderId/report", benchGate, async (req, res) => {
+  try {
+    res.json(
+      await removeOrderReport(req.params.orderId, { actorId: req.doctor?.doctor_id ?? null }),
+    );
+  } catch (e) {
+    handleError(res, e, "Gini Flow lab report delete");
+  }
+});
 
 router.post(
   "/giniflow/stations/lab/:orderId/outside-report",

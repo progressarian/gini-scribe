@@ -2,6 +2,7 @@ import pool from "../../config/db.js";
 import { parseStockReport } from "./stockParse.js";
 import { autoLinkKeys, hasCatalogMatch } from "./stockMatch.js";
 import { rebuildInventory } from "./stockInventory.js";
+import { stockSource } from "./inventorySync.js";
 
 const httpError = (status, message) => Object.assign(new Error(message), { status });
 
@@ -252,7 +253,10 @@ export async function commitUpload(id, actorId = null, db = pool) {
       );
     }
 
-    const inventory = await rebuildInventory(client);
+    const inventory =
+      (await stockSource(client)) === "darpan"
+        ? await rebuildInventory(client)
+        : { skipped: "Scribe batch stock feeds the prescription screens" };
 
     await client.query(
       `UPDATE pharmacy_stock_uploads

@@ -216,6 +216,10 @@ const ROUTE_CAPABILITIES = [
   ["/api/pharmacy/indents", [CAP.PHARMACY_INDENT, CAP.PHARMACY_DEPT_MANAGE]],
   ["/api/pharmacy/collect", CAP.PHARMACY_COLLECT],
   ["/api/pharmacy/reports", CAP.PHARMACY_REPORTS],
+  [
+    "/api/pharmacy/accounts",
+    [CAP.PHARMACY_BILL, CAP.PHARMACY_COLLECT, CAP.PHARMACY_CREDIT_APPROVE, CAP.PHARMACY_REPORTS],
+  ],
   ["/api/doctors", CAP.RECEPTION_OPS],
   // Slot availability — drives the time-slot picker on both /find and /ghm.
   ["/api/availability", [CAP.RECEPTION_OPS, CAP.OBT_OPS]],

@@ -66,7 +66,11 @@ function Cells({ row, data, layout }) {
           {money(row.charges[column.key] ?? 0)}
         </td>
       ))}
-      <td className="brep-num bdash-muted">—</td>
+      <td
+        className={`brep-num${row.pharmacy === null || row.pharmacy === undefined ? " bdash-muted" : ""}`}
+      >
+        {row.pharmacy === null || row.pharmacy === undefined ? "—" : money(row.pharmacy)}
+      </td>
       <td className="brep-num">{negativeMoney(row.discount)}</td>
       <td className="brep-num">{negativeMoney(row.discount_consultation)}</td>
       <td className="brep-num">{negativeMoney(row.discount_tests)}</td>
@@ -163,7 +167,9 @@ export default function MisTable({ data, onPick, onOpenGroup, openGroup }) {
               ))}
               <th scope="col" className="brep-num" title={data.columns.pharmacy.note}>
                 {data.columns.pharmacy.label}
-                <span className="bdash-th-note">Not in Scribe</span>
+                <span className="bdash-th-note">
+                  {data.columns.pharmacy.live ? "Not in net revenue" : "Not in Scribe"}
+                </span>
               </th>
               <th scope="col" className="brep-num">
                 Discount given

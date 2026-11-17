@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import useDebounced from "../../../hooks/useDebounced.js";
+import Dropdown from "../../ui/Dropdown.jsx";
 
 export function SearchField({ value, onSearch, label, placeholder }) {
   const [text, setText] = useState(value || "");
@@ -30,21 +31,14 @@ export function SearchField({ value, onSearch, label, placeholder }) {
 
 export function FilterSelect({ label, value, onChange, allLabel, options }) {
   return (
-    <label className="asg__field asg__field--narrow">
-      <span className="asg__sr">{label}</span>
-      <select
-        className={`rep__input ${value ? "home__select--on" : ""}`}
+    <div className={`asg__field asg__field--narrow crm-dd ${value ? "crm-dd--on" : ""}`}>
+      <Dropdown
+        ariaLabel={label}
         value={value || ""}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">{allLabel}</option>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
+        onChange={onChange}
+        options={[{ value: "", label: allLabel }, ...options]}
+      />
+    </div>
   );
 }
 

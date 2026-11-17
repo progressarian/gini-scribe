@@ -3,16 +3,17 @@ import { getSlaConfig, getDayBoard, getBottleneck, boardClock } from "./board.js
 import { getTriageSummary } from "./triage.js";
 import { getMachines } from "./machineCatalog.js";
 import { machinesForStation } from "../../../shared/machineStages.js";
-import { getPaymentQueue, getArrivals } from "./receptionStation.js";
+import { getArrivals } from "./receptionStation.js";
 import { getLabQueue } from "./labStation.js";
 import { getPharmacyQueue } from "./pharmacyStation.js";
 import { getVitalsQueue } from "./vitalsStation.js";
 import { getMachineCountsByStation } from "./machineStation.js";
+import { counterPatients } from "../billing/counterPatients.js";
 
 const PIECES_BY_STATION = {
   triage: ["triage"],
   vitals: ["vitals"],
-  reception: ["payments", "arrivals"],
+  reception: ["counter", "arrivals"],
   lab: ["collection", "processing"],
   lab_collect: ["collection"],
   lab_process: ["processing"],
@@ -44,6 +45,16 @@ async function loadMachineCounts(visitDate, db) {
   return { catalogue, sideStationIds, counts };
 }
 
+async function loadCounter(visitDate, db) {
+  try {
+    const counter = await counterPatients(visitDate, "", new Date(), db);
+    return { counts: { toBill: counter.toBill.length } };
+  } catch (e) {
+    if (e.status === 400) return EMPTY_QUEUE;
+    throw e;
+  }
+}
+
 async function loadBoard(visitDate, db) {
   const sla = await getSlaConfig(db);
   return getDayBoard(visitDate, sla, boardClock(visitDate), db);
@@ -63,7 +74,7 @@ async function loadReferrals(visitDate, db) {
 
 const PIECE_LOADERS = {
   board: (date, db) => loadBoard(date, db),
-  payments: (date, db) => getPaymentQueue(date, db),
+  counter: (date, db) => loadCounter(date, db),
   arrivals: (date, db) => getArrivals(date, "", new Date(), db),
   collection: (date, db) => getLabQueue(date, null, db, { room: "collection" }),
   processing: (date, db) => getLabQueue(date, null, db, { room: "processing" }),
@@ -104,7 +115,7 @@ async function buildStationSummary(visitDate, db, stations) {
   const col = (key) => board.columns.find((c) => c.key === key)?.count ?? 0;
   const atRisk = board.onFloor.filter((c) => !c.finished && c.statusColour === "red").length;
 
-  const payments = loaded.payments || EMPTY_QUEUE;
+  const counter = loaded.counter || EMPTY_QUEUE;
   const arrivals = loaded.arrivals || EMPTY_QUEUE;
   const collection = loaded.collection || EMPTY_QUEUE;
   const processing = loaded.processing || EMPTY_QUEUE;
@@ -128,9 +139,12 @@ async function buildStationSummary(visitDate, db, stations) {
   };
 
   const n = (v) => v || 0;
-  const pay = payments.counts;
-  const paymentPending = n(pay.pending) + n(pay.charges) + n(pay.healthrayLab);
   const toCheckIn = n(arrivals.counts.expected);
+  const toBill = n(counter.counts.toBill);
+  const receptionWork = [
+    toCheckIn && `${toCheckIn} to check in`,
+    toBill && `${toBill} to bill`,
+  ].filter(Boolean);
   const toCollect = n(collection.counts.pending) + n(collection.counts.drawing);
   const toSend = n(collection.counts.collecting);
   const toReceive = n(processing.counts.sent);
@@ -179,13 +193,9 @@ async function buildStationSummary(visitDate, db, stations) {
       tone: "blue",
     },
     reception: {
-      count: paymentPending || toCheckIn,
-      label: paymentPending
-        ? `${paymentPending} payment pending`
-        : toCheckIn
-          ? `${toCheckIn} to check in`
-          : "desk clear",
-      tone: paymentPending ? "red" : toCheckIn ? "blue" : "teal",
+      count: toCheckIn + toBill,
+      label: receptionWork.length ? receptionWork.join(" · ") : "desk clear",
+      tone: receptionWork.length ? "blue" : "teal",
     },
     lab: {
       count: toCollect + toSend + toReceive + inLab + toUpload,

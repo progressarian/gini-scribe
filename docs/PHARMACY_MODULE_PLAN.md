@@ -23,13 +23,13 @@ DARPAN keeps running alongside during a cut-over period, then is retired.
 
 ### Decisions already made
 
-| #   | Decision                                                                                                                                                                                                                                    |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1  | **Run in parallel with DARPAN** for a cut-over period. Scribe gets an opening stock import from DARPAN, plus a reconciliation report, then the upload is retired.                                                                           |
-| D2  | **Extend the existing `bills` system** with a `pharmacy` account. This reuses split payments, cash shifts, dues/pay-later, credit notes, `billing_requests` approvals, `billing_audit`, bill numbering and the PDF builders.                |
-| D3  | **Stock is held in the smallest unit** (tablet/ml). Each medicine has a `pack_size`, and the counter can sell whole packs or loose units.                                                                                                   |
-| D4  | **The pharmacist picks the batch.** The batch list is sorted by expiry, soonest at the top and latest at the bottom, with the rack shown. There is also an "Auto-fill (earliest expiry first)" button. Expired batches can never be picked. |
-| D5  | **IPD sale = GST folded into the rate, 0% GST on the bill.** For example, an OPD sale is ₹100 + 5% GST, and the same item in IPD is ₹105 at 0% GST.                                                                                         |
+| #   | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| D1  | **Run in parallel with DARPAN** for a cut-over period. Scribe gets an opening stock import from DARPAN, plus a reconciliation report, then the upload is retired.                                                                                                                                                                                                                                                                                                                                                                                      |
+| D2  | **Revised at the start of P3 (2026-11-17): separate pharmacy bill tables.** `pharmacy_bills`, `pharmacy_bill_lines` and `pharmacy_payments` reuse the billing _code_ (GST maths `lineTax`, bill numbering `nextNumber`/`bill_series`, payment checks, PDF builders, `billing_audit`) but not the hospital tables. Hospital `bills` is read by ~320 queries in 49 files, many totalling every bill by date, so sharing the table would have meant filtering every hospital report. Cash shifts and reception collection are wired in explicitly (P5.4). |
+| D3  | **Stock is held in the smallest unit** (tablet/ml). Each medicine has a `pack_size`, and the counter can sell whole packs or loose units.                                                                                                                                                                                                                                                                                                                                                                                                              |
+| D4  | **The pharmacist picks the batch.** The batch list is sorted by expiry, soonest at the top and latest at the bottom, with the rack shown. There is also an "Auto-fill (earliest expiry first)" button. Expired batches can never be picked.                                                                                                                                                                                                                                                                                                            |
+| D5  | **IPD sale = GST folded into the rate, 0% GST on the bill.** For example, an OPD sale is ₹100 + 5% GST, and the same item in IPD is ₹105 at 0% GST.                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 ---
 
@@ -210,108 +210,131 @@ Each task should be small, then tested (an e2e spec in `e2e/pharmacy/` against t
 
 ### P1 — Masters
 
-- [ ] P1.1 Vendors
+- [x] P1.1 Vendors
   - Migration, service, routes, Zod schema
   - `/pharmacy/vendors` page (list, search, create/edit dialog, deactivate)
   - Validation: GSTIN/PAN/phone format
   - Spec PH10
-- [ ] P1.2 Medicine master
+- [x] P1.2 Medicine master
   - Migration, CRUD, search API
   - `/pharmacy/medicines` page (form, pack, HSN, GST preset or custom, schedule, MRP/sale rate, min/max, default rack)
   - Spec PH11
-- [ ] P1.3 Seed and link the master: a one-off script `server/scripts/pharmacy-seed-medicines.mjs`
+- [x] P1.3 Seed and link the master: a one-off script `server/scripts/pharmacy-seed-medicines.mjs`
   - Sources: `medicine_db.json` + current `pharmacy_stock_items` + `pharmacy_stock_links`
   - Batched, rerunnable, dry run first (per the bulk-write rules)
-- [ ] P1.4 Locations + department stock levels: `/pharmacy/departments` page (admin and pharmacy_admin). Spec PH12.
-- [ ] P1.5 Pharmacy settings: price-inclusive flag, near-expiry days, pharmacy GSTIN/drug licence for the bill header.
+- [x] P1.4 Locations + department stock levels: `/pharmacy/departments` page (admin and pharmacy_admin). Spec PH12.
+- [x] P1.5 Pharmacy settings: price-inclusive flag, near-expiry days, pharmacy GSTIN/drug licence for the bill header.
+
+> P1 notes (built):
+>
+> - Vendors, medicines and departments share one service (`server/services/pharmacy/masterRecords.js`), one route file (`server/routes/pharmacyMasters.js`), one list page (`src/components/pharmacy/MasterListPage.jsx`) and one dialog frame + form hook (`MasterFormDialog.jsx`, `useMasterForm.jsx`).
+> - Medicines imported by `server/scripts/pharmacy-seed-medicines.mjs` (dry run by default, `--apply` to save) are flagged **Needs review**: pack size 1, GST 5% and no HSN are placeholders until the admin opens and saves each one.
+> - GSTINs are checked against their check digit (`gstinCheckCharacter`, now in `shared/pharmacyVocab.js`, re-exported by billing).
+> - Pharmacy settings left blank fall back to the hospital billing settings on the bill header (answers open question 1 either way).
 
 ### P2 — Inventory
 
-- [ ] P2.1 Batches + stock + movement ledger tables, append-only trigger, `stockLedger.js` (`postMovement(client, …)`, the only way stock ever changes).
-- [ ] P2.2 Goods receipt
+- [x] P2.1 Batches + stock + movement ledger tables, append-only trigger, `stockLedger.js` (`postMovement(client, …)`, the only way stock ever changes).
+- [x] P2.2 Goods receipt
   - `/pharmacy/purchases/new`: vendor, invoice no/date
   - Lines: medicine, batch, expiry, qty + free, purchase rate, MRP, sale rate, GST (5/12/18/custom), discount, rack
   - Draft → Post creates batches and the ledger rows
   - Duplicate invoice guard
   - Spec PH20
-- [ ] P2.3 Stock view
+- [x] P2.3 Stock view
   - Rework `/pharmacy/stock` into a batch-level stock list per location: rack, expiry, qty in packs + loose, value
   - Filters: low / over / near-expiry / out
   - Keep the DARPAN upload tab during the parallel run
-- [ ] P2.4 Stock adjustments + expiry write-off (reason required, admin only). Spec PH21.
-- [ ] P2.5 Opening stock import from the DARPAN batch report
+- [x] P2.4 Stock adjustments + expiry write-off (reason required, admin only). Spec PH21.
+- [x] P2.5 Opening stock import from the DARPAN batch report
   - Extend `stockParse.js`; Location becomes the rack
   - Preview → commit, the same pattern as `stockUpload.js`
-- [ ] P2.6 Keep `pharmacy_inventory` in sync from the new stock (MAIN location) so the doctor screen, pharmacy station queue and "needed in stock" keep working unchanged.
+- [x] P2.6 Keep `pharmacy_inventory` in sync from the new stock (MAIN location) so the doctor screen, pharmacy station queue and "needed in stock" keep working unchanged.
+
+> P2 notes (built):
+>
+> - `server/services/pharmacy/stockLedger.js` `postMovements` is the only code that changes stock. Increases upsert, decreases use a plain UPDATE (a negative upsert trips the not-negative check before conflict resolution).
+> - Batches store prices per pack plus a `pack_size` snapshot, so a later pack-size change on the medicine cannot corrupt stock maths.
+> - Opening stock = a goods receipt of kind `opening` (no vendor). DARPAN's item report has no batch/expiry, so opening stock comes from the downloadable Excel template (`/pharmacy/purchases/template.xlsx`), imported into a draft and posted.
+> - `pharmacy_settings.stock_source` (`darpan` | `scribe`) decides who feeds `pharmacy_inventory`. Switching rebuilds it in the same transaction; with `scribe`, every movement at the main pharmacy re-syncs the affected medicines. Flipping it is the cut-over.
 
 ### P3 — Pharmacy billing (POS)
 
-- [ ] P3.1 Billing schema extension
-  - `bills.account`, nullable `visit_id`, the new line columns and series
-  - **Audit every existing `bills` reader** (dashboard, dues, MIS, reports, counterPatients) and add `account='hospital'` where pharmacy must not appear
-  - Run the existing billing e2e suite to confirm nothing changed
-- [ ] P3.2 `pharmacyPricing.js` (OPD GST vs IPD folded, loose units, MRP cap), with focused smoke tests.
-- [ ] P3.3 Billing service: open draft (visit patient / walk-in / IPD), add line with batch(es), reprice, finalise (lock batches, post `sale` movements, number from `PH`)
-  - Reuses `payAndFinalise` + split payments
-- [ ] P3.4 `/pharmacy/billing` counter page
-  - Patient search + "New walk-in" form
-  - Prefill from today's prescription
-  - Medicine search with stock
-  - Batch picker sorted by expiry with rack + Auto-fill
-  - Totals and split payment (reusing `TotalsAndPayment`)
-  - Spec PH30
-- [ ] P3.5 IPD sale mode (sale_type `ipd`, IPD number field, 0% GST bill print). Spec PH31.
-- [ ] P3.6 Pharmacy bill / receipt PDF (pharmacy header, HSN, batch, expiry, GST break-up, H1 prescriber line), reusing `billPdf.js`.
-- [ ] P3.7 Link to the pharmacy station: finalising a bill for a visit patient marks `medicine_collections` given/partial and advances the giniflow status. The station card shows a "Bill" action.
-- [ ] P3.8 Duration/quantity on `medications` (finalize fix) so the prefill knows quantities.
-- [ ] P3.9 Sale return → `PHCN` credit note + `sale_return` movement into the same batch. Spec PH32.
+- [x] P3.1 Pharmacy bill schema (separate tables, see D2)
+  - `2027-01-11_pharmacy_row_security.sql`: row-level security on every P1/P2 pharmacy table (they were missing it; every hospital table has it)
+  - `2027-01-12_pharmacy_bills.sql`: `pharmacy_bills` (draft → final, credit notes, PH / PHCN numbers, sale_type, gst_folded, visit link, IPD number, prescriber, issued GSTIN / legal name / drug licence snapshot), `pharmacy_bill_lines` (batch snapshot, units, pack MRP / rate, GST or folded GST, MRP cap), `pharmacy_payments` (in / out, PHR receipts), `patients.registration_source`
+  - `bill_series` accepts PH / PHR / PHCN (`billSeries.js` `NUMBER_SERIES`); hospital Billing settings still only lists and edits MAIN / RCPT / CN. The pharmacy admin sets the pharmacy series in Pharmacy settings → Number series (shared `components/billing/SeriesCard.jsx`)
+- [x] P3.2 `shared/pharmacyPricing.js`: loose units priced from the pack rate, GST on top or inside (setting), MRP cap (inclusive), IPD folds GST into the rate at 0%, bill rounded to the rupee. `pharmacyReturnAmounts` prices returns incrementally so all returns add up to exactly what was charged.
+- [x] P3.3 `services/pharmacy/bills.js`: create (reuses an open draft for the same visit), save lines (expired refused, near-expiry needs confirmation, whole packs only when loose sale is off, stock checked), finalise (stock taken with `postMovements` `sale`, PH number, PHR receipt per payment, split payment must equal the total, header snapshot), discard draft. Walk-ins: `billPatients.js` (GNI file number, `registration_source = pharmacy_walkin`, same phone + name reuses the record).
+- [x] P3.4 `/pharmacy/billing` list + `/pharmacy/billing/:id` counter (patient search / walk-in, sale type, stock search, batch picker soonest expiry first with rack and auto-fill, split payment, confirmation). Spec PH30.
+- [x] P3.5 IPD sale mode. Spec PH31.
+- [x] P3.6 Bill / credit note PDF (`services/pharmacy/billPdf.js`, reuses the hospital bill builders): tax invoice vs pharmacy bill, drug licence, HSN, batch, expiry, GST split or folded GST note, H1/X prescriber note, receipts. Spec PH31.
+- [x] P3.7 Prefill from today's prescription (`giniflow_rx_items`, matched by `medicine_key`, quantity suggested from frequency × duration only when both are clear, tablets/capsules only) and the station link: a "Pharmacy bill" button on the station pane; finalising marks the billed medicines `given` in `medicine_collections` while the visit is `pharmacy_pending`. Spec PH32.
+- [ ] P3.8 Not needed for now: today's prescription items already carry `duration`, so the prefill does not depend on `medications`. Revisit only if bills must be prefilled from older prescriptions.
+- [x] P3.9 Sale return → PHCN credit note, refund (`pharmacy_payments` direction `out`), `sale_return` back into the same batch, expired lines refused. Spec PH33.
+
+P3 notes:
+
+- Pharmacy cash is not yet in the hospital cash-shift drawer (`pharmacy_payments.shift_id` stays empty). It is wired in with reception collection in P5.4.
+- Line discounts are not in P3; add them with an approval rule if the pharmacy gives discounts.
 
 ### P4 — Credit
 
-- [ ] P4.1 `credit_sale` request kind + `approveRequest` branch, notification to pharmacy_admin/admin.
-- [ ] P4.2 Counter: "Request credit" (amount, reason). The bill is locked while pending; finalise is allowed with partial pay after approval. Spec PH40.
-- [ ] P4.3 Approvals inbox for pharmacy_admin (reusing `DeskRequestsInbox` filtered to pharmacy).
-- [ ] P4.4 Pharmacy dues
-  - Per-patient outstanding, collect later (any mode, reference for UPI/NEFT)
-  - Outstanding shown on the patient header and at the counter
-  - Spec PH41
+- [x] P4.1 `2027-01-13_pharmacy_credit.sql`: `pharmacy_credit_requests` (pending → approved / rejected / withdrawn → used; one open request per bill; approved amount ≤ asked ≤ bill total; a refusal needs a reason) and `pharmacy_bills.due_adjusted` (how much of a credit note went against money still due). Service `services/pharmacy/credit.js`, routes `routes/pharmacyCredit.js`. Notifications to approvers wait for the P6 notifications table; until then the Credit page lists what is waiting.
+- [x] P4.2 Counter: "Ask for credit" (amount, reason). The draft is locked while the request waits and while an approval stands (withdraw to edit). After approval the bill is finalised with at least bill − approved credit; the rest stays due (`pay_later`). Spec PH40.
+- [x] P4.3 `/pharmacy/credit` → Credit requests: approvers (PHARMACY_CREDIT_APPROVE) approve the asked amount or less, or refuse with a reason. Nobody approves their own request. The approver sees the patient's existing pharmacy due.
+- [x] P4.4 Dues: `/pharmacy/credit?tab=dues` (oldest first, total outstanding), "Collect due" on the bill (any mode, part payments, PHR receipts, never more than is due). The patient's pharmacy due shows in the patient search and on the bill. A return on a bill with money due clears the due first and refunds only the rest. Specs PH40, PH41.
+
+P4 notes:
+
+- No per-patient credit limit (open question 3); the approver sees the existing due before deciding.
+- Reception collecting pharmacy dues is P5.4 (it reuses `collectDue`).
 
 ### P5 — Department stock & indents
 
-- [ ] P5.1 Transfers MAIN ↔ department (request → approve → issue), ledger `transfer_out/in`. Spec PH50.
-- [ ] P5.2 Department stock view and low-level alerts to admin/pharmacy_admin.
-- [ ] P5.3 Indent: a department user raises an indent for a patient, which deducts department stock and creates an `indent` pharmacy bill (IPD pricing, pay_later). Spec PH51.
-- [ ] P5.4 Reception **Pharmacy bills** tab in `BillingDesk.jsx`
-  - List pharmacy dues/indent bills, collect payment
-  - Receipts go to `PHR`; payments are tagged to the pharmacy account
-  - Cash-shift totals are split by account
-  - Spec PH52
+- [x] P5.1 Transfers (`2027-01-14_pharmacy_transfers_indents.sql`, `services/pharmacy/transfers.js`, `/pharmacy/transfers`): the pharmacy admin moves chosen batches between the main pharmacy and a department, or back. A transfer posts at once (`transfer_out` / `transfer_in`, TRF number); a mistake is undone with a reverse transfer. The separate request → approve step was dropped: departments are restocked by the admin. Expired batches cannot go to a department. Spec PH50, PH51.
+- [x] P5.2 Department stock: the Stock page already shows any location with its own min/max levels; the main pharmacy cannot sell from department stock. Low-level alerts come with P6.
+- [x] P5.3 Indents (`services/pharmacy/indents.js`, `/pharmacy/indents`): a nurse (PHARMACY_INDENT) picks the department, the patient and batches from that department's stock. It posts `indent_issue` and makes a finalised `indent` pharmacy bill at IPD pricing (GST folded), fully due. IND number. Spec PH50, PH51.
+- [x] P5.4 Reception "Pharmacy bills" tab on the billing desk (PHARMACY_COLLECT): pharmacy bills with money due, collected with PHR receipts. Cash needs an open shift. `pharmacy_payments.shift_id` is recorded whenever the person has a shift open; the shift shows pharmacy cash on its own lines, the expected drawer includes it, and the hospital collected totals stay hospital-only (`cashShifts.js`, `staffDashboard.js`, ShiftPanel, ShiftSummary, HandoverSlip). Spec PH50, PH51.
+
+P5 notes:
+
+- Deploy order: `2027-01-12_pharmacy_bills.sql` must run before this code goes live, because the hospital cash-shift queries now read `pharmacy_payments`.
+- Returning indented medicines to a department is not built yet (the pharmacist can make a sale return on the indent bill).
 
 ### P6 — Alerts & expiry
 
-- [ ] P6.1 `notifications` table, `/api/notifications` (list, mark read), and a bell in `AppLayout.jsx` with an unread count, plus realtime push via `realtimeBus`.
-- [ ] P6.2 Event checks after every stock write (low / over max).
-- [ ] P6.3 Daily sweep in the **worker** (`services/cron/`, a self-rescheduling `setTimeout`, using `cronPool`): near-expiry / expired batches, department levels, ledger vs cache drift.
-- [ ] P6.4 `/pharmacy/expiry` page: batches by expiry bucket (expired / 30 / 60 / 90 days) with vendor and contact, plus "Return to vendor" → vendor return (P6.5).
-- [ ] P6.5 Vendor return / replacement flow (`vendor_return` movement, replacement goods receipt linked).
+- [x] P6.1 `2027-01-15_notifications_vendor_returns.sql`: `notifications` (audience is a capability or one person; `dedupe_key` keeps one open alert per condition; `resolved_at` closes it when the condition clears) and `notification_reads` (read per person). `services/notifications.js` (`raiseNotification`, `resolveNotifications`, list / mark read), `/api/notifications` for every signed-in staff member (filtered to the capabilities they hold). Bell with unread count in the header (`components/NotificationBell.jsx`), polled every 60 s; clicking an alert opens the screen it is about.
+- [x] P6.2 After every stock write (`postMovements`), and when a min/max is changed, the medicine's level at that location is checked: low / out of stock (PHARMACY_PURCHASE for the main pharmacy, PHARMACY_DEPT_MANAGE for departments) and over the maximum. Credit requests notify approvers; the decision notifies the person who asked.
+- [x] P6.3 Worker sweep every 6 h (`services/cron/pharmacyAlertsSweep.js`, cron lock, `PHARMACY_ALERTS=0` turns it off): expired stock on shelves and stock expiring within the alert window (one alert per location), a full recheck of every level, and ledger vs stock drift (critical, PHARMACY_MASTER).
+- [x] P6.4 `/pharmacy/expiry`: batches by expiry bucket (expired / 30 / 60 / 90 days) for any location, with rack, vendor and contact. Cost value only for purchase / master users.
+- [x] P6.5 Vendor returns (`services/pharmacy/vendorReturns.js`): choose batches on the expiry page → "Return to vendor" (vendor, reason, vendor credit note reference); posts `vendor_return` from the main pharmacy at the batch purchase cost, VRT number. The replacement stock is recorded as a normal goods receipt. Specs PH60, PH61.
+
+P6 notes:
+
+- Department stock must be moved back to the main pharmacy before it is returned to a vendor.
+- The bell polls; switching it to the existing realtime bus can come later if a minute's delay matters.
+
+### After P7 — completion pass (2026-11-17)
+
+- Indent returns: a nurse returns unused indent medicines from `/pharmacy/indents` (`POST /pharmacy/indents/:id/returns`); stock goes back to the department as `indent_return` and only the amount still due is reduced. When the bill is already paid the return is refused and goes to the pharmacy, which can refund.
+- Review fixes: alert rows locked in one order (no deadlock between two sales); credit approve / withdraw lock the bill before the request (same order as finalise); credit notes are not rounded up and are capped at what is left of the bill, so returns never credit more than was charged; tiny loose quantities give a clear 400; the same new batch posted twice at once no longer fails, and a known batch with a different sale rate is refused; walk-in file numbers retry if another desk took the number; a visit's open draft is reused only for the same sale type; vendor returns refuse a deactivated vendor; dues queries use the outstanding-bill index; the 61–90 day expiry filter stops at 90 days.
+- Spec PH80: double-click finalise, stock taken between draft and finalise, expiry / deactivation after saving, racing returns, racing due collection, split returns, indent returns, odd search text, the MIS pharmacy column, and ledger = stock at the end.
+
+### P8 — Discounts, stock list, patient accounts, top items (2026-11-17)
+
+- [x] P8.1 Discounts (migration `2027-01-17`): any pharmacist types a % on each line and/or a % or ₹ on the whole bill when billing; it changes from patient to patient. Line % comes off the line total (after the MRP cap); a bill % applies to every line and a bill ₹ is shared across lines in proportion. GST is worked back out of the discounted amount. Admin sets **Maximum discount %** in Pharmacy settings; the line %, the bill % and the overall effect are each checked against it. The bill PDF shows a Disc column and the bill discount; returns credit the discounted price. Spec PH81.
+- [x] P8.2 Stock list tab on `/pharmacy/stock` (`?tab=list`, `GET /pharmacy/batches/list[.xlsx]`): item name, type (TAB, INJ… — this is the "item type / category" asked for), supplier, unit, batch, expiry, MRP, PTR, LP, margin %. LP = PTR less purchase discount, plus GST, spread over free packs (from the latest posted purchase line, else the batch purchase rate); margin % = (MRP − LP) ÷ MRP. Cost columns only for users who can see purchases. Filters, sort on every column, Excel. Spec PH82.
+- [x] P8.3 Patient accounts (migration `2027-01-18`): deposits and deposit refunds (pharmacist), paying a bill from the deposit, write-off of a bill's due and manual credit / debit vouchers (pharmacy admin, reason required). `/pharmacy/accounts/:patientId` shows balance, bills with money due and the full statement; `/pharmacy/ledger` lists every patient with S.no, payer, total amount, paid, write-off, deposit, deposit refund, discounts, sales-return vouchers, manual vouchers, due and balance, with search, filters, sorting and totals. Spec PH83.
+- [x] P8.4 Top selling items `/pharmacy/reports/top-items` (`GET /pharmacy/reports/top-items[.xlsx]`, PHARMACY_REPORTS): Sr no, item, company, supplier(s), sales qty, return qty, net qty, sale amount, return amount, net amount. "Merge suppliers" gives one row per item; "Split by supplier" gives a row per item and supplier (the batch's vendor). Filters: dates, location, sale type, item type, supplier, search; sort on every column; totals over all pages; Excel. Spec PH84.
 
 ### P7 — Reports & cut-over
 
-- [ ] P7.1 Reports:
-  - daily sales by mode/account
-  - GST summary by HSN/rate (for filing; IPD folded GST shown separately)
-  - stock valuation
-  - movement ledger by medicine/batch
-  - credit outstanding
-  - purchase register by vendor
-  - H1 register
-  - expiry loss
-- [ ] P7.2 Pharmacy dashboard `/pharmacy` (today's sales, dues, alerts, low stock, near expiry). This is the pharmacy_admin home.
-- [ ] P7.3 DARPAN reconciliation report (Scribe stock vs latest DARPAN upload per medicine) during the parallel run.
-- [ ] P7.4 Billing dashboard: show pharmacy revenue (currently "Not in Scribe" in `dashboardCharges.js`).
-- [ ] P7.5 Cut-over checklist, then retire the DARPAN upload (feature flag), and update `docs/PHARMACY_STOCK_PLAN.md` and `README.md`.
-
----
+- [x] P7.1 `services/pharmacy/reports.js`, `/pharmacy/reports` (PHARMACY_REPORTS): daily sales, collections by mode, GST summary by HSN and rate (IPD GST inside the rate on its own rows), purchase register, Schedule H1 / X register, expiry and write-off loss, stock valuation, credit outstanding. Every report downloads as Excel with a total row. The movement history of a batch stays on the Stock page (History).
+- [x] P7.2 `/pharmacy/dashboard` "Pharmacy today" (net sales, collected, money due, credit waiting, out of stock / below minimum, expired / expiring batches, latest bills); the pharmacy admin's home page. Spec PH70.
+- [x] P7.3 DARPAN reconciliation report: Scribe main-pharmacy units beside the latest DARPAN upload for every linked medicine (Same / Different / only in one system).
+- [x] P7.4 Hospital MIS "Pharmacy Charges": stays "Not in Scribe" while the stock source is DARPAN; once it is Scribe the column (screen and Excel) shows Scribe pharmacy sales after returns, labelled "not in net revenue", and hospital net revenue is unchanged. Hidden when the dashboard is filtered by category or consultant.
+- [x] P7.5 `docs/PHARMACY_CUTOVER.md`: migration and deploy order, set-up, opening stock count, parallel run with the reconciliation report, the switch (Stock source → Scribe), and how to go back. README has a Pharmacy section.
 
 ## Verification
 

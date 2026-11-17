@@ -33,10 +33,11 @@ export const CRM_ROLE_VALUES = CRM_ROLES.map((r) => r.value);
 export const DOCTOR_PRIORITIES = [
   { value: "A", label: "A — High value", short: "A", tone: "red" },
   { value: "B", label: "B — Meaningful potential", short: "B", tone: "amb" },
-  { value: "C", label: "C — Lower frequency", short: "C", tone: "ink" },
+  { value: "C", label: "C — Lower frequency", short: "C", tone: "ink", retired: true },
   { value: "unclassified", label: "Unclassified", short: "—", tone: "ink" },
 ];
 export const DOCTOR_PRIORITY_VALUES = DOCTOR_PRIORITIES.map((p) => p.value);
+export const SELECTABLE_DOCTOR_PRIORITIES = DOCTOR_PRIORITIES.filter((p) => !p.retired);
 
 // The relationship ladder, in order. Dormant and Lost are off-ladder states a
 // doctor can fall into from anywhere, so they sort last rather than eighth.

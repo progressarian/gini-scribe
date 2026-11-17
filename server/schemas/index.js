@@ -1762,6 +1762,13 @@ export * from "./billing.js";
 export * from "./billingReports.js";
 export * from "./pharmacyStock.js";
 export * from "./pharmacyVendors.js";
+export * from "./pharmacyMedicines.js";
+export * from "./pharmacyLocations.js";
+export * from "./pharmacySettings.js";
+export * from "./pharmacyPurchases.js";
+export * from "./pharmacyBills.js";
+export * from "./pharmacyDepartments.js";
+export * from "./notifications.js";
 
 const cancelTargetSchema = z.strictObject({
   orderId: z.string().trim().max(64).optional(),

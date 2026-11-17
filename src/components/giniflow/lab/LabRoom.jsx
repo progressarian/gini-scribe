@@ -11,6 +11,7 @@ import {
   useMarkLabCaseAction,
   useUploadLabCaseReport,
   useDeleteLabCaseReport,
+  useRemoveLabReport,
   reportHref,
   useOutsidePendingCount,
 } from "../../../queries/hooks/useGiniflowLab";
@@ -26,6 +27,7 @@ import LabSiteControl from "../LabSiteControl";
 import useDismiss from "./useDismiss";
 import LabResultsForm from "../LabResultsForm";
 import PdfViewerModal from "../../visit/PdfViewerModal";
+import ConfirmModal from "../../ui/ConfirmModal";
 import StationNotice from "../StationNotice";
 import CancelTestControl from "../CancelTestControl";
 import { cancelledText, cancelledToastMs, TOAST_MS } from "../../../lib/testCancelText.js";
@@ -506,13 +508,19 @@ function LabDetailPane({
   onCancelAll,
   canCancelTest,
   onHomeCollect,
+  canManageReport,
+  onReplaceReport,
+  onRemoveReport,
+  removingReport,
   busy,
 }) {
   // Same rule as the hospital-case pane: results belong to the analyzer bench.
   const atTheBench = room !== "collection";
   const paneRef = useRef(null);
   const fileRef = useRef(null);
+  const replaceRef = useRef(null);
   const [dragging, setDragging] = useState(false);
+  const [askRemove, setAskRemove] = useState(false);
   useDismiss(!!order, onClose, paneRef);
   if (!order) return null;
 
@@ -533,6 +541,15 @@ function LabDetailPane({
       return;
     }
     onUpload(order, file);
+  };
+
+  const takeReplacement = (file) => {
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      onUpload(order, file, "Report is larger than 5 MB — nothing was replaced");
+      return;
+    }
+    onReplaceReport(order, file);
   };
 
   return (
@@ -771,37 +788,89 @@ function LabDetailPane({
             {order.reportUrl && (
               <div className="dp-sec">
                 <div className="dp-sec-title">Report</div>
-                {/* The same viewer every other screen opens a document in. The
+                <div className="dp-report-acts">
+                  {/* The same viewer every other screen opens a document in. The
                     raw file link is kept only for the moment before the chart
                     row exists — promotion into `documents` runs fire-and-forget
                     after the upload, so a report opened straight away may not
                     have one yet. */}
-                {order.reportDocId ? (
-                  <button
-                    type="button"
-                    className="st-btn st-btn-g"
-                    onClick={() =>
-                      onViewReport({
-                        id: order.reportDocId,
-                        title: "Lab report",
-                        doc_type: "lab_report",
-                      })
-                    }
-                  >
-                    📄 View uploaded report
-                  </button>
-                ) : (
-                  <a
-                    className="st-btn st-btn-g"
-                    href={reportHref(order.orderId)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    📄 View uploaded report
-                  </a>
-                )}
+                  {order.reportDocId ? (
+                    <button
+                      type="button"
+                      className="st-btn st-btn-g"
+                      onClick={() =>
+                        onViewReport({
+                          id: order.reportDocId,
+                          title: "Lab report",
+                          doc_type: "lab_report",
+                        })
+                      }
+                    >
+                      📄 View uploaded report
+                    </button>
+                  ) : (
+                    <a
+                      className="st-btn st-btn-g"
+                      href={reportHref(order.orderId)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      📄 View uploaded report
+                    </a>
+                  )}
+                  {canManageReport && (
+                    <>
+                      <input
+                        ref={replaceRef}
+                        type="file"
+                        accept="application/pdf,image/jpeg,image/png"
+                        hidden
+                        onChange={(e) => {
+                          takeReplacement(e.target.files?.[0]);
+                          e.target.value = "";
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="st-btn st-btn-g"
+                        disabled={busy || removingReport}
+                        onClick={() => replaceRef.current?.click()}
+                      >
+                        🔁 Replace report
+                      </button>
+                      <button
+                        type="button"
+                        className="st-btn st-btn-red"
+                        disabled={busy || removingReport}
+                        onClick={() => setAskRemove(true)}
+                      >
+                        🗑 Remove report
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             )}
+
+            <ConfirmModal
+              open={askRemove}
+              title={`Remove the report for ${order.name}?`}
+              message={
+                <>
+                  <strong>{order.name}</strong>
+                  {order.fileNo ? ` (${order.fileNo})` : ""} — {orderTestNames(order).join(", ")}
+                  <br />
+                  <br />
+                  The uploaded file is deleted from the patient's chart and the MO and doctor stop
+                  seeing it. If no results were typed in for this order, it goes back to “Results
+                  ready” so the correct report can be uploaded. This cannot be undone.
+                </>
+              }
+              confirmLabel={removingReport ? "Removing…" : "Remove report"}
+              busy={removingReport}
+              onCancel={() => setAskRemove(false)}
+              onConfirm={() => onRemoveReport(order, () => setAskRemove(false))}
+            />
           </div>
         </div>
       </div>
@@ -1577,6 +1646,7 @@ export default function LabRoom({ room = null }) {
   const [homeOnly, setHomeOnly] = useState(false);
   const [viewingDoc, setViewingDoc] = useState(null);
   const deleteCaseReport = useDeleteLabCaseReport();
+  const removeReport = useRemoveLabReport();
 
   const healthray = data?.healthray || [];
   const caseCount = healthray.reduce((n, r) => n + r.cases, 0);
@@ -1813,6 +1883,35 @@ export default function LabRoom({ room = null }) {
     useAuthStore((st) => st.currentDoctor?.role),
     CAP.GINIFLOW_STATION_LAB_PROCESS,
   );
+  const onReplaceReport = (order, file) =>
+    upload.mutate(
+      { orderId: order.orderId, file, replace: true, outside: order.outsourced },
+      {
+        onSuccess: () => showToast(`🔁 ${order.name}'s report replaced with ${file.name}`),
+        onError: (e) =>
+          showToast(e?.response?.data?.error || "Could not replace the report — nothing changed"),
+      },
+    );
+
+  const onRemoveReport = (order, done) =>
+    removeReport.mutate(
+      { orderId: order.orderId },
+      {
+        onSuccess: (r) => {
+          done();
+          showToast(
+            r?.sampleStatus === "uploaded"
+              ? `🗑 ${order.name}'s report removed — the typed results stay on the order`
+              : `🗑 ${order.name}'s report removed — upload the correct one when ready`,
+          );
+        },
+        onError: (e) => {
+          done();
+          showToast(e?.response?.data?.error || "Could not remove the report — nothing changed");
+        },
+      },
+    );
+
   const onUploadCase = (caseNo, file, confirmAdditional = false) => {
     if (file.size > 5 * 1024 * 1024) return showToast("File is larger than 5 MB — not uploaded");
     caseUpload.mutate(
@@ -2492,6 +2591,10 @@ export default function LabRoom({ room = null }) {
         onCancelAll={onCancelAll}
         canCancelTest={canCancelTest}
         onHomeCollect={openHomeForOrder}
+        canManageReport={canFileReport}
+        onReplaceReport={onReplaceReport}
+        onRemoveReport={onRemoveReport}
+        removingReport={removeReport.isPending}
       />
 
       {homeTarget && (
@@ -2515,8 +2618,16 @@ export default function LabRoom({ room = null }) {
                     confirmUpload.at ? `, uploaded at ${clock(confirmUpload.at)}` : ""
                   }.`
                 : `This case already has a report from the ${confirmUpload.source || "hospital lab"}.`}{" "}
-              Uploading <strong>{confirmUpload.file.name}</strong> adds it alongside — nothing is
-              replaced or deleted.
+              {confirmUpload.kind === "order" ? (
+                <>
+                  Uploading <strong>{confirmUpload.file.name}</strong> replaces the current report.
+                </>
+              ) : (
+                <>
+                  Uploading <strong>{confirmUpload.file.name}</strong> adds it alongside — nothing
+                  is replaced or deleted.
+                </>
+              )}
             </p>
             <div className="modal-acts">
               <button className="st-btn st-btn-g" onClick={() => setConfirmUpload(null)}>
@@ -2531,7 +2642,7 @@ export default function LabRoom({ room = null }) {
                   else onUploadCase(c.caseNo, c.file, true);
                 }}
               >
-                Add as another report
+                {confirmUpload.kind === "order" ? "Replace report" : "Add as another report"}
               </button>
             </div>
           </div>

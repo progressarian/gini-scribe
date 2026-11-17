@@ -36,6 +36,7 @@ import ShiftPanel from "./ShiftPanel";
 import CounterDate, { PastDayBanner } from "./CounterDate";
 import RefundsBoard from "./RefundsBoard";
 import DeskRequestsInbox from "../DeskRequestsInbox";
+import PharmacyBillsPanel from "./PharmacyBillsPanel";
 import LeaveDraftDialog from "./LeaveDraftDialog";
 import { dropStaleForms, useSavedForm } from "./useSavedForm";
 import { BILL_FORM, BILL_FORM_PREFIX, SHIFT_FORM_PREFIX, billFormKey } from "./counterForm";
@@ -58,6 +59,12 @@ export const DESK_TABS = {
     label: "Requests",
     tabId: "bc-tab-requests",
     panelId: "bc-panel-requests",
+  },
+  pharmacy: {
+    key: "pharmacy",
+    label: "Pharmacy bills",
+    tabId: "bc-tab-pharmacy",
+    panelId: "bc-panel-pharmacy",
   },
 };
 
@@ -691,6 +698,12 @@ export default function BillingDesk({
           {tab === DESK_TABS.refunds.key && (
             <Panel tab={DESK_TABS.refunds}>
               <RefundsBoard onOpen={takePaymentOn} />
+            </Panel>
+          )}
+
+          {tab === DESK_TABS.pharmacy.key && (
+            <Panel tab={DESK_TABS.pharmacy}>
+              <PharmacyBillsPanel />
             </Panel>
           )}
 

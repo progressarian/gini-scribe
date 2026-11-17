@@ -184,7 +184,8 @@ test.describe("CRM home: paged and filtered lists", () => {
     await mine.getByRole("button", { name: "Clear filters" }).first().click();
     await expect(mine.getByText("55 doctors")).toBeVisible();
     await expect(mine.getByRole("searchbox")).toHaveValue("");
-    await mine.getByRole("combobox", { name: "Territory" }).selectOption("Mohali");
+    await mine.getByRole("button", { name: "Territory" }).click();
+    await page.getByRole("option", { name: "Mohali" }).click();
     await expect(mine.getByText("Set all 55 in Mohali to")).toBeVisible();
   });
 });

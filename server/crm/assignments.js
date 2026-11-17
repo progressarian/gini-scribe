@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { withCrmContext } from "./db.js";
 import { ASSIGNABLE_ROLES } from "./assignees.js";
+import { DOCTOR_PRIORITY_VALUES } from "../../shared/crmVocab.js";
 
 const PAGE_SIZE = 50;
 const MAX_PER_CHANGE = 100;
@@ -41,9 +42,15 @@ export async function applyAssignments(sql, { hospitalId, assignedBy, items }) {
   return new Set(rows.map((r) => r.doctor_id));
 }
 
-function filterSql({ owner = "all", territory = "", q = "" }) {
+const priorityOf = (v) => (DOCTOR_PRIORITY_VALUES.includes(v) ? v : "");
+
+function filterSql({ owner = "all", territory = "", q = "", priority = "" }) {
   const params = [];
   const where = ["d.deleted_at IS NULL", "d.is_active"];
+  if (priorityOf(priority)) {
+    params.push(priorityOf(priority));
+    where.push(`d.priority = $${params.length}`);
+  }
   if (owner === "unassigned") where.push("a.executive_id IS NULL");
   else if (owner && owner !== "all") {
     if (!UUID.test(owner)) throw new AssignmentError("Choose an owner from the list");
@@ -72,13 +79,16 @@ const FROM = `
   LEFT JOIN crm.users o ON o.id = a.executive_id
   LEFT JOIN crm.users b ON b.id = a.assigned_by`;
 
-const COLUMNS = `d.id AS doctor_id, d.full_name, d.specialty, d.mobile, d.area,
+const COLUMNS = `d.id AS doctor_id, d.full_name, d.specialty, d.mobile, d.area, d.priority,
        t.name AS territory, o.id AS owner_id, o.full_name AS owner,
        a.effective_from AS assigned_at, b.full_name AS assigned_by`;
 
 export async function listAssignments(crmUser, filters = {}) {
   const requested = Math.min(10_000, Math.max(1, Math.floor(Number(filters.page)) || 1));
   const { params, where } = filterSql(filters);
+  const priority = priorityOf(filters.priority);
+  const countParams = priority ? [priority] : [];
+  const countWhere = `d.deleted_at IS NULL AND d.is_active${priority ? " AND d.priority = $1" : ""}`;
   return withCrmContext(crmUser, async (sql) => {
     const { rows: total } = await sql(`SELECT count(*)::int AS n ${FROM} WHERE ${where}`, params);
     const page = Math.min(requested, Math.max(1, Math.ceil(total[0].n / PAGE_SIZE)));
@@ -93,15 +103,17 @@ export async function listAssignments(crmUser, filters = {}) {
          FROM crm.doctors d
          JOIN crm.doctor_assignments a ON a.doctor_id = d.id AND a.effective_to IS NULL
          JOIN crm.users o ON o.id = a.executive_id
-        WHERE d.deleted_at IS NULL AND d.is_active
+        WHERE ${countWhere}
         GROUP BY o.id, o.full_name ORDER BY o.full_name`,
+      countParams,
     );
     const { rows: overall } = await sql(
       `SELECT count(*)::int AS total,
               count(*) FILTER (WHERE a.executive_id IS NULL)::int AS unassigned
          FROM crm.doctors d
          LEFT JOIN crm.doctor_assignments a ON a.doctor_id = d.id AND a.effective_to IS NULL
-        WHERE d.deleted_at IS NULL AND d.is_active`,
+        WHERE ${countWhere}`,
+      countParams,
     );
     const { rows: territories } = await sql(
       `SELECT DISTINCT t.name FROM crm.doctors d JOIN crm.territories t ON t.id = d.territory_id
@@ -204,10 +216,11 @@ export async function assignmentsWorkbook(crmUser, filters = {}) {
     { header: "Assigned to", key: "owner", width: 22 },
     { header: "Assigned on", key: "assigned_at", width: 18, style: { numFmt: "dd-mmm-yyyy" } },
     { header: "Assigned by", key: "assigned_by", width: 22 },
+    { header: "Priority", key: "priority", width: 14 },
   ];
   rows.forEach((r) => sheet.addRow(r));
   sheet.getRow(1).font = { bold: true };
   sheet.views = [{ state: "frozen", ySplit: 1 }];
-  sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 9 } };
+  sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 10 } };
   return { buffer: await book.xlsx.writeBuffer(), count: rows.length };
 }

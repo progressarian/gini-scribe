@@ -1302,10 +1302,6 @@ a.dimp__btn {
 .asg__owner .rep__input {
   font-size: 14px;
 }
-.asg__owner--none {
-  border-color: #f59e0b;
-  background: #fffbeb;
-}
 .asg__skeleton {
   height: 64px;
   background: #f8fafc;
@@ -1421,6 +1417,34 @@ a.dimp__btn {
 .home__select--on {
   border-color: #1e40af;
   background: #eff6ff;
+}
+.crm-dd .doc-dd {
+  width: 100%;
+}
+.crm-dd .doc-dd__btn {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  font-size: 15px;
+  border-color: #cbd5e1;
+  border-radius: 8px;
+}
+.crm-dd .doc-dd__btn:focus-visible {
+  border-color: #1e40af;
+  box-shadow: 0 0 0 2px #bfdbfe;
+}
+.crm-dd .doc-dd__btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.crm-dd--on .doc-dd__btn {
+  border-color: #1e40af;
+  background: #eff6ff;
+}
+.crm-dd--warn .doc-dd__btn {
+  border-color: #f59e0b;
+  background: #fffbeb;
 }
 .home__list .rep__empty,
 .home__list .rep__more {

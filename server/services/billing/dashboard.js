@@ -5,7 +5,13 @@ import { indiaToday } from "./categoryResolver.js";
 import { unsettledOf } from "../../../shared/billingDashboardText.js";
 import { bucketsOf, cleanDashboardFilters, previousRange } from "./dashboardPeriods.js";
 import { DUE_BILLS, DUE_MONEY, DUE_OUTSTANDING } from "./dues.js";
-import { chargeColumnsFor, GROUP_KEY, LINE_KIND, PHARMACY_COLUMN } from "./dashboardCharges.js";
+import {
+  chargeColumnsFor,
+  GROUP_KEY,
+  LINE_KIND,
+  PHARMACY_COLUMN,
+  PHARMACY_LIVE_COLUMN,
+} from "./dashboardCharges.js";
 import { CATEGORY, LINE_CONSULTANT, SCHEME_JOIN, SIGN, VISIT_JOIN } from "./reports.js";
 import { dayOfInstant, reportScope } from "./reportsFilters.js";
 import {
@@ -462,6 +468,28 @@ async function totalsFor(filters, charges, db) {
   });
 }
 
+async function pharmacySales(filters, db) {
+  if (narrowed(filters)) return null;
+  const source = await db
+    .query(`SELECT stock_source FROM pharmacy_settings WHERE id`)
+    .then((r) => r.rows)
+    .catch((e) => {
+      if (e.code === "42P01" || e.code === "42703") return [];
+      throw e;
+    });
+  if (source[0]?.stock_source !== "scribe") return null;
+  const { rows } = await db.query(
+    `SELECT ${bucketOf(filters.period, "b.bill_date")}::text AS bucket,
+            COALESCE(SUM(CASE WHEN b.bill_type = 'credit_note' THEN -b.net_amount
+                              ELSE b.net_amount END), 0) AS sales
+       FROM pharmacy_bills b
+      WHERE b.status = 'final' AND b.bill_date BETWEEN $1::date AND $2::date
+      GROUP BY 1`,
+    [filters.from, filters.to],
+  );
+  return new Map(rows.map((row) => [row.bucket ?? null, paise(row.sales)]));
+}
+
 async function buildDashboard(filters, db) {
   const range = { from: filters.from, to: filters.to };
   const previous = previousRange(range);
@@ -499,6 +527,9 @@ async function buildDashboard(filters, db) {
     (sum, row) => addInto(sum, row),
     blankRow({ bucket: null, start: filters.from, end: filters.to, partial: false }, charges),
   );
+  const pharmacy = await pharmacySales(filters, db);
+  for (const row of rows) row.pharmacy = pharmacy ? (pharmacy.get(row.bucket) ?? 0) : null;
+  total.pharmacy = pharmacy ? [...pharmacy.values()].reduce((sum, v) => sum + v, 0) : null;
   const rangeBills = bills.find((row) => row.rolled);
   total.patients = Number(rangeBills?.patients ?? 0);
   total.rev_per_patient = total.patients ? Math.round(total.net_revenue / total.patients) : null;
@@ -506,7 +537,11 @@ async function buildDashboard(filters, db) {
     filters,
     previous_range: previous,
     generated_at: new Date().toISOString(),
-    columns: { charges, money: MONEY_COLUMNS, pharmacy: PHARMACY_COLUMN },
+    columns: {
+      charges,
+      money: MONEY_COLUMNS,
+      pharmacy: pharmacy ? PHARMACY_LIVE_COLUMN : PHARMACY_COLUMN,
+    },
     rows,
     total,
     kpis: { current: kpisOf(total), previous: kpisOf(before) },

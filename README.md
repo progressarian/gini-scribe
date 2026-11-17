@@ -186,6 +186,23 @@ Wait-time and bottleneck reports moved to Gini Flow at `/giniflow/reports` (`ser
 
 ---
 
+## Pharmacy
+
+Stock, billing and credit for the hospital pharmacy, replacing DARPAN after a parallel run. Screens under `/pharmacy/*`:
+
+| Route                                                                                     | Who uses it                                                                                                                                            |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/pharmacy/dashboard`, `/pharmacy/reports`                                                | Pharmacy admin — today's figures; sales, GST, collections, purchase, H1 register, expiry loss, stock value, dues, DARPAN reconciliation (Excel export) |
+| `/pharmacy/billing`                                                                       | Pharmacist — counter bills (OPD, walk-in, IPD), batch picker, split payment, returns, prescription prefill                                             |
+| `/pharmacy/credit`                                                                        | Pharmacist asks, pharmacy admin approves credit; dues collection                                                                                       |
+| `/pharmacy/purchases`, `/pharmacy/stock`, `/pharmacy/expiry`                              | Goods receipts, batch stock by location, expiry list and vendor returns                                                                                |
+| `/pharmacy/transfers`, `/pharmacy/indents`                                                | Restocking departments; nurses issuing medicines from department stock                                                                                 |
+| `/pharmacy/vendors`, `/pharmacy/medicines`, `/pharmacy/departments`, `/pharmacy/settings` | Masters, number series, stock source                                                                                                                   |
+
+Stock is a batch ledger: `pharmacy_stock` is a cache of the append-only `pharmacy_stock_movements`, and `services/pharmacy/stockLedger.js` `postMovements` is the only writer. Pharmacy bills live in their own tables (`pharmacy_bills`, `pharmacy_bill_lines`, `pharmacy_payments`) and reuse the billing code for GST, numbering, PDFs and audit; reception collects pharmacy dues from the billing desk and pharmacy cash shows in the cash shift. Alerts (low stock, expiry, credit requests, ledger drift) go to the header bell (`notifications`), raised on every stock change and by a 6-hourly worker sweep. Plan and decisions: `docs/PHARMACY_MODULE_PLAN.md`; go-live steps: `docs/PHARMACY_CUTOVER.md`.
+
+---
+
 ## External Systems
 
 **HealthRay** — the hospital's HIS, and the authoritative source for appointments, visit completion, labs, and scanned documents. It has no webhooks, so sync is a set of self-rescheduling loops in `server/services/cron/`. The cadences are deliberately slow (roughly 2–3 minutes): tighter polling repeatedly tripped HealthRay's WAF into a 403 IP-block. `HEALTHRAY_PROXY_URL` points all HealthRay traffic through a static-IP proxy so the IP can be allowlisted — that is the permanent fix. `labapi.healthray.com` is a **separate** system from `node.healthray.com` with its own credentials and its own loop.

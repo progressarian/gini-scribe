@@ -1694,6 +1694,11 @@
   color: var(--ink3);
   margin-bottom: 8px;
 }
+.gf .dp-report-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .gf .dp-hint {
   font-size: 11px;
   color: var(--ink3);

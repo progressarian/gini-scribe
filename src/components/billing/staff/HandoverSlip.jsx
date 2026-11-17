@@ -32,6 +32,8 @@ export default function HandoverSlip({ data, level = 1 }) {
   const { shift, payments, cleared } = data;
   const snap = shift.handover;
   const paidBack = snap?.refunded.cash ?? shift.refunded.cash;
+  const pharmacy = snap?.pharmacy ?? shift.pharmacy;
+  const pharmacyCash = pharmacy ? pharmacy.cash_collected - pharmacy.cash_refunded : 0;
   const expected = snap?.expected_cash ?? shift.expected_cash;
   const counted = snap ? snap.counted_cash : shift.counted_cash;
   const difference = snap ? snap.difference : shift.difference;
@@ -63,6 +65,9 @@ export default function HandoverSlip({ data, level = 1 }) {
             <Row label="Opening cash" value={money(shift.opening_cash)} />
             <Row label="+ Cash taken" value={money(snap?.collected.cash ?? shift.collected.cash)} />
             <Row label="− Cash paid back" value={paidBack ? `−${money(paidBack)}` : money(0)} />
+            {pharmacyCash ? (
+              <Row label="+ Pharmacy cash (net)" value={money(pharmacyCash)} />
+            ) : null}
             <Row label="= Expected in drawer" value={money(expected)} strong />
             <Row
               label="Counted"

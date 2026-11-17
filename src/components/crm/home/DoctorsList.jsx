@@ -5,7 +5,7 @@ import DoctorRow from "./DoctorRow.jsx";
 import ListPager from "../ListPager.jsx";
 import { SearchField, FilterSelect, ListStatus, ListBody } from "./ListToolbar.jsx";
 import { PRIORITY_OPTIONS, DUE_OPTIONS, territoryOptions, hasFilters } from "./options.js";
-import { DOCTOR_PRIORITIES } from "../../../../shared/crmVocab.js";
+import { SELECTABLE_DOCTOR_PRIORITIES } from "../../../../shared/crmVocab.js";
 import { errorText } from "../import/importText.js";
 
 const FILTER_KEYS = ["q", "territory", "priority", "due", "incomplete"];
@@ -91,7 +91,7 @@ export default function DoctorsList({ filters, onChange, refreshKey, onChanged }
           <span className="rep__hint">
             Set all {data.counts.territory} in {filters.territory} to
           </span>
-          {DOCTOR_PRIORITIES.filter((p) => p.value !== "unclassified").map((p) => (
+          {SELECTABLE_DOCTOR_PRIORITIES.filter((p) => p.value !== "unclassified").map((p) => (
             <button
               key={p.value}
               type="button"

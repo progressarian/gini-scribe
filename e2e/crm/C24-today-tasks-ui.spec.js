@@ -163,7 +163,8 @@ test.describe("CRM home: Today and Tasks tabs", () => {
     await dialog.getByLabel("Assign to").selectOption({ label: "Sandeep Sangroy" });
     await dialog.getByRole("button", { name: "Add task" }).click();
     await expect(page.getByText("Task added.")).toBeVisible();
-    await panel.getByLabel("Owner").selectOption({ label: "Sandeep Sangroy" });
+    await panel.getByRole("button", { name: "Owner" }).click();
+    await page.getByRole("option", { name: "Sandeep Sangroy" }).click();
     await expect(panel.locator(".tsk__row").filter({ hasText: "Meet Dr Due Today" })).toContainText(
       "Sandeep Sangroy",
     );
