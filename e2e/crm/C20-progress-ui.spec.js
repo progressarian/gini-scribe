@@ -6,16 +6,22 @@ import { query } from "../helpers/db.mjs";
 import { addDays, istDate } from "../../server/crm/istPeriods.js";
 
 const SHOTS = process.env.SHOT_DIR;
+const field = (page, label) => page.getByRole("button", { name: label, exact: true });
+const pick = async (page, label, option) => {
+  await field(page, label).click();
+  await page.getByRole("option", { name: option, exact: true }).click();
+};
 
 test.describe("CRM progress page", () => {
   let users;
+  let mine;
 
   test.beforeAll(async () => {
     test.setTimeout(120_000);
     const seeded = await seedCrmStaff();
     users = seeded.users;
     const hospitalId = seeded.hospitalId;
-    const mine = await seedDoctors(hospitalId, [
+    mine = await seedDoctors(hospitalId, [
       {
         full_name: "Dr Kiran Bedi Long Name Clinic Phase Seven",
         territory: "Mohali",
@@ -48,8 +54,8 @@ test.describe("CRM progress page", () => {
     await page.locator(".tabs").getByRole("link", { name: "📈 Progress" }).click();
     await expect(page.getByRole("heading", { name: "Progress" })).toBeVisible();
     await expect(page.getByText(/^Rajesh Sharma · /)).toBeVisible();
-    await expect(page.getByLabel("Period")).toHaveValue("this_month");
-    await expect(page.getByLabel("Staff")).toHaveCount(0);
+    await expect(field(page, "Period")).toHaveText("This month");
+    await expect(field(page, "Staff")).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Staff comparison" })).toHaveCount(0);
     await expect(page.locator(".prg__card").filter({ hasText: /^2\s*Visits/ })).toBeVisible();
     await expect(page.getByText("Sandeep")).toHaveCount(0);
@@ -74,13 +80,14 @@ test.describe("CRM progress page", () => {
     await expect(page).toHaveURL(new RegExp(`rep=${users.sandeep.crmId}`));
     await expect(page.getByText(/^Sandeep Sangroy · /)).toBeVisible();
     await expect(page.getByRole("heading", { name: "Staff comparison" })).toHaveCount(0);
-    await page.getByLabel("Period").selectOption("this_month");
+    await pick(page, "Period", "Last month");
+    await pick(page, "Period", "This month");
     await expect(page).toHaveURL(/period=this_month/);
     await page.reload();
-    await expect(page.getByLabel("Period")).toHaveValue("this_month");
-    await expect(page.getByLabel("Staff")).toHaveValue(users.sandeep.crmId);
+    await expect(field(page, "Period")).toHaveText("This month");
+    await expect(field(page, "Staff")).toHaveText("Sandeep Sangroy");
     await page.getByRole("button", { name: "Reset filters" }).click();
-    await expect(page.getByLabel("Staff")).toHaveValue("all");
+    await expect(field(page, "Staff")).toHaveText("All staff");
   });
 
   test("3. Custom range, a bad range shows the reason, and an empty period says so", async ({
@@ -157,11 +164,11 @@ test.describe("CRM progress page", () => {
     await expect(table.locator("thead")).toContainText("Sandeep Sangroy");
     await expect(table.locator("tbody tr").last()).toContainText("3");
 
-    await page.getByLabel("Territory").selectOption({ label: "Kharar" });
+    await pick(page, "Territory", "Kharar");
     await expect(page).toHaveURL(/territory=/);
     await expect(page.locator(".prg__card").filter({ hasText: /^1\s*Visits/ })).toBeVisible();
 
-    await page.getByLabel("Period").selectOption("custom");
+    await pick(page, "Period", "Custom range");
     await page.getByLabel("From", { exact: true }).fill(addDays(today, -10));
     await page.getByLabel("To", { exact: true }).fill(today);
     await page.getByRole("button", { name: "Apply" }).click();
@@ -176,5 +183,43 @@ test.describe("CRM progress page", () => {
     await page.getByRole("button", { name: "Reset filters" }).click();
     await expect(page.getByRole("alert")).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Staff comparison" })).toBeVisible();
+  });
+
+  test("8. Priority filter narrows the report, the doctor list and the download", async ({
+    page,
+  }) => {
+    await query(`UPDATE crm.doctors SET priority = 'A' WHERE id = $1`, [mine[0].id]);
+    const head = await crmApi(users.virender);
+    const report = async (params) =>
+      (await head.get(`/api/crm/progress?${new URLSearchParams(params)}`)).json();
+    const all = await report({ period: "today" });
+    const onlyA = await report({ period: "today", priority: "A" });
+    expect(all.cards.visits.visits).toBe(3);
+    expect(onlyA.cards.visits.visits).toBe(1);
+    expect(onlyA.filters.priority).toBe("A");
+    expect((await report({ period: "today", priority: "B" })).cards.visits.visits).toBe(0);
+    const bad = await head.get("/api/crm/progress?priority=Z");
+    expect(bad.status()).toBe(400);
+    expect((await bad.json()).error).toBe("Choose a priority from the list.");
+    const doctors = await (
+      await head.get("/api/crm/progress/doctors?period=today&priority=A")
+    ).json();
+    expect(doctors.rows.map((d) => d.full_name)).toEqual([mine[0].full_name]);
+    const xlsx = await head.get("/api/crm/progress/export.xlsx?period=today&priority=A");
+    expect(xlsx.status()).toBe(200);
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await loginCrm(page, head);
+    await gotoReady(page, "/crm/progress?period=today", () =>
+      page.getByRole("heading", { name: "Staff comparison" }),
+    );
+    await field(page, "Priority").click();
+    await expect(page.getByRole("option", { name: /^C —/ })).toHaveCount(0);
+    await page.getByRole("option", { name: "A — High value" }).click();
+    await expect(page).toHaveURL(/priority=A/);
+    await expect(page.locator(".prg__card").filter({ hasText: /^1\s*Visits/ })).toBeVisible();
+    await page.getByRole("button", { name: "Reset filters" }).click();
+    await expect(page).not.toHaveURL(/priority=/);
+    await expect(field(page, "Priority")).toHaveText("All priorities");
   });
 });

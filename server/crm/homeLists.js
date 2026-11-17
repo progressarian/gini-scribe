@@ -1,5 +1,6 @@
 import { withCrmContext } from "./db.js";
 import { VISIT_DUE_CTE } from "./visitDue.js";
+import { ASSIGNABLE_ROLES, ASSIGNING_ROLES } from "./assignees.js";
 import {
   DOCTOR_PRIORITY_VALUES,
   REFERRAL_STATUS_VALUES,
@@ -12,6 +13,9 @@ const WAITING_STATES = ["overdue", "due", "never_visited"];
 
 const MAX_PAGE = 10_000;
 const MAX_TEXT = 100;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const canPickOwner = (crmUser) => ASSIGNING_ROLES.includes(crmUser?.role);
 
 const pageOf = (v) => Math.min(MAX_PAGE, Math.max(1, Math.floor(Number(v)) || 1));
 const textOf = (v) => (typeof v === "string" ? v.trim().slice(0, MAX_TEXT) : "");
@@ -45,13 +49,23 @@ const DOCTOR_FROM = `
 const DOCTOR_COLUMNS = `d.id AS doctor_id, d.full_name, d.specialty, d.area, d.city, d.priority,
        d.relationship_stage, d.mobile, d.profile_complete, d.missing_fields,
        d.needs_verification, t.name AS territory_name,
-       vd.due_state, vd.last_visit_at, vd.next_due_on`;
+       vd.due_state, vd.last_visit_at, vd.next_due_on,
+       (SELECT u.full_name FROM crm.doctor_assignments a JOIN crm.users u ON u.id = a.executive_id
+         WHERE a.doctor_id = d.id AND a.effective_to IS NULL LIMIT 1) AS owner_name`;
 
 const PRIORITY_RANK = `CASE d.priority WHEN 'A' THEN 0 WHEN 'B' THEN 1 WHEN 'C' THEN 2 ELSE 3 END`;
 
-function doctorFilters(filters, { waitingOnly }) {
+const CURRENT_OWNER = `SELECT a.executive_id FROM crm.doctor_assignments a
+  WHERE a.doctor_id = d.id AND a.effective_to IS NULL`;
+
+function doctorFilters(filters, { waitingOnly, pickOwner }) {
   const q = builder();
   q.where.push("d.deleted_at IS NULL", "d.is_active");
+  if (pickOwner && filters.owner === "unassigned") {
+    q.where.push(`NOT EXISTS (${CURRENT_OWNER})`);
+  } else if (pickOwner && UUID.test(String(filters.owner || ""))) {
+    q.where.push(`EXISTS (${CURRENT_OWNER} AND a.executive_id = ${q.bind(filters.owner)}::uuid)`);
+  }
   if (waitingOnly) q.where.push(`vd.due_state = ANY(${q.bind(WAITING_STATES)}::text[])`);
   if (DOCTOR_PRIORITY_VALUES.includes(filters.priority)) {
     q.where.push(`d.priority = ${q.bind(filters.priority)}`);
@@ -79,9 +93,20 @@ async function territoriesOf(sql) {
   return rows.map((r) => r.name);
 }
 
+async function staffOf(sql, crmUser) {
+  if (!canPickOwner(crmUser)) return null;
+  const { rows } = await sql(
+    `SELECT id, full_name FROM crm.users
+      WHERE is_active AND deleted_at IS NULL AND role = ANY($1::text[])
+      ORDER BY full_name`,
+    [ASSIGNABLE_ROLES],
+  );
+  return rows;
+}
+
 export async function listDueDoctors(crmUser, filters = {}) {
   const requested = pageOf(filters.page);
-  const q = doctorFilters(filters, { waitingOnly: true });
+  const q = doctorFilters(filters, { waitingOnly: true, pickOwner: canPickOwner(crmUser) });
   const scoped = q.where.join(" AND ");
   const state = WAITING_STATES.includes(filters.state) ? filters.state : null;
   const stateParam = state ? q.bind(state) : null;
@@ -110,13 +135,14 @@ export async function listDueDoctors(crmUser, filters = {}) {
       ...paged(rows, total, page),
       counts: counts[0],
       territories: await territoriesOf(sql),
+      staff: await staffOf(sql, crmUser),
     };
   });
 }
 
 export async function listMyDoctors(crmUser, filters = {}) {
   const requested = pageOf(filters.page);
-  const q = doctorFilters(filters, { waitingOnly: false });
+  const q = doctorFilters(filters, { waitingOnly: false, pickOwner: canPickOwner(crmUser) });
   if (VISIT_DUE_STATE_VALUES.includes(filters.due)) {
     q.where.push(`vd.due_state = ${q.bind(filters.due)}`);
   }
@@ -150,6 +176,7 @@ export async function listMyDoctors(crmUser, filters = {}) {
       ...paged(rows, counts[0].total, page),
       counts: { ...counts[0], territory: territoryTotal },
       territories: await territoriesOf(sql),
+      staff: await staffOf(sql, crmUser),
     };
   });
 }

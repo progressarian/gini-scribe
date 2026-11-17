@@ -188,4 +188,46 @@ test.describe("CRM home: paged and filtered lists", () => {
     await page.getByRole("option", { name: "Mohali" }).click();
     await expect(mine.getByText("Set all 55 in Mohali to")).toBeVisible();
   });
+
+  test("7. Staff filter: leads filter by owner, reps cannot", async ({ page }) => {
+    const head = await crmApi(users.virender);
+    const asHead = async (path, params = {}) =>
+      (await head.get(`${path}?${new URLSearchParams(params)}`)).json();
+    const all = await asHead("/api/crm/home/doctors");
+    expect(all.staff.map((s) => s.full_name)).toEqual(
+      expect.arrayContaining(["Rajesh Sharma", "Sandeep Sangroy"]),
+    );
+    const theirs = await asHead("/api/crm/home/doctors", { owner: users.sandeep.crmId });
+    expect(theirs.total).toBe(3);
+    expect(theirs.rows.every((r) => r.owner_name === "Sandeep Sangroy")).toBe(true);
+    expect((await asHead("/api/crm/home/doctors", { owner: users.rajesh.crmId })).total).toBe(55);
+    expect((await asHead("/api/crm/home/doctors", { owner: "unassigned" })).total).toBe(0);
+    expect((await asHead("/api/crm/home/doctors", { owner: "not-a-uuid" })).total).toBe(58);
+    const due = await asHead("/api/crm/home/due", { owner: users.sandeep.crmId });
+    expect(due.counts).toMatchObject({ all: 3, never_visited: 3 });
+
+    const rep = await get("/api/crm/home/doctors", { owner: users.sandeep.crmId });
+    expect(rep.staff).toBeNull();
+    expect(rep.total).toBe(55);
+
+    await loginCrm(page, head);
+    await gotoReady(page, "/crm/home", () => page.getByRole("button", { name: "My doctors" }));
+    await page.getByRole("button", { name: "My doctors" }).click();
+    const mine = page.getByRole("region", { name: "My doctors" });
+    await expect(mine.getByText("58 doctors")).toBeVisible();
+    await mine.getByRole("button", { name: "Staff", exact: true }).click();
+    await page.getByRole("option", { name: "Sandeep Sangroy" }).click();
+    await expect(mine.getByText("3 doctors", { exact: true })).toBeVisible();
+    await expect(mine.getByText("Owner: Sandeep Sangroy")).toHaveCount(3);
+    await mine.getByRole("button", { name: "Clear filters" }).first().click();
+    await expect(mine.getByText("58 doctors")).toBeVisible();
+
+    await loginCrm(page, api);
+    await gotoReady(page, "/crm/home", () => page.getByRole("button", { name: "My doctors" }));
+    await expect(
+      page
+        .getByRole("region", { name: "Doctors to visit" })
+        .getByRole("button", { name: "Staff", exact: true }),
+    ).toHaveCount(0);
+  });
 });

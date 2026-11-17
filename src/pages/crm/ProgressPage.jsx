@@ -12,7 +12,7 @@ import DoctorsAdded from "../../components/crm/progress/DoctorsAdded.jsx";
 import ProgressDoctors from "../../components/crm/progress/ProgressDoctors.jsx";
 import { SERIES, rangeText } from "../../components/crm/progress/progressText.js";
 
-const KEYS = ["period", "from", "to", "group", "rep", "territory"];
+const KEYS = ["period", "from", "to", "group", "rep", "territory", "priority"];
 
 export default function ProgressPage() {
   const [params, setParams] = useSearchParams();
@@ -74,6 +74,7 @@ export default function ProgressPage() {
         to: reportFilters.to,
         rep: reportFilters.rep,
         territory: reportFilters.territory || undefined,
+        priority: reportFilters.priority || undefined,
       }
     : null;
   const who = !data

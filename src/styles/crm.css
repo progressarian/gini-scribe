@@ -2375,3 +2375,12 @@ a.rep__btn {
     justify-content: flex-start;
   }
 }
+.prg__field.crm-dd .doc-dd__btn {
+  min-height: 38px;
+  padding: 8px 12px;
+  font-size: 14px;
+  background: #fff;
+}
+.prg__field.crm-dd--on .doc-dd__btn {
+  background: #eff6ff;
+}

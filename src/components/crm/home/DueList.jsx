@@ -2,7 +2,7 @@ import usePagedList from "./usePagedList.js";
 import DoctorRow from "./DoctorRow.jsx";
 import ListPager from "../ListPager.jsx";
 import { SearchField, FilterSelect, ListStatus, ListBody } from "./ListToolbar.jsx";
-import { PRIORITY_OPTIONS, territoryOptions, hasFilters } from "./options.js";
+import { PRIORITY_OPTIONS, territoryOptions, staffOptions, hasFilters } from "./options.js";
 
 const STATES = [
   { key: "", label: "All waiting", count: "all" },
@@ -10,7 +10,7 @@ const STATES = [
   { key: "due", label: "Due", count: "due" },
   { key: "never_visited", label: "Never visited", count: "never_visited" },
 ];
-const FILTER_KEYS = ["q", "priority", "territory"];
+const FILTER_KEYS = ["q", "priority", "territory", "owner"];
 
 export default function DueList({ filters, onChange, refreshKey }) {
   const list = usePagedList(
@@ -60,6 +60,15 @@ export default function DueList({ filters, onChange, refreshKey }) {
           allLabel="All territories"
           options={territoryOptions(data)}
         />
+        {data?.staff && (
+          <FilterSelect
+            label="Staff"
+            value={filters.owner}
+            onChange={(owner) => update({ owner })}
+            allLabel="All staff"
+            options={staffOptions(data)}
+          />
+        )}
       </div>
       <ListStatus {...list} noun="doctor" active={active} onClear={clear} />
       <ListBody
@@ -71,7 +80,7 @@ export default function DueList({ filters, onChange, refreshKey }) {
         filteredEmpty="No doctors to visit match these filters."
       >
         {data?.rows.map((d) => (
-          <DoctorRow key={d.doctor_id} d={d} showDue />
+          <DoctorRow key={d.doctor_id} d={d} showDue showOwner={!!data.staff} />
         ))}
       </ListBody>
       <ListPager

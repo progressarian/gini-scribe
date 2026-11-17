@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { visitDueStateMeta, doctorPriorityMeta } from "../../../../shared/crmVocab.js";
 
-export default function DoctorRow({ d, showDue }) {
+export default function DoctorRow({ d, showDue, showOwner }) {
   const navigate = useNavigate();
   const due = d.due_state ? visitDueStateMeta(d.due_state) : null;
   const pri = doctorPriorityMeta(d.priority);
@@ -23,6 +23,11 @@ export default function DoctorRow({ d, showDue }) {
           {showDue && due && <span className={`rep__due rep__due--${due.tone}`}>{due.label}</span>}
           {d.profile_complete === false && <span className="rep__flag">No mobile</span>}
           {d.needs_verification && <span className="rep__flag">Check details</span>}
+          {showOwner && (
+            <span className="rep__flag">
+              {d.owner_name ? `Owner: ${d.owner_name}` : "Unassigned"}
+            </span>
+          )}
         </span>
       </div>
       <div className="rep__row-actions">

@@ -4,11 +4,17 @@ import usePagedList from "./usePagedList.js";
 import DoctorRow from "./DoctorRow.jsx";
 import ListPager from "../ListPager.jsx";
 import { SearchField, FilterSelect, ListStatus, ListBody } from "./ListToolbar.jsx";
-import { PRIORITY_OPTIONS, DUE_OPTIONS, territoryOptions, hasFilters } from "./options.js";
+import {
+  PRIORITY_OPTIONS,
+  DUE_OPTIONS,
+  territoryOptions,
+  staffOptions,
+  hasFilters,
+} from "./options.js";
 import { SELECTABLE_DOCTOR_PRIORITIES } from "../../../../shared/crmVocab.js";
 import { errorText } from "../import/importText.js";
 
-const FILTER_KEYS = ["q", "territory", "priority", "due", "incomplete"];
+const FILTER_KEYS = ["q", "territory", "priority", "due", "incomplete", "owner"];
 
 export default function DoctorsList({ filters, onChange, refreshKey, onChanged }) {
   const list = usePagedList(
@@ -24,7 +30,8 @@ export default function DoctorsList({ filters, onChange, refreshKey, onChanged }
     setBulkMsg(null);
     onChange({ ...filters, ...patch, page: 1 });
   };
-  const clear = () => update({ q: "", territory: "", priority: "", due: "", incomplete: "" });
+  const clear = () =>
+    update({ q: "", territory: "", priority: "", due: "", incomplete: "", owner: "" });
   const active = hasFilters(filters, FILTER_KEYS);
 
   const classifyTerritory = async (priority) => {
@@ -76,6 +83,15 @@ export default function DoctorsList({ filters, onChange, refreshKey, onChanged }
           allLabel="Any visit status"
           options={DUE_OPTIONS}
         />
+        {data?.staff && (
+          <FilterSelect
+            label="Staff"
+            value={filters.owner}
+            onChange={(owner) => update({ owner })}
+            allLabel="All staff"
+            options={staffOptions(data)}
+          />
+        )}
         <button
           type="button"
           className={`rep__chip ${filters.incomplete ? "rep__chip--on" : ""}`}
@@ -120,7 +136,7 @@ export default function DoctorsList({ filters, onChange, refreshKey, onChanged }
         filteredEmpty="No doctors match these filters."
       >
         {data?.rows.map((d) => (
-          <DoctorRow key={d.doctor_id} d={d} />
+          <DoctorRow key={d.doctor_id} d={d} showOwner={!!data.staff} />
         ))}
       </ListBody>
       <ListPager

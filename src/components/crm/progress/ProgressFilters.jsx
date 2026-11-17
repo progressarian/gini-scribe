@@ -1,5 +1,28 @@
 import { useEffect, useState } from "react";
+import Dropdown from "../../ui/Dropdown.jsx";
 import { GROUPS, PERIODS, istToday } from "./progressText.js";
+import { DOCTOR_PRIORITIES } from "../../../../shared/crmVocab.js";
+
+const priorityOptions = (current) =>
+  DOCTOR_PRIORITIES.filter((p) => !p.retired || p.value === current).map((p) => ({
+    value: p.value,
+    label: p.label,
+  }));
+
+function PickField({ label, value, options, onChange, disabled, active }) {
+  return (
+    <div className={`prg__field crm-dd ${active ? "crm-dd--on" : ""}`}>
+      <span aria-hidden="true">{label}</span>
+      <Dropdown
+        ariaLabel={label}
+        value={value}
+        options={options}
+        onChange={onChange}
+        disabled={disabled}
+      />
+    </div>
+  );
+}
 
 export default function ProgressFilters({ filters, data, onChange, onReset, busy }) {
   const [from, setFrom] = useState(filters.from || "");
@@ -16,7 +39,8 @@ export default function ProgressFilters({ filters, data, onChange, onReset, busy
     (filters.period && filters.period !== "this_month") ||
     filters.group ||
     (filters.rep && filters.rep !== "all") ||
-    filters.territory,
+    filters.territory ||
+    filters.priority,
   );
 
   return (
@@ -28,27 +52,19 @@ export default function ProgressFilters({ filters, data, onChange, onReset, busy
         if (custom) onChange({ from, to });
       }}
     >
-      <label className="prg__field">
-        <span>Period</span>
-        <select
-          className="rep__input"
-          value={filters.period || "this_month"}
-          onChange={(e) =>
-            onChange(
-              e.target.value === "custom"
-                ? { period: "custom", from: data?.filters.from, to: data?.filters.to }
-                : { period: e.target.value, from: null, to: null },
-            )
-          }
-          disabled={busy}
-        >
-          {PERIODS.map((p) => (
-            <option key={p.value} value={p.value}>
-              {p.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      <PickField
+        label="Period"
+        value={filters.period || "this_month"}
+        options={PERIODS}
+        onChange={(period) =>
+          onChange(
+            period === "custom"
+              ? { period: "custom", from: data?.filters.from, to: data?.filters.to }
+              : { period, from: null, to: null },
+          )
+        }
+        disabled={busy}
+      />
 
       {custom && (
         <>
@@ -81,57 +97,48 @@ export default function ProgressFilters({ filters, data, onChange, onReset, busy
         </>
       )}
 
-      <label className="prg__field">
-        <span>Trend</span>
-        <select
-          className="rep__input"
-          value={filters.group || ""}
-          onChange={(e) => onChange({ group: e.target.value || null })}
-          disabled={busy}
-        >
-          {GROUPS.map((g) => (
-            <option key={g.value} value={g.value}>
-              {g.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      <PickField
+        label="Trend"
+        value={filters.group || ""}
+        options={GROUPS}
+        onChange={(group) => onChange({ group: group || null })}
+        disabled={busy}
+      />
 
       {data?.can_pick_staff && (
-        <label className="prg__field">
-          <span>Staff</span>
-          <select
-            className={`rep__input ${filters.rep && filters.rep !== "all" ? "home__select--on" : ""}`}
-            value={filters.rep || "all"}
-            onChange={(e) => onChange({ rep: e.target.value === "all" ? null : e.target.value })}
-            disabled={busy}
-          >
-            <option value="all">All staff</option>
-            {data.staff_options.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.full_name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <PickField
+          label="Staff"
+          value={filters.rep || "all"}
+          active={Boolean(filters.rep && filters.rep !== "all")}
+          options={[
+            { value: "all", label: "All staff" },
+            ...data.staff_options.map((s) => ({ value: s.id, label: s.full_name })),
+          ]}
+          onChange={(rep) => onChange({ rep: rep === "all" ? null : rep })}
+          disabled={busy}
+        />
       )}
 
-      <label className="prg__field">
-        <span>Territory</span>
-        <select
-          className={`rep__input ${filters.territory ? "home__select--on" : ""}`}
-          value={filters.territory || ""}
-          onChange={(e) => onChange({ territory: e.target.value || null })}
-          disabled={busy}
-        >
-          <option value="">All territories</option>
-          {(data?.territories || []).map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      <PickField
+        label="Territory"
+        value={filters.territory || ""}
+        active={Boolean(filters.territory)}
+        options={[
+          { value: "", label: "All territories" },
+          ...(data?.territories || []).map((t) => ({ value: t.id, label: t.name })),
+        ]}
+        onChange={(territory) => onChange({ territory: territory || null })}
+        disabled={busy}
+      />
+
+      <PickField
+        label="Priority"
+        value={filters.priority || ""}
+        active={Boolean(filters.priority)}
+        options={[{ value: "", label: "All priorities" }, ...priorityOptions(filters.priority)]}
+        onChange={(priority) => onChange({ priority: priority || null })}
+        disabled={busy}
+      />
 
       {changed && (
         <button type="button" className="asg__link prg__reset" onClick={onReset} disabled={busy}>

@@ -11,7 +11,9 @@ import {
 } from "./daysOff.js";
 import { ASSIGNABLE_ROLES, ASSIGNING_ROLES } from "./assignees.js";
 import {
+  DOCTOR_PRIORITY_VALUES,
   REFERRAL_STATUSES,
+  doctorPriorityMeta,
   VISIT_OUTCOMES,
   VISIT_SOURCES,
   VISIT_TYPES,
@@ -176,6 +178,14 @@ async function resolveIn(sql, crmUser, query = {}) {
     territory = String(query.territory);
   }
 
+  let priority = null;
+  if (query.priority) {
+    if (!DOCTOR_PRIORITY_VALUES.includes(String(query.priority))) {
+      throw new ProgressError("Choose a priority from the list.");
+    }
+    priority = String(query.priority);
+  }
+
   return {
     period: query.from || query.to ? "custom" : period,
     from: range.from,
@@ -185,6 +195,7 @@ async function resolveIn(sql, crmUser, query = {}) {
     rep,
     repIds,
     territory,
+    priority,
     canPickStaff: pick,
     staffOptions: options,
   };
@@ -199,7 +210,11 @@ const endOf = (param) => `((${param}::date + 1)::timestamp AT TIME ZONE ${IST})`
 const between = (col, fromParam, toParam) =>
   `${col} >= ${startOf(fromParam)} AND ${col} < ${endOf(toParam)}`;
 const territoryClause = (alias, param) =>
-  `(${param}::uuid IS NULL OR ${alias}.territory_id = ${param}::uuid)`;
+  `((${param}::jsonb->>'territory') IS NULL
+    OR ${alias}.territory_id = (${param}::jsonb->>'territory')::uuid)
+   AND ((${param}::jsonb->>'priority') IS NULL
+    OR ${alias}.priority = (${param}::jsonb->>'priority'))`;
+const doctorScope = (f) => JSON.stringify({ territory: f.territory, priority: f.priority });
 
 const visitMetricsSql = (from, to) => `SELECT v.executive_id,
             count(*)::int AS visits,
@@ -259,7 +274,7 @@ const taskMetricsSql = (from, to) => `SELECT t.owner_id AS executive_id,
        FROM crm.tasks t
        LEFT JOIN crm.doctors d ON d.id = t.doctor_id
       WHERE t.deleted_at IS NULL AND t.owner_id = ANY($1::uuid[])
-        AND ($4::uuid IS NULL OR d.territory_id = $4::uuid)
+        AND ${territoryClause("d", "$4")}
       GROUP BY GROUPING SETS ((t.owner_id), ())`;
 
 const ZERO = {
@@ -499,7 +514,7 @@ async function reportData(sql, f) {
       f.repIds,
       f.from,
       f.to,
-      f.territory,
+      doctorScope(f),
       REACHED,
       f.previous.from,
       f.previous.to,
@@ -575,6 +590,7 @@ export async function progressReport(crmUser, query) {
         group: f.group,
         rep: f.rep,
         territory: f.territory,
+        priority: f.priority,
       },
       can_pick_staff: f.canPickStaff,
       staff_options: f.staffOptions.map(({ id, full_name }) => ({ id, full_name })),
@@ -600,7 +616,7 @@ const PRIORITY_RANK = `CASE d.priority WHEN 'A' THEN 0 WHEN 'B' THEN 1 WHEN 'C' 
 
 async function doctorRows(sql, f, { state, q, limit, offset }) {
   const term = textOf(q);
-  const params = [f.repIds, f.from, f.to, f.territory, term ? likeOf(term) : null];
+  const params = [f.repIds, f.from, f.to, doctorScope(f), term ? likeOf(term) : null];
   const search = `($5::text IS NULL OR d.full_name ILIKE $5 OR d.area ILIKE $5 OR d.mobile ILIKE $5)`;
   if (state === "added") {
     const addedParams = [...params, allCreators(f)];
@@ -759,6 +775,14 @@ export async function progressWorkbook(crmUser, query) {
   ];
   const line = (label, now, before = "") => summary.addRow({ label, now, before });
   line("Staff", who, who);
+  if (filters.territory) {
+    const name = report.territories.find((t) => t.id === filters.territory)?.name ?? "";
+    line("Territory", name, name);
+  }
+  if (filters.priority) {
+    const label = doctorPriorityMeta(filters.priority)?.label ?? filters.priority;
+    line("Priority", label, label);
+  }
   line("Visits", cards.visits.visits, prev.visits.visits);
   line(
     filters.rep === "all" ? "Working days (all staff added up)" : "Working days",
