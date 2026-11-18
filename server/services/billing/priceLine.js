@@ -76,7 +76,8 @@ function cleanAgreedRate(value) {
   return paise(rate);
 }
 
-function rateFor(row, agreed) {
+function rateFor(row, agreed, packageRate = null) {
+  if (packageRate !== null) return { value: packageRate, source: "package" };
   const categoryRate = pick(
     row.own_rate === null ? null : paise(row.own_rate),
     row.parent_rate === null ? null : paise(row.parent_rate),
@@ -150,7 +151,7 @@ export async function primeLineItems(inputs, db) {
 }
 
 export async function lineActual(
-  { item, quantity, category, date, kept, agreedRate } = {},
+  { item, quantity, category, date, kept, agreedRate, packageRate } = {},
   db = pool,
 ) {
   const itemId = cleanItem(item);
@@ -171,7 +172,7 @@ export async function lineActual(
   }
   checkQuantity(row, count);
   if (code) await checkBillable(db, code);
-  const rate = rateFor(row, cleanAgreedRate(agreedRate));
+  const rate = rateFor(row, cleanAgreedRate(agreedRate), cleanAgreedRate(packageRate));
   const billName = pick(row.own_bill_name, row.parent_bill_name, row.name);
   const billCode = pick(row.own_bill_code, row.parent_bill_code, null);
   const actual = count * rate.value;

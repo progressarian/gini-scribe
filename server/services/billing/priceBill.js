@@ -23,7 +23,7 @@ import {
   manualRule,
 } from "./manualDiscounts.js";
 import { activePackages, choosePackages } from "./packages.js";
-import { primeLineItems, priceLine } from "./priceLine.js";
+import { lineActual, primeLineItems, priceLine } from "./priceLine.js";
 import { httpError } from "./transaction.js";
 
 export const MAX_BILL_LINES = 100;
@@ -335,19 +335,27 @@ async function settleLineCodes({ priced, lineInputs, lineCodes, admitted }, db) 
   return lines;
 }
 
-const packagePart = (line) =>
-  line.quantity === 1 && line.rate_source === "base" && line.remainder === null;
+const PACKAGE_PART_RATES = ["base", "own", "parent"];
+
+const packagePart = (line) => line.quantity === 1 && PACKAGE_PART_RATES.includes(line.rate_source);
+
+async function packagePrice(pkg, { category, date }, db) {
+  if (!category) return pkg.price;
+  const priced = await lineActual({ item: pkg.id, category, date }, db);
+  return priced.rate;
+}
 
 async function withPackages(lines, lineInputs, db) {
   const groups = choosePackages(await activePackages(db), lines, packagePart);
   const priced = lines.map((line) => ({ ...line, package_item_id: null, package_name: null }));
   for (const { package: pkg, scope } of groups) {
     const listed = lines.map((line) => line.listed_actual);
-    for (const { index, share } of allocate(pkg.price, scope, listed)) {
+    const price = await packagePrice(pkg, lineInputs[scope[0]], db);
+    for (const { index, share } of allocate(price, scope, listed)) {
       const line = await priceOne(
         {
           ...lineInputs[index],
-          agreedRate: share / 100,
+          packageRate: share / 100,
           codes: lines[index].discounts.map((step) => step.code).filter(Boolean),
           codesOnBill: 0,
         },

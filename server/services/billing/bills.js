@@ -1135,6 +1135,41 @@ async function insertLineIn(client, bill, input, ctx, { locked = false, lineNo =
   return { line: rows[0], linkedOrderId, repeatRequestId };
 }
 
+async function packagePartsToAdd(client, input) {
+  if ((input?.source ?? "added") !== "added" || input?.lab_order_id) return [];
+  const { rows } = await client.query(
+    `SELECT pp.part_item_id AS id
+       FROM service_item_package_parts pp
+       JOIN service_items p ON p.id = pp.package_item_id AND p.is_active
+      WHERE pp.package_item_id = $1
+      ORDER BY pp.part_item_id`,
+    [cleanItemId(input?.item_id ?? input?.item)],
+  );
+  return rows.length > 1 ? rows.map((row) => row.id) : [];
+}
+
+async function insertItemLinesIn(client, bill, input, ctx, { locked = false, lineNo = null } = {}) {
+  const parts = await packagePartsToAdd(client, input);
+  if (!parts.length) return [await insertLineIn(client, bill, input, ctx, { locked, lineNo })];
+  const rounds = wholeNumber(input?.quantity, "Quantity", { min: 1 }) ?? 1;
+  const inserted = [];
+  for (let round = 0; round < rounds; round += 1) {
+    for (const partId of parts) {
+      const seat = lineNo === null ? null : lineNo + inserted.length;
+      inserted.push(
+        await insertLineIn(
+          client,
+          bill,
+          { item_id: partId, source: "added", doctor_id: input?.doctor_id },
+          ctx,
+          { locked, lineNo: seat },
+        ),
+      );
+    }
+  }
+  return inserted;
+}
+
 async function nextLineNo(client, billId) {
   const { rows } = await client.query(
     `SELECT COALESCE(MAX(line_no), 0) + 1 AS next FROM bill_lines WHERE bill_id = $1`,
@@ -1154,16 +1189,18 @@ const auditLineCreated = (client, bill, line, ctx) =>
   writeAudit(client, { ...lineCreated(bill, line), ...auditFields(ctx) });
 
 export async function addLineIn(client, bill, input, ctx, { priceLater = false } = {}) {
-  const { line, linkedOrderId, repeatRequestId } = await insertLineIn(client, bill, input, ctx);
+  const inserted = await insertItemLinesIn(client, bill, input, ctx);
   const saved = await reprice(client, bill, await billCodes(client, bill.id), ctx);
-  if (!priceLater) refuseMissingPrice(saved, line.id);
-  await auditLineCreated(client, bill, line, ctx);
-  if (linkedOrderId) await resettleTestOrders(client, saved.bill, ctx);
+  for (const { line } of inserted) {
+    if (!priceLater) refuseMissingPrice(saved, line.id);
+    await auditLineCreated(client, bill, line, ctx);
+  }
+  if (inserted.some((row) => row.linkedOrderId)) await resettleTestOrders(client, saved.bill, ctx);
   return {
     bill: saved.bill,
-    line_id: line.id,
+    line_id: inserted[0].line.id,
     priced: saved.priced,
-    used_approval_id: repeatRequestId,
+    used_approval_id: inserted.find((row) => row.repeatRequestId)?.repeatRequestId ?? null,
   };
 }
 
@@ -1193,16 +1230,18 @@ export async function addLinesToDraftIn(client, visitId, inputs, ctx) {
     return await inTransaction(async (outer) => {
       const bill = await openDraftIn(outer, visitId, ctx);
       await lockVisitOrders(outer, visitId);
-      const firstSeat = await nextLineNo(outer, bill.id);
+      let nextSeat = await nextLineNo(outer, bill.id);
       const inserted = [];
       const skipped = [];
       for (const [index, input] of inputs.entries()) {
         try {
-          const seat = { locked: true, lineNo: firstSeat + index };
-          inserted.push({
-            index,
-            ...(await inTransaction((inner) => insertLineIn(inner, bill, input, ctx, seat), outer)),
-          });
+          const seat = { locked: true, lineNo: nextSeat };
+          const rows = await inTransaction(
+            (inner) => insertItemLinesIn(inner, bill, input, ctx, seat),
+            outer,
+          );
+          nextSeat += rows.length;
+          inserted.push(...rows.map((row) => ({ index, ...row })));
         } catch (error) {
           if (error.code === "40P01") throw error;
           skipped.push({ index, message: error.message });
@@ -1225,7 +1264,7 @@ export async function addLinesToDraftIn(client, visitId, inputs, ctx) {
       if (inserted.some((row) => row.linkedOrderId)) {
         await resettleTestOrders(outer, saved.bill, ctx);
       }
-      return { added: inserted.map((row) => row.index), skipped };
+      return { added: [...new Set(inserted.map((row) => row.index))], skipped };
     }, client);
   } catch (error) {
     if (error !== ONE_BY_ONE) throw error;

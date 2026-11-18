@@ -21,6 +21,7 @@ const creditNotes = await import("../../../server/services/billing/creditNotes.j
 const visitLines = await import("../../../server/services/billing/visitLines.js");
 const billPdf = await import("../../../server/services/billing/billPdf.js");
 const requests = await import("../../../server/services/billing/billingRequests.js");
+const counter = await import("../../../server/services/billing/counterPatients.js");
 
 const db = getPool();
 const tag = newTag();
@@ -71,6 +72,25 @@ const machineVisit = async (label, machines) => {
     billId = raised.bill_id;
   }
   return { ...visit, billId };
+};
+
+const orderedMachines = async (label, machines) => {
+  const visit = await extraVisit(ids, label, { visitType: "Follow Up", healthray: false });
+  const orders = [];
+  for (const name of machines) {
+    const order = await labOrder({ ...ids, visit: visit.visit }, [name], "machine");
+    await query(`UPDATE giniflow_lab_orders SET amount_total = $2 WHERE id = $1`, [
+      order,
+      PRICES[name],
+    ]);
+    orders.push(order);
+  }
+  return { ...visit, orders };
+};
+
+const counterRow = async (visitId) => {
+  const listed = await counter.counterPatients(ids.day, "", new Date(), db);
+  return [...listed.toBill, ...listed.billed, ...listed.waiting].find((row) => row.id === visitId);
 };
 
 const machineLines = (bill) =>
@@ -275,5 +295,52 @@ test.describe.serial("P5-17 a machine package is one bill line", () => {
     const preview = await creditNotes.previewCredit(bill.id, { lines: request.refund.lines }, db);
     expect(preview.totals.payable).toBe(20000);
     expect(preview.lines.map((line) => line.bill_name)).toEqual([`Fundus ${tag}`]);
+  });
+
+  test("11. a category rate on Fundus still bills the three tests as the ₹800 package", async () => {
+    await query(
+      `INSERT INTO category_item_rates (scheme_code, service_item_id, rate) VALUES ($1, $2, 450)`,
+      [ids.parent, part.Fundus],
+    );
+    try {
+      const visit = await machineVisit("Scheme", ["ABI", "VPT", "Fundus"]);
+      await bills.setCategory(visit.billId, { category: ids.paid }, desk, db);
+      const bill = await bills.readBill(visit.billId, db);
+      expect(bill.scheme_code).toBe(ids.paid);
+      expect(machineLines(bill).map((line) => line.package_item_id)).toEqual([
+        pkg.three,
+        pkg.three,
+        pkg.three,
+      ]);
+      expect(bill.totals.payable).toBe(80000);
+    } finally {
+      await query(`DELETE FROM category_item_rates WHERE service_item_id = $1`, [part.Fundus]);
+    }
+  });
+
+  test("12. adding the package at the counter adds the three tests linked to their orders", async () => {
+    const visit = await orderedMachines("Add", ["ABI", "VPT", "Fundus"]);
+    const draft = await bills.openDraft(visit.visit, desk, db);
+    const before = machineLines(await bills.readBill(draft.id, db));
+    for (const line of before) {
+      await bills.removeLine(draft.id, line.id, { reason: "Billing as a package" }, desk, db);
+    }
+    const bill = await bills.addLine(draft.id, { item_id: pkg.three }, desk, db);
+    expect(bill.lines.some((line) => line.service_item_id === pkg.three)).toBe(false);
+    const lines = machineLines(bill);
+    expect(lines).toHaveLength(3);
+    expect(new Set(lines.map((line) => line.lab_order_id))).toEqual(new Set(visit.orders));
+    expect(lines.every((line) => line.package_item_id === pkg.three)).toBe(true);
+    expect(bill.totals.payable).toBe(80000);
+    const { final } = await payAndFinalise(draft.id);
+    expect(final.status).toBe("final");
+    const { rows } = await query(
+      `SELECT payment_status FROM giniflow_lab_orders WHERE visit_id = $1`,
+      [visit.visit],
+    );
+    expect(rows.map((row) => row.payment_status)).toEqual(["paid", "paid", "paid"]);
+    const row = await counterRow(visit.visit);
+    expect(row.hints.tests).toBe(0);
+    expect(row.group).not.toBe("toBill");
   });
 });

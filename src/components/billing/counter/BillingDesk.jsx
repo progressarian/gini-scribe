@@ -14,6 +14,7 @@ import {
 import PatientList, { counterRows } from "./PatientList";
 import PatientHeader, { BillOpening } from "./PatientHeader";
 import PreviousBills from "./PreviousBills";
+import AllBillsFinal from "./AllBillsFinal";
 import BillLinesTable from "./BillLinesTable";
 import PaidAtReception from "./PaidAtReception";
 import NotPricedTests from "./NotPricedTests";
@@ -268,6 +269,7 @@ export default function BillingDesk({
   const [removedDoctor, setRemovedDoctor] = useState(null);
   const [priceChanges, setPriceChanges] = useState(null);
   const [listOpen, setListOpen] = useState(!visitId && !billId);
+  const [addingTo, setAddingTo] = useState(null);
   const opened = useRef(null);
   const [listWidth, setListWidth] = useListWidth();
   const form = useSavedForm(billFormKey(bill?.id), BILL_FORM);
@@ -437,6 +439,13 @@ export default function BillingDesk({
   const earlier = (visitBills || []).filter((b) => b.id !== bill?.id);
   const newerDraft = bill && bill.status !== "draft" && earlier.some((b) => b.status === "draft");
   const startAgain = bill?.status === "cancelled" && !newerDraft;
+  const finalBills = earlier.filter((b) => b.bill_type === "invoice" && b.status === "final");
+  const allFinal =
+    bill?.status === "draft" &&
+    !bill.lines?.length &&
+    finalBills.length > 0 &&
+    selected?.group !== "toBill" &&
+    addingTo !== bill.id;
   const needsCategory = needsSub && !bill?.category;
   const missing =
     Boolean(patientId) &&
@@ -599,73 +608,90 @@ export default function BillingDesk({
                         />
                       )}
                       <PreviousBills bills={earlier} onOpen={openEarlier} />
-                      <BillLinesTable bill={bill} onBill={setBill} form={form} />
-                      {bill.visit_id && !pastDay && <LabSiteControl visitId={bill.visit_id} card />}
-                      <AddItems bill={bill} onBill={setBill} form={form} />
-                      <ConsultationSuggestion
-                        key={bill.id}
-                        bill={bill}
-                        onBill={setBill}
-                        needsCategory={needsCategory}
-                      />
-                      <LabCaseTests
-                        key={`lab-${bill.id}`}
-                        bill={bill}
-                        onBill={setBill}
-                        needsCategory={needsCategory}
-                      />
-                      <HealthrayBillLines key={`hr-${bill.id}`} bill={bill} onBill={setBill} />
-                      <ScannedReportLines key={`scan-${bill.id}`} bill={bill} onBill={setBill} />
-                      <NotPricedTests tests={notPriced} />
-                      <PaidAtReception bill={bill} onChanged={refreshBill} />
-                    </div>
-                    <div className="bc-bill__summary">
-                      <TotalsAndPayment
-                        bill={bill}
-                        patient={selected || duePatient || feePatient || sentPatient}
-                        onBill={setBill}
-                        schemes={schemes || []}
-                        payLater={payLater}
-                        onPayLater={setPayLater}
-                        needsCategory={needsCategory}
-                        opening={openDraft.isPending}
-                        onPricesChanged={() => reopenVisit(bill.visit_id)}
-                        stillOnFloor={
-                          !pastDay &&
-                          !!selected &&
-                          !["dispensed", "exited"].includes(selected.status)
-                        }
-                        form={form}
-                        afterSummary={
-                          <DiscountCodeBox
+                      {allFinal && (
+                        <AllBillsFinal bills={finalBills} onAddItems={() => setAddingTo(bill.id)} />
+                      )}
+                      {!allFinal && (
+                        <>
+                          <BillLinesTable bill={bill} onBill={setBill} form={form} />
+                          {bill.visit_id && !pastDay && (
+                            <LabSiteControl visitId={bill.visit_id} card />
+                          )}
+                          <AddItems bill={bill} onBill={setBill} form={form} />
+                          <ConsultationSuggestion
+                            key={bill.id}
                             bill={bill}
                             onBill={setBill}
-                            form={form}
-                            patient={selected || duePatient || feePatient || sentPatient}
+                            needsCategory={needsCategory}
                           />
-                        }
-                      />
-                      <BillActions
-                        bill={bill}
-                        onBill={setBill}
-                        onDeleted={() => {
-                          leave.release();
-                          setBill(null);
-                          pick(null);
-                        }}
-                        onRefunded={refreshBill}
-                        onPricesChanged={() => reopenVisit(bill.visit_id)}
-                        schemes={schemes || []}
-                        needsCategory={needsCategory}
-                        opening={openDraft.isPending}
-                        form={form}
-                        stillOnFloor={
-                          !pastDay &&
-                          !!selected &&
-                          !["dispensed", "exited"].includes(selected.status)
-                        }
-                      />
-                      <BillRefunds bill={bill} onRefunded={refreshBill} />
+                          <LabCaseTests
+                            key={`lab-${bill.id}`}
+                            bill={bill}
+                            onBill={setBill}
+                            needsCategory={needsCategory}
+                          />
+                          <HealthrayBillLines key={`hr-${bill.id}`} bill={bill} onBill={setBill} />
+                          <ScannedReportLines
+                            key={`scan-${bill.id}`}
+                            bill={bill}
+                            onBill={setBill}
+                          />
+                          <NotPricedTests tests={notPriced} />
+                          <PaidAtReception bill={bill} onChanged={refreshBill} />
+                        </>
+                      )}
+                    </div>
+                    <div className="bc-bill__summary">
+                      {!allFinal && (
+                        <>
+                          <TotalsAndPayment
+                            bill={bill}
+                            patient={selected || duePatient || feePatient || sentPatient}
+                            onBill={setBill}
+                            schemes={schemes || []}
+                            payLater={payLater}
+                            onPayLater={setPayLater}
+                            needsCategory={needsCategory}
+                            opening={openDraft.isPending}
+                            onPricesChanged={() => reopenVisit(bill.visit_id)}
+                            stillOnFloor={
+                              !pastDay &&
+                              !!selected &&
+                              !["dispensed", "exited"].includes(selected.status)
+                            }
+                            form={form}
+                            afterSummary={
+                              <DiscountCodeBox
+                                bill={bill}
+                                onBill={setBill}
+                                form={form}
+                                patient={selected || duePatient || feePatient || sentPatient}
+                              />
+                            }
+                          />
+                          <BillActions
+                            bill={bill}
+                            onBill={setBill}
+                            onDeleted={() => {
+                              leave.release();
+                              setBill(null);
+                              pick(null);
+                            }}
+                            onRefunded={refreshBill}
+                            onPricesChanged={() => reopenVisit(bill.visit_id)}
+                            schemes={schemes || []}
+                            needsCategory={needsCategory}
+                            opening={openDraft.isPending}
+                            form={form}
+                            stillOnFloor={
+                              !pastDay &&
+                              !!selected &&
+                              !["dispensed", "exited"].includes(selected.status)
+                            }
+                          />
+                          <BillRefunds bill={bill} onRefunded={refreshBill} />
+                        </>
+                      )}
                       <DepositPanel
                         key={`deposit-${bill.patient_id}`}
                         patientId={bill.patient_id}

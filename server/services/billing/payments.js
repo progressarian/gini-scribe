@@ -237,7 +237,7 @@ async function orderEvent(client, orderId, status, ctx, meta) {
   );
 }
 
-async function writeOrderMoney(client, order, after, status, ctx, meta) {
+export async function writeOrderMoney(client, order, after, status, ctx, meta) {
   const { rowCount } = await client.query(
     `UPDATE giniflow_lab_orders
         SET amount_paid = $3, amount_claimed = $4, claim_state = $5, payment_status = $6,
