@@ -1638,6 +1638,10 @@ export default function LabRoom({ room = null }) {
     useAuthStore((st) => st.currentDoctor?.role),
     CAP.GINIFLOW_TEST_CANCEL,
   );
+  const canRemoveOutside = hasCapability(
+    useAuthStore((st) => st.currentDoctor?.role),
+    CAP.GINIFLOW_OUTSIDE_REMOVE,
+  );
   const upload = useUploadReport();
   const [openOrderId, setOpenOrderId] = useState(null);
   const [openCaseId, setOpenCaseId] = useState(null);
@@ -2135,6 +2139,7 @@ export default function LabRoom({ room = null }) {
             <OutsidePendingPanel
               onToast={showToast}
               canSend={room !== "processing"}
+              canRemove={canRemoveOutside}
               onViewReport={(row) =>
                 setViewingDoc({
                   id: row.docId,

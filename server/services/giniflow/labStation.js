@@ -2,6 +2,7 @@ import pool from "../../config/db.js";
 import {
   CASE_CANCELLABLE_SQL,
   LIVE_LAB_CASE_SQL,
+  NOT_OUTSIDE_REMOVED_SQL,
   ORDER_CANCELLABLE_SQL,
   ORDER_OUTPUT_SQL,
   caseFromEarlierLabOnlyVisit,
@@ -346,6 +347,7 @@ export async function getLabQueue(
         -- ordered for the next visit would otherwise sit here as a sample that
         -- never arrives.
         AND o.urgency = 'today'
+        AND ${NOT_OUTSIDE_REMOVED_SQL("order", "o.id::text")}
         -- No sample to take from a patient who never arrived or has gone home.
         AND v.current_status NOT IN ('no_show', 'cancelled')
         AND (
@@ -921,7 +923,7 @@ export function assertSampleDrawn({ kind, sample_status: status }) {
   );
 }
 
-async function resolveVisitForCase(db, caseNo) {
+export async function resolveVisitForCase(db, caseNo) {
   const { rows: visit } = await db.query(
     `SELECT v.id FROM lab_cases lc
        JOIN giniflow_visits v

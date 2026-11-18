@@ -1,6 +1,7 @@
 import pool from "../../config/db.js";
 import { SENT_OUTSIDE } from "../../../shared/labStages.js";
 import { IST_TODAY } from "./statusEngine.js";
+import { NOT_OUTSIDE_REMOVED_SQL } from "./testsHold.js";
 import {
   CASE_PATIENT_JOIN,
   IN_WINDOW_SQL,
@@ -54,6 +55,7 @@ const PENDING_CTE = `
       ) upload ON TRUE
       LEFT JOIN doctors uploader ON uploader.id = upload.actor_id
      WHERE o.is_outsourced AND o.kind = 'lab'
+       AND ${NOT_OUTSIDE_REMOVED_SQL("order", "o.id::text")}
        AND (o.sample_status IN ('sample_collected', '${SENT_OUTSIDE}')
             OR (o.sample_status = 'uploaded' AND ${istDay("o.uploaded_at")} = ${IST_TODAY}))
     UNION ALL
@@ -85,6 +87,7 @@ const PENDING_CTE = `
             OR (lc.outside_stage = 'uploaded'
                 AND lc.outside_uploaded_at >= ${IST_TODAY}::timestamp AT TIME ZONE 'Asia/Kolkata'))
        AND ${IN_WINDOW_SQL}
+       AND ${NOT_OUTSIDE_REMOVED_SQL("case", "lc.case_no")}
   )`;
 
 const PENDING_SQL = `

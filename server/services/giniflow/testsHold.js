@@ -44,8 +44,13 @@ export const CASE_NOT_CANCELLED_SQL = (lc = "lc") =>
                  WHERE cx.case_no = ${lc}.case_no AND cx.action = 'cancelled')
     AND lower(COALESCE(${lc}.case_status, ${lc}.raw_list_json->>'case_status', '')) <> 'cancelled')`;
 
+export const NOT_OUTSIDE_REMOVED_SQL = (kind, ref) =>
+  `NOT EXISTS (SELECT 1 FROM giniflow_outside_removals rx
+                WHERE rx.kind = '${kind}' AND rx.ref = ${ref})`;
+
 export const LIVE_LAB_CASE_SQL = (lc = "lc") =>
-  `(${CASE_NOT_CANCELLED_SQL(lc)} AND NOT ${CASE_NOT_ON_BILL_SQL(lc)})`;
+  `(${CASE_NOT_CANCELLED_SQL(lc)} AND NOT ${CASE_NOT_ON_BILL_SQL(lc)}
+    AND ${NOT_OUTSIDE_REMOVED_SQL("case", `${lc}.case_no`)})`;
 
 const CASE_STARTED_ACTIONS = [
   "drawing_started",

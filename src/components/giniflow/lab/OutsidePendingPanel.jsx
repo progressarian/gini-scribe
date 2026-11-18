@@ -3,6 +3,7 @@ import {
   useAdvanceSample,
   useMarkCaseSentOutside,
   useOutsidePending,
+  useRemoveOutsideEntry,
   useUploadLabCaseReport,
   useUploadReport,
 } from "../../../queries/hooks/useGiniflowLab";
@@ -75,7 +76,17 @@ const statusNote = (row) =>
       ? `${when(row.sentAt)}${row.sentBy ? ` · ${row.sentBy}` : ""}`
       : `Collected ${when(row.collectedAt)}`;
 
-function PendingRow({ row, busy, canSend, onUpload, onSend, onView, onReplace }) {
+function PendingRow({
+  row,
+  busy,
+  canSend,
+  canRemove,
+  onUpload,
+  onSend,
+  onView,
+  onReplace,
+  onRemove,
+}) {
   const uploaded = row.status === "uploaded";
   return (
     <tr role="row">
@@ -146,14 +157,32 @@ function PendingRow({ row, busy, canSend, onUpload, onSend, onView, onReplace })
             <UploadButton row={row} busy={busy} onUpload={onUpload} />
           </>
         )}
+        {canRemove && (
+          <button
+            type="button"
+            className="st-btn st-btn-g"
+            disabled={busy}
+            aria-label={`Delete outside entry for ${row.patient.name}`}
+            onClick={() => onRemove(row)}
+          >
+            Delete
+          </button>
+        )}
       </td>
     </tr>
   );
 }
 
-export default function OutsidePendingPanel({ onToast, onViewReport, canSend = true }) {
+export default function OutsidePendingPanel({
+  onToast,
+  onViewReport,
+  canSend = true,
+  canRemove = false,
+}) {
   const [filters, setFilters] = useState(NO_FILTERS);
   const [replacing, setReplacing] = useState(null);
+  const [removing, setRemoving] = useState(null);
+  const [removeReason, setRemoveReason] = useState("");
   const [page, setPage] = useState(1);
   const { data, isLoading, isError, isFetching, refetch } = useOutsidePending({
     ...filters,
@@ -163,7 +192,13 @@ export default function OutsidePendingPanel({ onToast, onViewReport, canSend = t
   const uploadCase = useUploadLabCaseReport();
   const advance = useAdvanceSample();
   const sendCase = useMarkCaseSentOutside();
-  const busy = upload.isPending || uploadCase.isPending || advance.isPending || sendCase.isPending;
+  const remove = useRemoveOutsideEntry();
+  const busy =
+    upload.isPending ||
+    uploadCase.isPending ||
+    advance.isPending ||
+    sendCase.isPending ||
+    remove.isPending;
   const filtered =
     filters.q.trim().length >= 2 || filters.status !== "all" || filters.from || filters.to;
   const rows = data?.rows ?? [];
@@ -205,6 +240,32 @@ export default function OutsidePendingPanel({ onToast, onViewReport, canSend = t
         setReplacing(null);
       },
     });
+
+  const onRemove = (row) => {
+    remove.reset();
+    setRemoveReason("");
+    setRemoving(row);
+  };
+
+  const closeRemove = () => {
+    if (remove.isPending) return;
+    setRemoving(null);
+  };
+
+  const confirmRemove = () =>
+    remove.mutate(
+      {
+        kind: removing.kind,
+        ref: removing.kind === "case" ? removing.caseNo : removing.orderId,
+        reason: removeReason.trim(),
+      },
+      {
+        onSuccess: () => {
+          onToast(`${removing.patient.name}'s outside entry deleted`);
+          setRemoving(null);
+        },
+      },
+    );
 
   const onSend = (row) => {
     const done = {
@@ -328,6 +389,8 @@ export default function OutsidePendingPanel({ onToast, onViewReport, canSend = t
                     <PendingRow
                       key={row.key}
                       canSend={canSend}
+                      canRemove={canRemove}
+                      onRemove={onRemove}
                       onView={onViewReport}
                       onReplace={onReplace}
                       row={row}
@@ -389,6 +452,51 @@ export default function OutsidePendingPanel({ onToast, onViewReport, canSend = t
         onCancel={() => {
           if (!busy) setReplacing(null);
         }}
+      />
+      <ConfirmModal
+        open={!!removing}
+        title={removing ? `Delete the outside entry for ${removing.patient.name}?` : ""}
+        message={
+          removing ? (
+            <>
+              <p>
+                {removing.patient.name}
+                {removing.patient.fileNo ? ` (${removing.patient.fileNo})` : ""} ·{" "}
+                {day(removing.visitDate)} · {STATUS_TEXT[removing.status]}
+                <br />
+                Tests: {removing.tests.join(", ") || "—"}
+              </p>
+              <p>
+                The entry is removed from this list and from the lab queue, and cannot be restored
+                from the screen. The deletion is recorded with your name and reason.
+              </p>
+              <label className="op-date" htmlFor="outside-remove-reason">
+                Reason (required)
+              </label>
+              <textarea
+                id="outside-remove-reason"
+                className="op-input"
+                rows={3}
+                maxLength={300}
+                value={removeReason}
+                onChange={(e) => setRemoveReason(e.target.value)}
+                aria-invalid={!!remove.error}
+                aria-describedby={remove.error ? "outside-remove-error" : undefined}
+                style={{ width: "100%" }}
+              />
+            </>
+          ) : null
+        }
+        confirmLabel={remove.isPending ? "Deleting…" : "Delete entry"}
+        confirmDisabled={removeReason.trim().length < 3}
+        busy={remove.isPending}
+        error={
+          remove.error
+            ? remove.error?.response?.data?.error || "Could not delete the entry — try again"
+            : null
+        }
+        onConfirm={confirmRemove}
+        onCancel={closeRemove}
       />
     </section>
   );

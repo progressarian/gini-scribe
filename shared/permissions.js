@@ -177,6 +177,7 @@ export const CAPABILITIES = {
   GINIFLOW_XRAY_REPORT_REMOVE: "GINIFLOW_XRAY_REPORT_REMOVE",
   GINIFLOW_TEST_CANCEL: "GINIFLOW_TEST_CANCEL",
   GINIFLOW_TEST_CANCEL_DECIDE: "GINIFLOW_TEST_CANCEL_DECIDE",
+  GINIFLOW_OUTSIDE_REMOVE: "GINIFLOW_OUTSIDE_REMOVE",
   GINIFLOW_STATION_DOCTOR: "GINIFLOW_STATION_DOCTOR", // the consultant's queue and consult screen
   GINIFLOW_MO_CLOSE: "GINIFLOW_MO_CLOSE", // end a visit without the consultant, prescription and all
   GINIFLOW_STATION_MO: "GINIFLOW_STATION_MO", // MO/SD workup, order tests, hand over
@@ -394,6 +395,7 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_STATION_LAB_PROCESS,
     C.GINIFLOW_TEST_CANCEL,
     C.LAB_TEST_CATALOG,
+    C.GINIFLOW_OUTSIDE_REMOVE,
   ],
   // The machine room — ABI, VPT, Fundus, TMT and ECG. Modelled on the lab role,
   // because the shape of the job is the same: one desk, one queue, reports that

@@ -52,6 +52,24 @@ export function useOutsidePending({ q = "", status = "all", from = "", to = "", 
   });
 }
 
+export function useRemoveOutsideEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ kind, ref, reason }) =>
+      (
+        await api.post("/api/giniflow/stations/lab/outside-pending/remove", {
+          kind,
+          ref,
+          reason,
+        })
+      ).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "lab"] });
+      queryClient.invalidateQueries({ queryKey: ["giniflow", "board"] });
+    },
+  });
+}
+
 // Uploading is one call: the file is stored and the order advanced together, so
 // a report can never sit in storage with the MO still waiting.
 export function useUploadReport() {

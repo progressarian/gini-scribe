@@ -786,6 +786,16 @@ export const giniflowOutsidePendingQuerySchema = z.object({
     .optional(),
 });
 
+export const giniflowOutsideRemoveSchema = z.object({
+  kind: z.enum(["order", "case"]),
+  ref: z.string().trim().min(1).max(64),
+  reason: z
+    .string()
+    .trim()
+    .min(3, "Say why this entry is being deleted (at least 3 characters)")
+    .max(300, "Keep the reason under 300 characters"),
+});
+
 export const giniflowStationQuerySchema = z.object({
   group: stationGroup,
   room: z.enum(["collection", "processing"]).optional(),

@@ -77,6 +77,7 @@ import {
   giniflowStationQuerySchema,
   homeCollectionsQuerySchema,
   giniflowOutsidePendingQuerySchema,
+  giniflowOutsideRemoveSchema,
   giniflowMoQueueQuerySchema,
   giniflowPaymentSchemaChecked,
   giniflowCheckinSchema,
@@ -137,6 +138,7 @@ import {
 } from "../services/giniflow/vitalsStation.js";
 import { labelOutsourcedPayments } from "../services/giniflow/outsourcedLabels.js";
 import { countOutsidePending, listOutsidePending } from "../services/giniflow/outsidePending.js";
+import { removeOutsideEntry } from "../services/giniflow/outsideRemoval.js";
 import {
   getPaymentQueue,
   clearPayment,
@@ -2165,6 +2167,26 @@ router.get(
       res.json(await listOutsidePending(req.query));
     } catch (e) {
       handleError(res, e, "Gini Flow outside reports pending");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/lab/outside-pending/remove",
+  requireCapability(CAP.GINIFLOW_OUTSIDE_REMOVE),
+  validate(giniflowOutsideRemoveSchema),
+  async (req, res) => {
+    try {
+      res.json(
+        await removeOutsideEntry({
+          kind: req.body.kind,
+          ref: req.body.ref,
+          reason: req.body.reason,
+          actorId: req.doctor?.doctor_id ?? null,
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Gini Flow outside report delete");
     }
   },
 );
