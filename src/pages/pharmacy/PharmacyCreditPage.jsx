@@ -16,6 +16,7 @@ import "./pharmacyVendors.css";
 import "./pharmacyBills.css";
 import PillGroup from "../../components/pharmacy/Pills";
 import useUrlState, { useUrlSearch, asNumber } from "../../hooks/useUrlState";
+import { usePharmacyLive } from "../../queries/hooks/usePharmacyLive";
 
 const TABS = [
   { key: "requests", label: "Credit requests" },
@@ -325,6 +326,7 @@ function DuesPanel() {
 
 export default function PharmacyCreditPage() {
   const me = useAuthStore((s) => s.currentDoctor);
+  usePharmacyLive();
   const canApprove = hasCapability(me?.role, CAPABILITIES.PHARMACY_CREDIT_APPROVE);
   const [tabParam, setTab] = useUrlState("tab", "requests");
   const tab = TABS.some((t) => t.key === tabParam) ? tabParam : "requests";

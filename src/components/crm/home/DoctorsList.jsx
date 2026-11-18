@@ -7,6 +7,7 @@ import { SearchField, FilterSelect, ListStatus, ListBody } from "./ListToolbar.j
 import {
   PRIORITY_OPTIONS,
   SLOT_OPTIONS,
+  SORT_OPTIONS,
   DUE_OPTIONS,
   territoryOptions,
   staffOptions,
@@ -32,7 +33,16 @@ export default function DoctorsList({ filters, onChange, refreshKey, onChanged }
     onChange({ ...filters, ...patch, page: 1 });
   };
   const clear = () =>
-    update({ q: "", territory: "", priority: "", slot: "", due: "", incomplete: "", owner: "" });
+    update({
+      q: "",
+      territory: "",
+      priority: "",
+      slot: "",
+      due: "",
+      incomplete: "",
+      owner: "",
+      sort: "",
+    });
   const active = hasFilters(filters, FILTER_KEYS);
 
   const classifyTerritory = async (priority) => {
@@ -90,6 +100,13 @@ export default function DoctorsList({ filters, onChange, refreshKey, onChanged }
           onChange={(due) => update({ due })}
           allLabel="Any visit status"
           options={DUE_OPTIONS}
+        />
+        <FilterSelect
+          label="Sort"
+          value={filters.sort}
+          onChange={(sort) => update({ sort })}
+          allLabel="Default order"
+          options={SORT_OPTIONS}
         />
         {data?.staff && (
           <FilterSelect

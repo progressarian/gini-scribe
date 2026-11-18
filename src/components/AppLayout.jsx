@@ -4,6 +4,7 @@ import {
   BookOpen,
   Building2,
   ClipboardCheck,
+  ClipboardList,
   CreditCard,
   Factory,
   FileBarChart,
@@ -180,6 +181,14 @@ const NAV_ITEMS = [
     icon: FileBarChart,
     cap: C["/pharmacy/reports"],
     match: (pathname) => pathname === "/pharmacy/reports",
+    show: () => true,
+  },
+  {
+    path: "/pharmacy/prescriptions",
+    group: "pharmacy",
+    label: "Prescriptions",
+    icon: ClipboardList,
+    cap: C["/pharmacy/prescriptions"],
     show: () => true,
   },
   {

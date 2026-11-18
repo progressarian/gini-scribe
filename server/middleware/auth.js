@@ -211,7 +211,12 @@ const ROUTE_CAPABILITIES = [
   ],
   ["/api/pharmacy/expiry", [CAP.PHARMACY_STOCK_VIEW, CAP.PHARMACY_PURCHASE]],
   ["/api/pharmacy/bills", CAP.PHARMACY_BILL],
+  ["/api/pharmacy/prescriptions", CAP.PHARMACY_BILL],
   ["/api/pharmacy/credit", [CAP.PHARMACY_CREDIT_REQUEST, CAP.PHARMACY_CREDIT_APPROVE]],
+  [
+    "/api/pharmacy/live",
+    [CAP.PHARMACY_BILL, CAP.PHARMACY_CREDIT_REQUEST, CAP.PHARMACY_CREDIT_APPROVE],
+  ],
   ["/api/pharmacy/transfers", CAP.PHARMACY_DEPT_MANAGE],
   ["/api/pharmacy/indents", [CAP.PHARMACY_INDENT, CAP.PHARMACY_DEPT_MANAGE]],
   ["/api/pharmacy/collect", CAP.PHARMACY_COLLECT],

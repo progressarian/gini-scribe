@@ -220,3 +220,15 @@ export const HSN_HINT = "Enter a 4 to 8 digit HSN code.";
 export const IFSC_HINT = "Enter the 11-character IFSC, for example HDFC0001234.";
 
 export const WALKIN_REGISTRATION_SOURCE = "pharmacy_walkin";
+
+export const RX_OUTCOMES = ["given", "substitute", "not_given", "requested"];
+
+export const RX_NOT_GIVEN_REASON_LABEL = {
+  out_of_stock: "Out of stock",
+  not_available: "Not in our pharmacy",
+  buying_outside: "Buying outside",
+  patient_declined: "Patient declined",
+  other: "Other",
+};
+
+export const RX_REQUESTED_REASON = "not_available";

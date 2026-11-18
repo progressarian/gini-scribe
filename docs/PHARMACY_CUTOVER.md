@@ -27,6 +27,9 @@ hospital cash-shift screens read `pharmacy_payments` from the moment the code is
 | 14    | `2027-01-16_pharmacy_credit_limit.sql`        | Credit limit setting                                            |
 | 15    | `2027-01-17_pharmacy_discounts.sql`           | Line and bill discounts, maximum discount setting               |
 | 16    | `2027-01-18_pharmacy_patient_accounts.sql`    | Patient deposits, write-offs, manual vouchers                   |
+| 17    | `2027-01-19_notifications_role_audience.sql`  | Pharmacy alerts go to the pharmacy admin role only              |
+| 18    | `2027-01-20_pharmacy_bill_rx_outcomes.sql`    | First version of per-line outcomes (replaced by 19)             |
+| 19    | `2027-01-21_pharmacy_bill_med_outcomes.sql`   | Per-medicine outcomes keyed by `medications`; drops 18 if empty |
 
 ```bash
 cd server

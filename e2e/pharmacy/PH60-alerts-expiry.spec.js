@@ -21,6 +21,7 @@ test.describe.configure({ mode: "serial" });
 
 test.describe("PH60 notifications, stock alerts, expiry and vendor returns", () => {
   let admin;
+  let mainAdmin;
   let pharmacist;
   let vendor;
   let medicine;
@@ -66,6 +67,7 @@ test.describe("PH60 notifications, stock alerts, expiry and vendor returns", () 
 
   test.beforeAll(async () => {
     admin = await apiAs("pharmacy_admin");
+    mainAdmin = await apiAs("admin");
     pharmacist = await apiAs("pharmacy");
     for (const [series, prefix] of [
       ["PH", "PH/"],
@@ -103,10 +105,10 @@ test.describe("PH60 notifications, stock alerts, expiry and vendor returns", () 
   });
 
   test.afterAll(async () => {
-    await Promise.all([admin?.dispose(), pharmacist?.dispose()]);
+    await Promise.all([admin?.dispose(), mainAdmin?.dispose(), pharmacist?.dispose()]);
   });
 
-  test("a stock change below the minimum raises a low-stock alert for buyers only", async () => {
+  test("a stock change below the minimum alerts the pharmacy admin only, not the pharmacist or main admin", async () => {
     const posted = await receive([line("ATV1", 3)]);
     goodBatch = posted.lines[0].batch_id;
     const low = await mine(admin, "stock_low");
@@ -115,6 +117,10 @@ test.describe("PH60 notifications, stock alerts, expiry and vendor returns", () 
     expect(low[0].body).toContain("30 tab left at the main pharmacy; the minimum is 50");
     expect(low[0].link).toContain(`/pharmacy/stock?location_id=${main.id}`);
     expect(await mine(pharmacist, "stock_low")).toHaveLength(0);
+    expect(await mine(mainAdmin, "stock_low")).toHaveLength(0);
+    expect(
+      await one(`SELECT role, capability, doctor_id FROM notifications WHERE id = $1`, [low[0].id]),
+    ).toEqual({ role: "pharmacy_admin", capability: null, doctor_id: null });
 
     const before = (await (await admin.get("/api/notifications")).json()).unread;
     const read = await admin.post("/api/notifications/read", { data: { ids: [low[0].id] } });
@@ -181,6 +187,7 @@ test.describe("PH60 notifications, stock alerts, expiry and vendor returns", () 
     ).json();
     const waiting = await mine(admin, "credit_request");
     expect(waiting).toHaveLength(1);
+    expect(await mine(mainAdmin, "credit_request")).toHaveLength(0);
     await admin.post(`/api/pharmacy/credit/requests/${asked.credit.id}/decision`, {
       data: { decision: "approve", note: "OK" },
     });

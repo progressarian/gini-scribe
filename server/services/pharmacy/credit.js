@@ -7,7 +7,7 @@ import { recordBillPayments } from "./accounts.js";
 import { DUE_SQL, PATIENT_DUE_SQL } from "./billDue.js";
 import { toPaise, toRupees } from "../../../shared/pharmacyMoney.js";
 import { PHARMACY_SERIES } from "../../../shared/pharmacyVocab.js";
-import { CAPABILITIES as CAP } from "../../../shared/permissions.js";
+import { ROLES } from "../../../shared/permissions.js";
 import { raiseNotification, resolveNotifications } from "../notifications.js";
 
 const ENTITY = "pharmacy_credit_requests";
@@ -129,7 +129,7 @@ export async function requestCredit(billId, { version, amount, reason }, ctx = {
     await raiseNotification(client, {
       kind: "credit_request",
       severity: "warning",
-      capability: CAP.PHARMACY_CREDIT_APPROVE,
+      role: ROLES.PHARMACY_ADMIN,
       title: `Credit asked: ${toRupeeText(wanted)} for ${who[0]?.name ?? "a patient"}`,
       body: reason,
       link: "/pharmacy/credit",

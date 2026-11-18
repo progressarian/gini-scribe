@@ -4,21 +4,10 @@ import MasterFormDialog from "./MasterFormDialog";
 import FormField from "../ui/FormField";
 import { digitsTyped } from "../billing/format";
 import { inr, localDate, packUnits, showDate } from "./format";
+import { autoFill } from "../../../shared/pharmacyBatchFill";
 
 const daysLeft = (iso) =>
   Math.round((Date.parse(`${iso}T00:00:00`) - Date.parse(`${localDate()}T00:00:00`)) / 86400000);
-
-export function autoFill(batches, needed) {
-  let left = needed;
-  const picked = {};
-  for (const b of batches) {
-    if (b.expired || left <= 0) continue;
-    const take = Math.min(b.qty_units, left);
-    if (take > 0) picked[b.id] = String(take);
-    left -= take;
-  }
-  return { picked, short: Math.max(left, 0) };
-}
 
 export default function BatchPickerDialog({
   medicine,

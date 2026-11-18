@@ -1272,6 +1272,13 @@ export const giniflowFloorSettingSchema = z.object({
   value: z.boolean(),
 });
 
+const followUpLimit = z.union([z.number().int().min(1).max(10000), z.null()]);
+
+export const giniflowFollowUpLimitsSchema = z.object({
+  allowedPerDay: followUpLimit,
+  maxPerDay: followUpLimit,
+});
+
 // A test this patient needs that the clinic list does not have. It rides on the
 // ORDER, not the catalogue: one patient's ultrasound is not a test every other
 // patient should be offered.

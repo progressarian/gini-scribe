@@ -8,12 +8,9 @@ import {
   VISIT_OUTCOMES,
   VISIT_FORM_STATUSES,
   VISIT_SLOTS,
-  SLOT_SPLIT_HOUR_IST,
+  visitSlotAt,
 } from "../../../shared/crmVocab.js";
 import { istToday } from "../../components/crm/progress/progressText.js";
-
-const slotNow = () =>
-  new Date(Date.now() + 330 * 60_000).getUTCHours() < SLOT_SPLIT_HOUR_IST ? "morning" : "evening";
 
 const ddmmyyyy = (day) => (day ? day.split("-").reverse().join("-") : "");
 
@@ -51,7 +48,7 @@ export default function AddVisitPage() {
 
   const [doctor, setDoctor] = useState(null);
   const [visitType, setVisitType] = useState("in_person");
-  const [visitSlot, setVisitSlot] = useState(slotNow);
+  const [visitSlot, setVisitSlot] = useState(() => visitSlotAt());
   const [purpose, setPurpose] = useState(null);
   const [outcome, setOutcome] = useState(null);
   const [notes, setNotes] = useState("");

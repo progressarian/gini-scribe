@@ -1,6 +1,7 @@
 import { withCrmContext } from "./db.js";
 import { VISIT_DUE_CTE } from "./visitDue.js";
 import { ASSIGNABLE_ROLES, ASSIGNING_ROLES } from "./assignees.js";
+import { IST } from "./istPeriods.js";
 import {
   DOCTOR_PRIORITY_VALUES,
   REFERRAL_STATUS_VALUES,
@@ -50,16 +51,26 @@ const DOCTOR_FROM = `
     SELECT v.visit_slot FROM crm.visits v
      WHERE v.doctor_id = d.id AND v.deleted_at IS NULL
      ORDER BY v.occurred_at DESC LIMIT 1
-  ) lv ON TRUE`;
+  ) lv ON TRUE
+  LEFT JOIN LATERAL (
+    SELECT count(*)::int AS n FROM crm.visits v
+     WHERE v.doctor_id = d.id AND v.deleted_at IS NULL
+       AND v.occurred_at >= date_trunc('month', now() AT TIME ZONE ${IST}) AT TIME ZONE ${IST}
+  ) mv ON TRUE`;
 
 const DOCTOR_COLUMNS = `d.id AS doctor_id, d.full_name, d.specialty, d.area, d.city, d.priority,
        d.relationship_stage, d.mobile, d.profile_complete, d.missing_fields,
        d.needs_verification, t.name AS territory_name,
        vd.due_state, vd.last_visit_at, vd.next_due_on, lv.visit_slot AS last_visit_slot,
+       mv.n AS visits_this_month,
        (SELECT u.full_name FROM crm.doctor_assignments a JOIN crm.users u ON u.id = a.executive_id
          WHERE a.doctor_id = d.id AND a.effective_to IS NULL LIMIT 1) AS owner_name`;
 
 const PRIORITY_RANK = `CASE d.priority WHEN 'A' THEN 0 WHEN 'B' THEN 1 WHEN 'C' THEN 2 ELSE 3 END`;
+
+const VISIT_COUNT_SORTS = { visits_most: "mv.n DESC, ", visits_least: "mv.n ASC, " };
+const countSortOf = (sort) =>
+  Object.hasOwn(VISIT_COUNT_SORTS, sort) ? VISIT_COUNT_SORTS[sort] : "";
 
 const CURRENT_OWNER = `SELECT a.executive_id FROM crm.doctor_assignments a
   WHERE a.doctor_id = d.id AND a.effective_to IS NULL`;
@@ -135,7 +146,7 @@ export async function listDueDoctors(crmUser, filters = {}) {
     const { rows } = await sql(
       `WITH ${VISIT_DUE_CTE}
        SELECT ${DOCTOR_COLUMNS} ${DOCTOR_FROM} WHERE ${where}
-        ORDER BY CASE vd.due_state WHEN 'overdue' THEN 0 WHEN 'due' THEN 1 ELSE 2 END,
+        ORDER BY ${countSortOf(filters.sort)}CASE vd.due_state WHEN 'overdue' THEN 0 WHEN 'due' THEN 1 ELSE 2 END,
                  ${PRIORITY_RANK}, vd.last_visit_at NULLS FIRST, d.full_name, d.id
         ${pageWindow(page)}`,
       q.params,
@@ -168,7 +179,7 @@ export async function listMyDoctors(crmUser, filters = {}) {
     const { rows } = await sql(
       `WITH ${VISIT_DUE_CTE}
        SELECT ${DOCTOR_COLUMNS} ${DOCTOR_FROM} WHERE ${where}
-        ORDER BY t.name NULLS LAST, ${PRIORITY_RANK}, d.full_name, d.id
+        ORDER BY ${countSortOf(filters.sort)}t.name NULLS LAST, ${PRIORITY_RANK}, d.full_name, d.id
         ${pageWindow(page)}`,
       q.params,
     );

@@ -1,5 +1,6 @@
 import pool from "../../config/db.js";
 import { medicineKey } from "./stockMatch.js";
+import { resolveNotifications } from "../notifications.js";
 
 export const NEEDED_DAYS = 30;
 const PRESCRIBED_STATUSES = [
@@ -150,6 +151,7 @@ export async function markOrdered(
      RETURNING medicine_key, ordered_at`,
     [cleanKey, cleanName, cleanNote, actorId],
   );
+  await resolveNotifications(db, `pharmacy:needed:${cleanKey}`);
   return { medicineKey: rows[0].medicine_key, orderedAt: rows[0].ordered_at };
 }
 

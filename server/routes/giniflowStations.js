@@ -95,6 +95,7 @@ import {
   giniflowCatalogTestSchema,
   giniflowCatalogTestPatchSchema,
   giniflowFloorSettingSchema,
+  giniflowFollowUpLimitsSchema,
   giniflowPlanSchema,
   giniflowPlanExtractSchema,
   giniflowProposalSchema,
@@ -306,6 +307,11 @@ import { listCancelled, restoreTest } from "../services/giniflow/testRestore.js"
 import { announceRequest } from "../services/billing/billingRequests.js";
 import { getMachines } from "../services/giniflow/machineCatalog.js";
 import { getFloorSettings, setFloorSetting } from "../services/giniflow/floorSettings.js";
+import {
+  followUpLoad,
+  getFollowUpLimits,
+  setFollowUpLimits,
+} from "../services/giniflow/followUpLoad.js";
 import { machinesForStation } from "../../shared/machineStages.js";
 import {
   getHealthrayStatus,
@@ -632,6 +638,46 @@ router.patch(
     }
   },
 );
+
+const followUpError = (res, e, label) =>
+  e?.status && e.status < 500
+    ? res.status(e.status).json({ error: e.message })
+    : handleError(res, e, label);
+
+router.get("/giniflow/follow-up-limits", requireCapability(CAP.ADMIN), async (_req, res) => {
+  try {
+    res.json({ limits: await getFollowUpLimits() });
+  } catch (e) {
+    followUpError(res, e, "Gini Flow follow-up limits");
+  }
+});
+
+router.put(
+  "/giniflow/follow-up-limits",
+  requireCapability(CAP.ADMIN),
+  validate(giniflowFollowUpLimitsSchema),
+  async (req, res) => {
+    try {
+      res.json({ limits: await setFollowUpLimits(req.body, req.doctor?.doctor_id ?? null) });
+    } catch (e) {
+      followUpError(res, e, "Gini Flow follow-up limits update");
+    }
+  },
+);
+
+router.get("/giniflow/follow-up-load", async (req, res) => {
+  try {
+    res.json(
+      await followUpLoad({
+        from: req.query.from,
+        to: req.query.to,
+        visitId: req.query.visitId || null,
+      }),
+    );
+  } catch (e) {
+    followUpError(res, e, "Gini Flow follow-up load");
+  }
+});
 
 // These two are declared BEFORE /doctor/:visitId on purpose: Express matches in
 // order, so "/doctor/medicines" would otherwise be read as a visit id called

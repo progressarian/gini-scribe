@@ -1,0 +1,360 @@
+.prx-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+  min-height: 0;
+}
+.prx-list,
+.prx-detail {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+.prx-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0 4px 16px 0;
+}
+.fset.bill-ui .prx-detail > .flow-card,
+.fset.bill-ui .prx-detail .phb-checkout,
+.fset.bill-ui .prx-detail > .phs-head,
+.fset.bill-ui .prx-detail > .adj-facts {
+  margin: 0;
+}
+.prx-list .fset__cardhead {
+  position: sticky;
+  top: -20px;
+  z-index: 2;
+  margin-top: -20px;
+  padding-top: 20px;
+  background: #fff;
+}
+.phs-title.phs-title--compact {
+  font-size: 18px;
+}
+.fset.bill-ui .prx-layout > .flow-card {
+  margin: 0;
+}
+.prx-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0;
+}
+.prx-filters .fset__field {
+  flex: 0 0 auto;
+}
+.prx-filters .ph-pills {
+  align-self: stretch;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+.prx-filters .ph-pills::-webkit-scrollbar {
+  height: 6px;
+}
+.prx-filters .ph-pills::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+.prx-filters .ph-pill {
+  flex-shrink: 0;
+}
+.prx-patients {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.prx-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--ui-line);
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    box-shadow 0.15s;
+}
+.prx-row:hover:not(.is-on) {
+  border-color: #b8c3d1;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
+}
+.prx-row.is-on {
+  border-color: var(--ui-accent);
+  background: var(--ui-accent-soft);
+  box-shadow: inset 3px 0 0 var(--ui-accent);
+}
+.prx-row:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 1px;
+}
+.prx-row__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+.prx-row__name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ui-ink);
+  overflow-wrap: anywhere;
+}
+.prx-row__meta {
+  margin-top: -4px;
+  font-size: 12px;
+  color: var(--ui-muted);
+}
+.prx-row__last {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ui-muted);
+}
+.prx-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.prx-status__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.prx-status--ready {
+  background: #e6f6f4;
+  border-color: #a7ddd5;
+  color: #0b6b5f;
+}
+.prx-status--rx {
+  background: #fff6e6;
+  border-color: #f6d79b;
+  color: #92400e;
+}
+.prx-status--early {
+  background: #eef4ff;
+  border-color: #c7d7fe;
+  color: #1d4ed8;
+}
+.prx-status--done {
+  background: #ecfdf3;
+  border-color: #b5e8c8;
+  color: #166534;
+}
+.prx-status--none {
+  background: #f1f5f9;
+  border-color: #dde3ea;
+  color: #475569;
+}
+.prx-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+.prx-progress__text {
+  font-size: 12px;
+  color: var(--ui-ink2);
+}
+.prx-progress__bar {
+  display: block;
+  height: 5px;
+  border-radius: 999px;
+  background: #e8edf3;
+  overflow: hidden;
+}
+.prx-progress__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ui-accent);
+  transition: width 0.2s;
+}
+.prx-badge--paid {
+  color: var(--fgn);
+}
+.prx-patient__name {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ui-ink);
+}
+.prx-med__small {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  align-self: flex-start;
+}
+@media (max-width: 960px) {
+  .prx-layout {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .prx-list,
+  .prx-detail {
+    overflow: visible;
+  }
+  .prx-list .fset__cardhead {
+    position: static;
+    margin-top: 0;
+    padding-top: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .prx-row,
+  .prx-progress__fill {
+    transition: none;
+  }
+}
+.prx-note {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--ui-field);
+  border-left: 3px solid var(--fam);
+  border-radius: 8px;
+  background: var(--ui-soft);
+  font-size: 13px;
+  color: var(--ui-ink2);
+}
+
+.prx-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 16px 20px;
+  border: 1px solid var(--ui-line);
+  border-radius: 12px;
+  background: #fff;
+}
+.prx-summary__who p {
+  margin: 2px 0 0;
+}
+.prx-summary__facts {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.prx-summary__bills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-basis: 100%;
+}
+.prx-billchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--ui-field);
+  border-radius: 999px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ui-ink2);
+  cursor: pointer;
+}
+.prx-billchip.is-on {
+  border-color: var(--ui-accent);
+  background: var(--ui-accent-soft);
+  color: var(--ui-ink);
+}
+.prx-billchip:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 1px;
+}
+.prx-start {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.fset.bill-ui .prx-start__form {
+  margin-top: 0;
+  flex: 1 1 320px;
+  grid-template-columns: repeat(2, minmax(140px, 200px));
+}
+.prx-rx__hint {
+  margin: 4px 0 8px;
+}
+.prx-rx__table td {
+  vertical-align: top;
+}
+.prx-rx__table td .phs-item,
+.prx-rx__table td .phs-meta {
+  display: block;
+}
+.prx-rx__last {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+.prx-rx__acts-col {
+  width: 1%;
+}
+.prx-rx__acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+  min-width: 380px;
+}
+.prx-rx__acts .flow-btn {
+  white-space: nowrap;
+}
+.fset.bill-ui .doc-dd.ph-dd.prx-rx__reason {
+  width: 150px;
+}
+.fset.bill-ui .prx-rx__reason .doc-dd__btn {
+  height: 30px;
+  font-size: 12px;
+}
+.prx-rx__picker td {
+  background: var(--ui-soft);
+}
+@media (max-width: 960px) {
+  .prx-summary__facts {
+    align-items: flex-start;
+  }
+  .prx-rx__acts {
+    justify-content: flex-start;
+    min-width: 0;
+  }
+}

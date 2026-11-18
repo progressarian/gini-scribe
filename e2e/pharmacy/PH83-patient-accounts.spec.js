@@ -18,7 +18,7 @@ const FY = financialYearOf(dayOffset(0));
 
 test.describe.configure({ mode: "serial" });
 
-test.describe("PH83 deposits, write-offs, vouchers and the patient ledger", () => {
+test.describe("PH83 deposits, write-offs and the patient ledger", () => {
   let admin;
   let pharmacist;
   let patient;
@@ -185,7 +185,7 @@ test.describe("PH83 deposits, write-offs, vouchers and the patient ledger", () =
     expect((await done.json()).balance).toBe("62.00");
   });
 
-  test("only the admin writes off a due or adds a manual voucher", async () => {
+  test("only the admin writes off a due, and manual vouchers are switched off", async () => {
     let bill = await draft(20, 10);
     const asked = await (
       await pharmacist.post(`/api/pharmacy/credit/bills/${bill.id}/requests`, {
@@ -219,24 +219,11 @@ test.describe("PH83 deposits, write-offs, vouchers and the patient ledger", () =
     const after = await (await pharmacist.get(`/api/pharmacy/bills/${creditBill.id}`)).json();
     expect(Number(after.due_amount)).toBeCloseTo(Number(creditBill.net_amount) - 10, 2);
 
-    expect(
-      (
-        await pharmacist.post(`/api/pharmacy/accounts/${patient.id}/vouchers`, {
-          data: { kind: "credit", amount: 5, reason: "Goodwill" },
-        })
-      ).status(),
-    ).toBe(403);
-    const credit = await admin.post(`/api/pharmacy/accounts/${patient.id}/vouchers`, {
+    const voucher = await admin.post(`/api/pharmacy/accounts/${patient.id}/vouchers`, {
       data: { kind: "credit", amount: 15, reason: "Goodwill" },
     });
-    expect((await credit.json()).balance).toBe("77.00");
-    const debit = await admin.post(`/api/pharmacy/accounts/${patient.id}/vouchers`, {
-      data: { kind: "debit", amount: 500, reason: "Correction" },
-    });
-    expect(debit.status()).toBe(409);
-    await admin.post(`/api/pharmacy/accounts/${patient.id}/vouchers`, {
-      data: { kind: "debit", amount: 7, reason: "Correction" },
-    });
+    expect(voucher.status()).toBe(404);
+    expect((await account(admin)).balance).toBe("62.00");
   });
 
   test("the ledger adds up every column for the patient and sorts and filters", async () => {
@@ -249,9 +236,9 @@ test.describe("PH83 deposits, write-offs, vouchers and the patient ledger", () =
       write_off: "10.00",
       deposit: "200.00",
       deposit_refund: "20.00",
-      voucher_manual: "8.00",
-      balance: "70.00",
+      balance: "62.00",
     });
+    expect(row).not.toHaveProperty("voucher_manual");
     expect(Number(row.discounts)).toBeGreaterThan(0);
     expect(Number(row.due)).toBeCloseTo(Number(creditBill.net_amount) - 10, 2);
     expect(await ledgerRow({ only: "due" })).toBeTruthy();
@@ -263,15 +250,7 @@ test.describe("PH83 deposits, write-offs, vouchers and the patient ledger", () =
 
     const statement = (await account(admin)).statement.map((s) => s.kind);
     expect(statement).toEqual(
-      expect.arrayContaining([
-        "bill",
-        "payment",
-        "deposit",
-        "deposit_refund",
-        "write_off",
-        "voucher_credit",
-        "voucher_debit",
-      ]),
+      expect.arrayContaining(["bill", "payment", "deposit", "deposit_refund", "write_off"]),
     );
   });
 
@@ -288,7 +267,7 @@ test.describe("PH83 deposits, write-offs, vouchers and the patient ledger", () =
     await dialog.getByLabel("Amount (₹)").fill("50");
     await dialog.getByRole("button", { name: "Receive ₹50.00" }).click();
     await expect(dialog).toBeHidden();
-    await expect(page.getByText("₹120.00").first()).toBeVisible();
+    await expect(page.getByText("₹112.00").first()).toBeVisible();
 
     const bill = await draft(10);
     await gotoReady(

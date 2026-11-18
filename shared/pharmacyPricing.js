@@ -14,6 +14,17 @@ const halfOnTop = (amount, bp) => roundDiv(amount * bp, 2 * BASIS);
 
 const halfInside = (amount, bp) => roundDiv(amount * bp, 2 * (BASIS + bp));
 
+export function inclusivePackRate({
+  packSaleRate,
+  packMrp,
+  gstRatePct,
+  saleRateIncludesGst = false,
+}) {
+  const gross = toPaise(packSaleRate);
+  const total = saleRateIncludesGst ? gross : gross + 2 * halfOnTop(gross, basisPoints(gstRatePct));
+  return Math.min(total, toPaise(packMrp));
+}
+
 export function pricePharmacyLine({
   packSaleRate,
   packMrp,

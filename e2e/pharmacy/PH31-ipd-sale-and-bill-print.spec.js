@@ -137,7 +137,26 @@ test.describe("PH31 IPD sales and the printed pharmacy bill", () => {
     await Promise.all([admin?.dispose(), pharmacist?.dispose()]);
   });
 
-  test("an IPD bill prints as a pharmacy bill with GST inside the rates", async () => {
+  test("OPD and IPD bills for the same medicines come to the same total", async () => {
+    const lines = async () => [
+      { batch_id: (await batchOf(controlled.id)).id, qty_units: 10 },
+      { batch_id: (await batchOf(plain.id)).id, qty_units: 5 },
+    ];
+    const extra = { prescriber_name: "Dr. Mehta" };
+    const opd = await billFor("opd", await lines(), extra);
+    const ipd = await billFor("ipd", await lines(), { ...extra, ipd_number: "IPD/2026/0099" });
+    expect(Number(ipd.net_amount)).toBeGreaterThan(0);
+    expect(ipd.net_amount).toBe(opd.net_amount);
+    expect(Number(opd.cgst_amount)).toBeGreaterThan(0);
+    expect(ipd.cgst_amount).toBe("0.00");
+    for (const draft of [opd, ipd]) {
+      await pharmacist.post(`/api/pharmacy/bills/${draft.id}/discard`, {
+        data: { version: draft.version },
+      });
+    }
+  });
+
+  test("an IPD bill prints with one all-in rate and no GST anywhere", async () => {
     const bill = await finalise(
       await billFor(
         "ipd",
@@ -163,11 +182,12 @@ test.describe("PH31 IPD sales and the printed pharmacy bill", () => {
     expect(html).not.toContain("PHARMACY TAX INVOICE");
     expect(html).not.toContain(">CGST<");
     expect(html).toContain("IPD/2026/0042");
-    expect(html).toContain("GST of ₹18.00 is included in the rates");
+    expect(html).not.toContain("GST");
+    expect(html).not.toContain(GSTIN);
+    expect(html).not.toContain("30049099");
     expect(html).toContain("Schedule H1 medicines sold on the prescription of Dr. Mehta");
     expect(html).toContain("DRUG LICENCE NO: PB-MOH-20B-1234");
     expect(html).toContain("ALP1");
-    expect(html).toContain("30049099");
 
     const pdf = await pharmacist.get(`/api/pharmacy/bills/${bill.id}/bill.pdf`);
     expect(pdf.status(), await pdf.text()).toBe(200);
@@ -222,9 +242,9 @@ test.describe("PH31 IPD sales and the printed pharmacy bill", () => {
     await picker.getByRole("button", { name: "Add to bill" }).click();
     await expect(picker).toBeHidden();
 
-    const totals = page.getByRole("definition").filter({ hasText: "₹12.00" });
-    await expect(page.getByText("GST inside the rates")).toBeVisible();
-    await expect(totals).toBeVisible();
+    const lines = page.getByRole("table", { name: "Medicines on this bill" });
+    await expect(lines.getByRole("row").nth(1)).toContainText("₹112.00");
+    await expect(page.getByText(/GST/)).toHaveCount(0);
     await page.getByRole("button", { name: "Finalise and collect ₹112.00" }).click();
     await page
       .getByRole("dialog")

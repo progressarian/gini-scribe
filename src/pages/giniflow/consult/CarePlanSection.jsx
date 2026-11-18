@@ -182,6 +182,7 @@ export default function CarePlanSection({
       <ReferralChips visitId={visitId} readOnly={readOnly} onToast={onToast} />
 
       <NextVisitPicker
+        visitId={visitId}
         fromDate={consult.visitDate}
         interval={plan.nextVisitInterval}
         date={plan.nextVisitDate}

@@ -82,6 +82,10 @@ export const VISIT_SLOTS = [
 ];
 export const VISIT_SLOT_VALUES = VISIT_SLOTS.map((v) => v.value);
 export const SLOT_SPLIT_HOUR_IST = 16;
+export const visitSlotAt = (when = Date.now()) =>
+  new Date(new Date(when).getTime() + 330 * 60_000).getUTCHours() < SLOT_SPLIT_HOUR_IST
+    ? "morning"
+    : "evening";
 
 export const VISIT_SOURCES = [
   { value: "app", label: "Logged in the app" },

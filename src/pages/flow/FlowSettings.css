@@ -399,3 +399,23 @@
   color: var(--fink);
   cursor: pointer;
 }
+
+.fset__limits {
+  align-items: flex-start;
+}
+.fset__field--limit {
+  flex: 0 1 180px;
+}
+.fset__error {
+  color: #b91c1c;
+  font-weight: 600;
+}
+.fset__limits-actions {
+  display: flex;
+  align-items: flex-end;
+  align-self: stretch;
+  padding-top: 18px;
+}
+.fset__section h2.flow-sec-title {
+  margin: 0;
+}

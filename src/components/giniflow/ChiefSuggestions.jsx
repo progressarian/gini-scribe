@@ -237,6 +237,7 @@ export default function ChiefSuggestions({
 
       {state("next_visit") && <div className="cp-lab">Next visit {stateBadge("next_visit")}</div>}
       <NextVisitPicker
+        visitId={visitId}
         interval={values.next_visit.interval || ""}
         date={values.next_visit.date || ""}
         disabled={locked("next_visit")}

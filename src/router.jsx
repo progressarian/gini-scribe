@@ -78,6 +78,9 @@ const PharmacyPurchaseEditorPage = lazyWithRetry(
 );
 const PharmacySettingsPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacySettingsPage"));
 const PharmacyBillsPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyBillsPage"));
+const PharmacyPrescriptionsPage = lazyWithRetry(
+  () => import("./pages/pharmacy/PharmacyPrescriptionsPage"),
+);
 const PharmacyCreditPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyCreditPage"));
 const PharmacyTransfersPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyTransfersPage"));
 const PharmacyIndentsPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyIndentsPage"));
@@ -224,6 +227,7 @@ const router = createBrowserRouter([
               { path: "/pharmacy/purchases", element: lazyEl(PharmacyPurchasesPage) },
               { path: "/pharmacy/purchases/:id", element: lazyEl(PharmacyPurchaseEditorPage) },
               { path: "/pharmacy/billing", element: lazyEl(PharmacyBillsPage) },
+              { path: "/pharmacy/prescriptions", element: lazyEl(PharmacyPrescriptionsPage) },
               { path: "/pharmacy/billing/:id", element: lazyEl(PharmacyBillEditorPage) },
               { path: "/pharmacy/credit", element: lazyEl(PharmacyCreditPage) },
               { path: "/pharmacy/transfers", element: lazyEl(PharmacyTransfersPage) },

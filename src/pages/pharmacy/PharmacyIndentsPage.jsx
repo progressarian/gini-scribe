@@ -243,8 +243,8 @@ function NewIndent({ departments }) {
               ))}
             </ul>
             <p>
-              The medicines come off {department?.name}&apos;s stock and a pharmacy bill (GST
-              included in the rates) is made for the patient to pay at reception.
+              The medicines come off {department?.name}&apos;s stock and a pharmacy bill is made for
+              the patient to pay at reception.
             </p>
           </div>
         }

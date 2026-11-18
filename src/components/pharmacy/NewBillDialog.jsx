@@ -20,7 +20,7 @@ import {
 const SALE_TYPE_HINT = {
   opd: "GST is added on top of the sale rate",
   walkin: "Not a hospital patient. GST is added on top",
-  ipd: "Admitted patient. GST is included in the rate and the bill shows 0% GST",
+  ipd: "Admitted patient. Same total as OPD; the bill shows one all-in rate per item",
 };
 
 const EMPTY_WALKIN = { name: "", phone: "", age: "", sex: "" };

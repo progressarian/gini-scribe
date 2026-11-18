@@ -25,7 +25,6 @@ const COLUMNS = [
   { key: "deposit_refund", label: "Deposit refund", money: true },
   { key: "discounts", label: "Discounts", money: true },
   { key: "sales_return", label: "Voucher (sales return)", money: true },
-  { key: "voucher_manual", label: "Voucher (manual)", money: true },
   { key: "due", label: "Due", money: true },
   { key: "balance", label: "Deposit balance", money: true },
 ];

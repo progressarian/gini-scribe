@@ -193,26 +193,6 @@ export async function refundDeposit(patientId, input, ctx = {}, db = pool) {
   }, db);
 }
 
-export async function addVoucher(patientId, input, ctx = {}, db = pool) {
-  return inTransaction(async (client) => {
-    const account = await lockPatient(client, patientId);
-    const amount = toPaise(input.amount);
-    if (input.kind === "debit" && amount > account.balance) {
-      throw httpError(
-        409,
-        `A debit voucher cannot take the account below zero; ${rupeeText(account.balance)} is left`,
-      );
-    }
-    await entry(client, ctx, {
-      patientId,
-      kind: input.kind === "credit" ? "voucher_credit" : "voucher_debit",
-      amount,
-      reason: input.reason,
-    });
-    return patientAccount(patientId, client);
-  }, db);
-}
-
 export async function writeOffDue(billId, input, ctx = {}, db = pool) {
   return inTransaction(async (client) => {
     const { rows } = await client.query(
@@ -302,7 +282,6 @@ const LEDGER_SORTS = {
   deposit_refund: "deposit_refund",
   discounts: "discounts",
   sales_return: "sales_return",
-  voucher_manual: "voucher_manual",
   due: "due",
   balance: "balance",
   last_activity: "last_activity",
@@ -352,8 +331,6 @@ export async function patientLedger(
               COALESCE(SUM(e.amount) FILTER (WHERE e.kind = 'write_off'), 0) AS write_off,
               COALESCE(SUM(e.amount) FILTER (WHERE e.kind = 'deposit'), 0) AS deposit,
               COALESCE(SUM(e.amount) FILTER (WHERE e.kind = 'deposit_refund'), 0) AS deposit_refund,
-              COALESCE(SUM(CASE e.kind WHEN 'voucher_credit' THEN e.amount
-                                       WHEN 'voucher_debit' THEN -e.amount END), 0) AS voucher_manual,
               COALESCE(SUM(CASE WHEN e.kind IN ('deposit', 'voucher_credit') THEN e.amount
                                 WHEN e.kind = 'write_off' THEN 0 ELSE -e.amount END), 0) AS balance,
               MAX(e.created_at) AS last_entry
@@ -370,7 +347,6 @@ export async function patientLedger(
               COALESCE(e.deposit_refund, 0)::numeric(14, 2) AS deposit_refund,
               COALESCE(b.discounts, 0)::numeric(14, 2) AS discounts,
               COALESCE(b.sales_return, 0)::numeric(14, 2) AS sales_return,
-              COALESCE(e.voucher_manual, 0)::numeric(14, 2) AS voucher_manual,
               COALESCE(b.due, 0)::numeric(14, 2) AS due,
               COALESCE(e.balance, 0)::numeric(14, 2) AS balance,
               GREATEST(b.last_bill, e.last_entry) AS last_activity

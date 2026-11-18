@@ -20,3 +20,7 @@ export const staffOptions = (data) => [
   { value: "unassigned", label: "Unassigned" },
   ...(data?.staff || []).map((s) => ({ value: s.id, label: s.full_name })),
 ];
+export const SORT_OPTIONS = [
+  { value: "visits_most", label: "Most visits this month" },
+  { value: "visits_least", label: "Fewest visits this month" },
+];

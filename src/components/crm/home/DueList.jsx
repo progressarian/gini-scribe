@@ -5,6 +5,7 @@ import { SearchField, FilterSelect, ListStatus, ListBody } from "./ListToolbar.j
 import {
   PRIORITY_OPTIONS,
   SLOT_OPTIONS,
+  SORT_OPTIONS,
   territoryOptions,
   staffOptions,
   hasFilters,
@@ -72,6 +73,13 @@ export default function DueList({ filters, onChange, refreshKey }) {
           onChange={(territory) => update({ territory })}
           allLabel="All territories"
           options={territoryOptions(data)}
+        />
+        <FilterSelect
+          label="Sort"
+          value={filters.sort}
+          onChange={(sort) => update({ sort })}
+          allLabel="Default order"
+          options={SORT_OPTIONS}
         />
         {data?.staff && (
           <FilterSelect

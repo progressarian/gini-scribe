@@ -291,7 +291,7 @@ test.describe("PH10 pharmacy vendors", () => {
     await expect(pharmacyMenu(page)).toHaveCount(0);
   });
 
-  test("the pharmacy admin gets eight top-bar entries with related pages grouped", async ({
+  test("the pharmacy admin gets nine top-bar entries with related pages grouped", async ({
     page,
   }) => {
     await loginAs(page, "pharmacy_admin");
@@ -300,6 +300,7 @@ test.describe("PH10 pharmacy vendors", () => {
     await expect(topEntries(page)).toHaveText([
       "Pharmacy Today",
       /^Reports/,
+      "Prescriptions",
       "Pharmacy Bills",
       "Pharmacy Credit",
       /^Inventory/,
@@ -307,7 +308,7 @@ test.describe("PH10 pharmacy vendors", () => {
       "Medicine Collection",
       "Pharmacy Station",
     ]);
-    await expect(page.locator(".tabs .tab-btn svg.tab-btn__icon")).toHaveCount(8);
+    await expect(page.locator(".tabs .tab-btn svg.tab-btn__icon")).toHaveCount(9);
     await expect(page.locator(".tabs")).toHaveCSS("scrollbar-width", "none");
     await expect(pharmacyMenu(page)).toHaveCount(0);
 

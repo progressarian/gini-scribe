@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { UPI_APPS } from "../../shared/billingVocab.js";
-import { COUNTER_SALE_TYPES, PAYMENTS_AT_ONCE, PAYMENT_MODES } from "../../shared/pharmacyVocab.js";
+import {
+  COUNTER_SALE_TYPES,
+  PAYMENTS_AT_ONCE,
+  PAYMENT_MODES,
+  RX_NOT_GIVEN_REASON_LABEL,
+  RX_OUTCOMES,
+} from "../../shared/pharmacyVocab.js";
 import { blankToNull, optionalText, phoneField } from "./pharmacyFields.js";
 
 const id = z.coerce.number().int().min(1);
@@ -233,7 +239,6 @@ export const pharmacyAccountLabels = {
   reason: "Reason",
   reference: "Reference",
   upi_app: "UPI app",
-  kind: "Voucher type",
 };
 
 export const pharmacyDepositSchema = moneyIn
@@ -244,12 +249,6 @@ export const pharmacyDepositRefundSchema = moneyIn
   .extend({ reason })
   .refine(needsReference, referenceRule)
   .refine(needsUpiApp, upiRule);
-
-export const pharmacyVoucherSchema = z.strictObject({
-  kind: z.enum(["credit", "debit"]),
-  amount: money,
-  reason,
-});
 
 export const pharmacyWriteOffSchema = z.strictObject({
   amount: z.preprocess(blankToNull, money.nullish()),
@@ -264,3 +263,48 @@ export const pharmacyLedgerQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
+
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be a date like 2026-11-18");
+
+export const pharmacyRxQueueQuerySchema = z.object({
+  date: isoDate.optional(),
+  q: z.string().trim().max(80).optional(),
+  category: z.enum(["ready", "coming", "done", "all"]).default("ready"),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  offset: z.coerce.number().int().min(0).max(100000).default(0),
+});
+
+const rxOutcome = z
+  .strictObject({
+    medication_id: id,
+    outcome: z.enum([...RX_OUTCOMES, "pending"]),
+    medicine_id: z.preprocess(blankToNull, id.nullish()),
+    reason: z.preprocess(blankToNull, z.enum(Object.keys(RX_NOT_GIVEN_REASON_LABEL)).nullish()),
+  })
+  .refine((o) => o.outcome !== "not_given" || Boolean(o.reason), {
+    path: ["reason"],
+    message: "is needed when a medicine is not given",
+  })
+  .refine((o) => o.outcome !== "substitute" || Boolean(o.medicine_id), {
+    path: ["medicine_id"],
+    message: "is needed for a substitute",
+  });
+
+export const pharmacyRxOutcomesSchema = z.strictObject({
+  bill_id: uuid,
+  outcomes: z.array(rxOutcome).min(1, "needs at least one medicine").max(200),
+});
+
+export const pharmacyRxRequestSchema = z.strictObject({ medication_id: id });
+
+export const pharmacyRxPatientQuerySchema = z.object({ date: isoDate.optional() });
+
+export const pharmacyRxLabels = {
+  ...pharmacyBillLabels,
+  lines: "Medicines",
+  outcomes: "Prescription lines",
+  reason: "Reason",
+  medicine_id: "Substitute",
+  medication_id: "Prescribed medicine",
+  date: "Date",
+};

@@ -24,6 +24,7 @@ export default function EditNextVisit({ visitId, fromDate, saved, onToast }) {
         📅 Next visit {save.isPending ? "· saving…" : save.isSuccess ? "· saved" : ""}
       </div>
       <NextVisitPicker
+        visitId={visitId}
         fromDate={fromDate}
         interval={value?.interval || ""}
         date={value?.date || ""}

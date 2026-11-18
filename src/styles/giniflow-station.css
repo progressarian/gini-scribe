@@ -9590,8 +9590,53 @@
 }
 .gf .cp-next-val {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+.gf .cp-next-cal {
+  position: relative;
+}
+.gf .cp-next-calbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--blu);
+  border-color: var(--blu-b);
+  background: var(--white);
+  font-weight: 600;
+}
+.gf .cp-next-calbtn::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  border-top-width: 3px;
+  border-radius: 2px;
+}
+.gf .cp-next-calbtn[aria-expanded="true"] {
+  background: var(--blu);
+  border-color: var(--blu);
+  color: #fff;
+}
+.gf .cp-next-over,
+.gf .cp-next-full {
+  display: block;
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-radius: var(--r-md, 6px);
+  font-size: 11px;
+  font-weight: 700;
+}
+.gf .cp-next-over {
+  color: #92400e;
+  background: var(--amb-l);
+  border: 1px solid var(--amb-b);
+}
+.gf .cp-next-full {
+  color: var(--red);
+  background: var(--red-l);
+  border: 1px solid var(--red-b);
 }
 .gf .fin-bar .fin-edit-need {
   display: flex;

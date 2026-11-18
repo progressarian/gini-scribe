@@ -6,7 +6,6 @@ import { requestErrorOf } from "../billing/format";
 import { inr } from "./format";
 import { toast } from "../../stores/uiStore";
 import {
-  useAddVoucher,
   useReceiveDeposit,
   useRefundDeposit,
   useWriteOff,
@@ -154,74 +153,6 @@ export function DepositDialog({ account, refund = false, onClose }) {
           onChange={set("reason")}
           error={errors.reason}
         />
-      </div>
-    </MasterFormDialog>
-  );
-}
-
-export function VoucherDialog({ account, onClose }) {
-  const add = useAddVoucher();
-  const [v, set, pick] = useFields({ kind: "credit", amount: "", reason: "" });
-  const [touched, setTouched] = useState(false);
-  const [error, setError] = useState("");
-  const amount = toPaise(v.amount);
-
-  const problems = {};
-  if (!(amount > 0)) problems.amount = "Enter an amount more than 0.";
-  else if (v.kind === "debit" && amount > toPaise(account.balance))
-    problems.amount = `A debit cannot take the account below zero; ${inr(account.balance)} is left.`;
-  if (v.reason.trim().length < 3) problems.reason = "Say why this voucher is made.";
-  const errors = touched ? problems : {};
-
-  const submit = async (e) => {
-    e.preventDefault();
-    setTouched(true);
-    setError("");
-    if (Object.keys(problems).length) return;
-    try {
-      const after = await add.mutateAsync({
-        target: account.id,
-        kind: v.kind,
-        amount: amount / 100,
-        reason: v.reason.trim(),
-      });
-      toast(`Voucher saved. Account balance is now ${inr(after.balance)}.`);
-      onClose();
-    } catch (err) {
-      setError(requestErrorOf(err, "Could not save the voucher"));
-    }
-  };
-
-  return (
-    <MasterFormDialog
-      title="Manual voucher"
-      intro={
-        <p className="phs-meta">
-          {account.name} ({account.file_no ?? "—"}) · account balance {inr(account.balance)}. A
-          credit adds to the balance the patient can use on bills; a debit takes from it.
-        </p>
-      }
-      dirty={Boolean(v.amount || v.reason)}
-      busy={add.isPending}
-      error={error}
-      submitLabel="Save voucher"
-      onSubmit={submit}
-      onClose={onClose}
-      wide={false}
-    >
-      <div className="bill-form">
-        <FormField label="Voucher type" required>
-          <SelectInput
-            value={v.kind}
-            onChange={pick("kind")}
-            options={[
-              { value: "credit", label: "Credit (add to the account)" },
-              { value: "debit", label: "Debit (take from the account)" },
-            ]}
-          />
-        </FormField>
-        <AmountField value={v.amount} onChange={set("amount", moneyTyped)} error={errors.amount} />
-        <ReasonField value={v.reason} onChange={set("reason")} error={errors.reason} />
       </div>
     </MasterFormDialog>
   );

@@ -218,7 +218,7 @@ test.describe("CRM home: paged and filtered lists", () => {
     await mine.getByRole("button", { name: "Staff", exact: true }).click();
     await page.getByRole("option", { name: "Sandeep Sangroy" }).click();
     await expect(mine.getByText("3 doctors", { exact: true })).toBeVisible();
-    await expect(mine.getByText("Owner: Sandeep Sangroy")).toHaveCount(3);
+    await expect(mine.locator(".rep__doc-owner", { hasText: "Sandeep Sangroy" })).toHaveCount(3);
     await mine.getByRole("button", { name: "Clear filters" }).first().click();
     await expect(mine.getByText("58 doctors")).toBeVisible();
 

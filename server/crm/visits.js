@@ -5,7 +5,7 @@ import {
   VISIT_OUTCOME_VALUES,
   VISIT_FORM_STATUS_VALUES,
   VISIT_SLOT_VALUES,
-  SLOT_SPLIT_HOUR_IST,
+  visitSlotAt,
   DOCTOR_PRIORITY_VALUES,
 } from "../../shared/crmVocab.js";
 import {
@@ -139,6 +139,7 @@ export async function logVisit(crmUser, visit) {
   const pickedDay = visit_date ? checkVisitDay(visit_date, loggedOn) : null;
   const backDated = pickedDay && pickedDay !== istDate(loggedOn);
   const occurredAt = backDated ? null : (occurred_at ?? null);
+  const slot = visit_slot || (backDated ? null : visitSlotAt(occurredAt ?? Date.now()));
   const fix = usableGps(gps);
   const followUp = Boolean(follow_up_required);
   const nextDate = followUp ? next_visit_date || null : null;
@@ -179,9 +180,7 @@ export async function logVisit(crmUser, visit) {
        VALUES ($1,$2,$3,$4,$5,$6,
                COALESCE($7, LEAST(($21::date + time '12:00') AT TIME ZONE 'Asia/Kolkata', now()), now()),
                $8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$4,
-               COALESCE($22::text, CASE WHEN $21::date IS NULL THEN
-                 CASE WHEN extract(hour FROM COALESCE($7::timestamptz, now()) AT TIME ZONE 'Asia/Kolkata')
-                           < ${SLOT_SPLIT_HOUR_IST} THEN 'morning' ELSE 'evening' END END))
+               $22)
        ON CONFLICT (id) DO NOTHING
        RETURNING id, occurred_at, synced_at`,
       [
@@ -206,7 +205,7 @@ export async function logVisit(crmUser, visit) {
         fix?.captured_at ?? null,
         client_created_at ?? null,
         backDated ? pickedDay : null,
-        visit_slot || null,
+        slot,
       ],
     );
 

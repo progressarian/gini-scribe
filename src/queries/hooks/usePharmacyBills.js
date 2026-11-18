@@ -33,11 +33,12 @@ export function useBillList(params) {
   });
 }
 
-export function useBill(id) {
+export function useBill(id, options = {}) {
   return useQuery({
     queryKey: billKeys.one(id),
     queryFn: async () => (await api.get(`${BASE}/${id}`)).data,
     enabled: Boolean(id),
+    ...options,
   });
 }
 

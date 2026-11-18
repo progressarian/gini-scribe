@@ -1,4 +1,6 @@
 import pool from "../../config/db.js";
+import { firstDateWithRoom } from "./followUpLoad.js";
+import { skipSunday } from "../../../shared/followUp.js";
 import { advanceStatus } from "./statusEngine.js";
 import { markMedicationVisitStatus } from "../medication/visitStatus.js";
 import { savePrescriptionForVisit, buildVisitPayloadFromDb } from "../prescriptionAutoSave.js";
@@ -356,7 +358,7 @@ export async function fastPathFinalize(visitId, actorId = null, db = pool, { con
     const { rows: d } = await db.query(
       `SELECT ((NOW() AT TIME ZONE 'Asia/Kolkata')::date + INTERVAL '3 months')::date::text AS d`,
     );
-    nextVisitDate = d[0].d;
+    nextVisitDate = await firstDateWithRoom(visitId, skipSunday(d[0].d), db);
     await saveCarePlan(visitId, { nextVisitDate, nextVisitInterval: "~3 months" }, actorId, db);
   }
 

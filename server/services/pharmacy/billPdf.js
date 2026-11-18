@@ -29,6 +29,7 @@ import {
   SCHEDULE_LABEL,
   splitUnits,
 } from "../../../shared/pharmacyVocab.js";
+import { inclusivePackRate } from "../../../shared/pharmacyPricing.js";
 
 const paise = (rupees) => toPaise(rupees);
 
@@ -52,7 +53,7 @@ function linesTableHtml(bill, closing) {
   const columns = [
     ["No.", "bp-sno"],
     ["Particulars", "bp-item"],
-    ["HSN", "bp-sac"],
+    ...(folded ? [] : [["HSN", "bp-sac"]]),
     ["Batch", "bp-code"],
     ["Exp", "bp-unit"],
     ["Qty", "bp-unit"],
@@ -81,12 +82,21 @@ function linesTableHtml(bill, closing) {
       const cells = [
         `<td class="bp-sno">${index + 1}</td>`,
         `<td class="bp-item">${escapeHtml(line.medicine_name)}${schedule}</td>`,
-        `<td class="bp-sac">${escapeHtml(line.hsn_code ?? "")}</td>`,
+        ...(folded ? [] : [`<td class="bp-sac">${escapeHtml(line.hsn_code ?? "")}</td>`]),
         `<td class="bp-code">${escapeHtml(line.batch_no)}</td>`,
         `<td class="bp-unit">${escapeHtml(expiryText(line.expiry_date))}</td>`,
         `<td class="bp-unit">${escapeHtml(quantityText(line))}</td>`,
         `<td class="bp-num">${amountText(paise(line.pack_mrp))}</td>`,
-        `<td class="bp-num">${amountText(paise(line.pack_sale_rate))}</td>`,
+        `<td class="bp-num">${amountText(
+          folded
+            ? inclusivePackRate({
+                packSaleRate: line.pack_sale_rate,
+                packMrp: line.pack_mrp,
+                gstRatePct: line.gst_rate_pct,
+                saleRateIncludesGst: bill.sale_rate_includes_gst,
+              })
+            : paise(line.pack_sale_rate),
+        )}</td>`,
       ];
       if (discounted) {
         const pct = Number(line.discount_pct ?? 0);
@@ -145,7 +155,6 @@ function totalsHtml(bill) {
   }
   if (bill.gst_folded) {
     rows.push(["Amount (₹)", amountText(paise(bill.taxable_amount))]);
-    rows.push(["GST included in rates (₹)", amountText(paise(bill.folded_gst_amount))]);
   } else {
     rows.push(["Taxable Value (₹)", amountText(paise(bill.taxable_amount))]);
     rows.push(["CGST (₹)", amountText(paise(bill.cgst_amount))]);
@@ -197,11 +206,6 @@ function noticeHtml(bill) {
   if (bill.bill_type === "credit_note" && bill.notes) {
     notes.push(`Returned: ${bill.notes}`);
   }
-  if (bill.gst_folded) {
-    notes.push(
-      `In-patient sale: GST of ₹${amountText(paise(bill.folded_gst_amount))} is included in the rates; no GST is charged on this bill.`,
-    );
-  }
   const controlled = bill.lines.filter((l) => REGISTER_SCHEDULES.includes(l.schedule));
   if (controlled.length) {
     const kinds = [...new Set(controlled.map((l) => SCHEDULE_LABEL[l.schedule]))].join(", ");
@@ -223,7 +227,10 @@ export function buildPharmacyBillHtml(view) {
     operator: { name: bill.finalised_by_name ?? null, at: bill.finalised_at ?? null },
   });
   const body = `<div class="bp-page">
-  ${headerHtml(view, { legalName: bill.issued_legal_name, gstin: bill.issued_gstin })}
+  ${headerHtml(view, {
+    legalName: bill.issued_legal_name,
+    gstin: bill.gst_folded ? null : bill.issued_gstin,
+  })}
   ${licenceHtml(bill)}
   ${titleHtml(bill.bill_type === "credit_note" ? "PHARMACY CREDIT NOTE" : taxInvoice ? "PHARMACY TAX INVOICE" : "PHARMACY BILL")}
   ${noticeHtml(bill)}

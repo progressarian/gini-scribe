@@ -34,6 +34,5 @@ function useAccountMutation(path) {
 
 export const useReceiveDeposit = () => useAccountMutation((id) => `${BASE}/${id}/deposits`);
 export const useRefundDeposit = () => useAccountMutation((id) => `${BASE}/${id}/deposit-refunds`);
-export const useAddVoucher = () => useAccountMutation((id) => `${BASE}/${id}/vouchers`);
 export const useWriteOff = () =>
   useAccountMutation((billId) => `${BASE}/bills/${billId}/write-off`);

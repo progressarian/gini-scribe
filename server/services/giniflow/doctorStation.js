@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { withFollowUpRoom } from "./followUpLoad.js";
 import { advanceStatus, budgetColour, returnToQueue, IST_TODAY } from "./statusEngine.js";
 import { getSlaConfig, budgetMap, budgetLookup } from "./board.js";
 import {
@@ -827,6 +828,13 @@ async function undoClaim(client, visitId, origin) {
 }
 
 export async function saveCarePlan(visitId, plan, actorId = null, db = pool) {
+  const nextVisitDate = skipSunday(plan.nextVisitDate) || null;
+  return withFollowUpRoom(db, { visitId, date: nextVisitDate }, (client) =>
+    writeCarePlan(client, visitId, { ...plan, nextVisitDate }, actorId),
+  );
+}
+
+async function writeCarePlan(db, visitId, plan, actorId) {
   const { rows } = await db.query(
     `INSERT INTO giniflow_care_plans
        (visit_id, treatment, lifestyle, internal_note, next_visit_date,
@@ -848,7 +856,7 @@ export async function saveCarePlan(visitId, plan, actorId = null, db = pool) {
       plan.treatment ?? null,
       plan.lifestyle ?? null,
       plan.internalNote ?? null,
-      skipSunday(plan.nextVisitDate) || null,
+      plan.nextVisitDate,
       plan.nextVisitInterval ?? null,
       JSON.stringify(plan.goals ?? []),
       plan.source || "typed",

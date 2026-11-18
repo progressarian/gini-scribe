@@ -8,12 +8,10 @@ import {
   pharmacyDepositRefundSchema,
   pharmacyDepositSchema,
   pharmacyLedgerQuerySchema,
-  pharmacyVoucherSchema,
   pharmacyWriteOffSchema,
 } from "../schemas/index.js";
 import { auditContext } from "../services/billing/audit.js";
 import {
-  addVoucher,
   patientAccount,
   patientLedger,
   receiveDeposit,
@@ -75,18 +73,6 @@ router.post(
   route(
     "Pharmacy deposit refund",
     (req) => refundDeposit(Number(req.params.patientId), req.body, auditContext(req)),
-    201,
-  ),
-);
-
-router.post(
-  "/pharmacy/accounts/:patientId/vouchers",
-  patientId,
-  canAdjust,
-  validate(pharmacyVoucherSchema, pharmacyAccountLabels),
-  route(
-    "Pharmacy manual voucher",
-    (req) => addVoucher(Number(req.params.patientId), req.body, auditContext(req)),
     201,
   ),
 );

@@ -9,6 +9,7 @@ import { getBillPatient } from "./billPatients.js";
 import { DUE_SQL, PATIENT_DUE_SQL } from "./billDue.js";
 import { canonicalMedKey } from "../medication/normalize.js";
 import { appointmentFor, markCollection } from "../medication/collection.js";
+import { handoverBlockFor } from "../giniflow/pharmacyStation.js";
 import {
   applyDiscounts,
   discountOf,
@@ -582,7 +583,8 @@ export async function finaliseBill(
       );
     }
     const after = await getBill(id, client);
-    const marked = await markDispensed(client, after, lines, ctx);
+    const dispensed = await markDispensed(client, after, lines, ctx);
+    const marked = [...dispensed, ...(await applyMedOutcomes(client, after, dispensed, ctx))];
     await writeAudit(client, {
       entity: ENTITY,
       entityId: id,
@@ -652,6 +654,49 @@ async function markDispensed(client, bill, lines, ctx) {
       markedBy: ctx.actorName ?? null,
     });
     marked.push(medication.id);
+  }
+  return marked;
+}
+
+async function applyMedOutcomes(client, bill, already, ctx) {
+  const { rows: outcomes } = await client.query(
+    `SELECT o.medication_id, o.outcome, o.reason, m.name AS substitute_name
+       FROM pharmacy_bill_med_outcomes o
+       JOIN medications med ON med.id = o.medication_id AND med.patient_id = $2
+       LEFT JOIN pharmacy_medicines m ON m.id = o.medicine_id
+      WHERE o.bill_id = $1
+        AND (o.outcome <> 'substitute'
+          OR EXISTS (SELECT 1 FROM pharmacy_bill_lines l
+                      WHERE l.bill_id = o.bill_id AND l.medicine_id = o.medicine_id))`,
+    [bill.id, bill.patient_id],
+  );
+  if (!outcomes.length) return [];
+  const date = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  if (await handoverBlockFor(client, bill.patient_id, date)) return [];
+  const appointmentId = await appointmentFor(client, bill.patient_id, date);
+  const done = new Set(already);
+  const marked = [];
+  for (const o of outcomes) {
+    if (done.has(o.medication_id)) continue;
+    const given = o.outcome === "given" || o.outcome === "substitute";
+    await markCollection(client, {
+      medicationId: o.medication_id,
+      patientId: bill.patient_id,
+      appointmentId,
+      date,
+      status: given ? "given" : "not_given",
+      reason: given ? null : o.reason,
+      qtyNote:
+        o.outcome === "substitute"
+          ? `Substitute ${o.substitute_name} on bill ${bill.bill_no}`
+          : o.outcome === "given"
+            ? `On bill ${bill.bill_no}`
+            : o.outcome === "requested"
+              ? "Requested; patient will collect later"
+              : null,
+      markedBy: ctx.actorName ?? null,
+    });
+    marked.push(o.medication_id);
   }
   return marked;
 }

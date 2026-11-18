@@ -13,6 +13,7 @@ import {
 } from "../../queries/hooks/useFlow";
 import JourneyTemplateEditor from "../../components/flow/JourneyTemplateEditor";
 import MachineSettings from "../../components/flow/MachineSettings";
+import FollowUpLimitsSettings from "../../components/flow/FollowUpLimitsSettings";
 import {
   useGiniflowFloorSettings,
   useSetGiniflowFloorSetting,
@@ -239,6 +240,8 @@ export default function FlowAdminPage() {
             Use each consultant's own time slots in GHM
           </label>
         </div>
+
+        <FollowUpLimitsSettings />
 
         <div className="fset__grid">
           {/* Benchmarks — add / edit / delete */}

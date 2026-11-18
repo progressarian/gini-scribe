@@ -1,5 +1,5 @@
 import pool from "../../config/db.js";
-import { CAPABILITIES as CAP } from "../../../shared/permissions.js";
+import { ROLES } from "../../../shared/permissions.js";
 import {
   raiseNotification,
   resolveNotifications,
@@ -48,13 +48,12 @@ async function applyLevels(db, rows) {
   for (const row of rows) {
     const key = `${row.location_id}:${row.medicine_id}`;
     const where = row.kind === "main" ? "the main pharmacy" : row.location_name;
-    const capability = row.kind === "main" ? CAP.PHARMACY_PURCHASE : CAP.PHARMACY_DEPT_MANAGE;
     if (row.min_units !== null && row.units < row.min_units) {
       open.low.push(LOW + key);
       await raiseNotification(db, {
         kind: row.kind === "main" ? "stock_low" : "dept_stock_low",
         severity: row.units === 0 ? "critical" : "warning",
-        capability,
+        role: ROLES.PHARMACY_ADMIN,
         title: row.units === 0 ? `Out of stock: ${row.name}` : `Low stock: ${row.name}`,
         body: `${row.units} ${row.unit_label} left at ${where}; the minimum is ${row.min_units}.`,
         link: `${link(row)}${row.units === 0 ? "out" : "low"}`,
@@ -70,7 +69,7 @@ async function applyLevels(db, rows) {
       await raiseNotification(db, {
         kind: "stock_over_max",
         severity: "info",
-        capability,
+        role: ROLES.PHARMACY_ADMIN,
         title: `Over stock: ${row.name}`,
         body: `${row.units} ${row.unit_label} at ${where}; the maximum is ${row.max_units}.`,
         link: `${link(row)}over`,
@@ -140,7 +139,7 @@ async function sweepExpiry(db) {
       await raiseNotification(db, {
         kind: "batch_expired",
         severity: "critical",
-        capability: CAP.PHARMACY_PURCHASE,
+        role: ROLES.PHARMACY_ADMIN,
         title: `${row.expired} expired batch${row.expired === 1 ? "" : "es"} on the shelf`,
         body: `${row.expired_units} units at ${where} have expired. Take them off the shelf and return or write them off.`,
         link: `/pharmacy/expiry?bucket=expired&location_id=${row.location_id}`,
@@ -152,7 +151,7 @@ async function sweepExpiry(db) {
       await raiseNotification(db, {
         kind: "batch_near_expiry",
         severity: row.within_30 ? "warning" : "info",
-        capability: CAP.PHARMACY_PURCHASE,
+        role: ROLES.PHARMACY_ADMIN,
         title: `${row.expiring} batch${row.expiring === 1 ? "" : "es"} expire within ${alertDays} days`,
         body: `At ${where}${row.within_30 ? `, ${row.within_30} of them within 30 days` : ""}. Sell them first or arrange a vendor return.`,
         link: `/pharmacy/expiry?location_id=${row.location_id}`,
@@ -181,7 +180,7 @@ async function sweepDrift(db) {
     await raiseNotification(db, {
       kind: "stock_drift",
       severity: "critical",
-      capability: CAP.PHARMACY_MASTER,
+      role: ROLES.PHARMACY_ADMIN,
       title: "Stock does not match its history",
       body: `${drifted} batch stock figure${drifted === 1 ? "" : "s"} differ from the sum of their movements. Tell the Scribe team.`,
       link: "/pharmacy/stock",

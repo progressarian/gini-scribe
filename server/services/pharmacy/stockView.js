@@ -114,7 +114,7 @@ export async function listStock(
   };
 }
 
-async function batchesAt(
+export async function batchesAt(
   db,
   locationId,
   medicineIds,

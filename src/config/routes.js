@@ -95,6 +95,7 @@ export const PAGE_CAPABILITIES = {
   "/pharmacy/adjustments": CAP.PHARMACY_STOCK_ADJUST,
   "/pharmacy/expiry": [CAP.PHARMACY_STOCK_VIEW, CAP.PHARMACY_PURCHASE],
   "/pharmacy/billing": CAP.PHARMACY_BILL,
+  "/pharmacy/prescriptions": CAP.PHARMACY_BILL,
   "/pharmacy/credit": [CAP.PHARMACY_CREDIT_REQUEST, CAP.PHARMACY_CREDIT_APPROVE],
   "/pharmacy/transfers": CAP.PHARMACY_DEPT_MANAGE,
   "/pharmacy/indents": [CAP.PHARMACY_INDENT, CAP.PHARMACY_DEPT_MANAGE],

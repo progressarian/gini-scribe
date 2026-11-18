@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { withFollowUpRoom } from "./followUpLoad.js";
 import { skipSunday } from "../../../shared/followUp.js";
 
 export const SUGGESTION_FIELDS = ["advice", "treatment", "lifestyle", "goals", "next_visit"];
@@ -186,11 +187,13 @@ async function applyToCarePlan(client, visitId, field, value, actorId) {
       [visitId, JSON.stringify(merged)],
     );
   } else {
+    const date = skipSunday(value.date) || null;
+    await withFollowUpRoom(client, { visitId, date }, () => null);
     await client.query(
       `UPDATE giniflow_care_plans
           SET next_visit_date = $2, next_visit_interval = $3, updated_at = NOW()
         WHERE visit_id = $1`,
-      [visitId, skipSunday(value.date) || null, value.interval],
+      [visitId, date, value.interval],
     );
   }
 }

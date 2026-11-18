@@ -12,6 +12,7 @@ import {
   pharmacyDuesQuerySchema,
 } from "../schemas/index.js";
 import { auditContext } from "../services/billing/audit.js";
+import { signalPharmacy } from "../services/pharmacy/live.js";
 import {
   collectDue,
   decideCredit,
@@ -52,14 +53,26 @@ router.post(
   known("Pharmacy bill"),
   canRequest,
   validate(pharmacyCreditRequestSchema, pharmacyCreditLabels),
-  route("Ask for credit", (req) => requestCredit(req.params.id, req.body, auditContext(req)), 201),
+  route(
+    "Ask for credit",
+    async (req) => {
+      const bill = await requestCredit(req.params.id, req.body, auditContext(req));
+      signalPharmacy("credit", bill.id);
+      return bill;
+    },
+    201,
+  ),
 );
 
 router.post(
   "/pharmacy/credit/requests/:id/withdraw",
   known("Credit request"),
   canRequest,
-  route("Withdraw credit request", (req) => withdrawCredit(req.params.id, auditContext(req))),
+  route("Withdraw credit request", async (req) => {
+    const bill = await withdrawCredit(req.params.id, auditContext(req));
+    signalPharmacy("credit", bill.id);
+    return bill;
+  }),
 );
 
 router.post(
@@ -67,7 +80,11 @@ router.post(
   known("Credit request"),
   canApprove,
   validate(pharmacyCreditDecisionSchema, pharmacyCreditLabels),
-  route("Decide credit request", (req) => decideCredit(req.params.id, req.body, auditContext(req))),
+  route("Decide credit request", async (req) => {
+    const decided = await decideCredit(req.params.id, req.body, auditContext(req));
+    signalPharmacy("credit", decided.bill_id);
+    return decided;
+  }),
 );
 
 router.get(

@@ -1,4 +1,5 @@
 import pool from "../../config/db.js";
+import { withFollowUpRoom } from "./followUpLoad.js";
 import { IST_TODAY } from "./statusEngine.js";
 import { skipSunday } from "../../../shared/followUp.js";
 import { SEEDED_SLOTS } from "./prescription.js";
@@ -301,6 +302,7 @@ export async function saveEditNextVisit(
       );
     }
     const date = skipSunday(nextVisitDate) || null;
+    await withFollowUpRoom(client, { visitId, date }, () => null);
     await client.query(
       `INSERT INTO giniflow_care_plans (visit_id, next_visit_date, next_visit_interval, authored_by)
        VALUES ($1, $2, $3, $4)

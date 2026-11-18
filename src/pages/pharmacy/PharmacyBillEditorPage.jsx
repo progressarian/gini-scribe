@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, HandCoins, Pill, Printer, Trash2, Undo2 } from "lucide-react";
@@ -7,7 +7,9 @@ import { AskCreditDialog, CollectDueDialog } from "../../components/pharmacy/Cre
 import useAuthStore from "../../stores/authStore";
 import { CAPABILITIES, hasCapability } from "../../../shared/permissions";
 import { useWithdrawCredit } from "../../queries/hooks/usePharmacyCredit";
+import { usePharmacyLive } from "../../queries/hooks/usePharmacyLive";
 import { toPaise, toRupees } from "../../../shared/pharmacyMoney";
+import { inclusivePackRate } from "../../../shared/pharmacyPricing";
 import { PdfButton } from "../../components/billing/counter/PdfViewer";
 import api from "../../services/api";
 import { requestErrorOf } from "../../components/billing/format";
@@ -15,6 +17,7 @@ import ConfirmModal from "../../components/ui/ConfirmModal";
 import MedicinePicker from "../../components/pharmacy/MedicinePicker";
 import BatchPickerDialog from "../../components/pharmacy/BatchPickerDialog";
 import { SelectInput } from "../../components/pharmacy/Fields";
+import { describeStock, useStockOptions } from "../../components/pharmacy/stockOptions";
 import BillPayments, {
   firstPayment,
   paymentProblems,
@@ -22,7 +25,7 @@ import BillPayments, {
 } from "../../components/pharmacy/BillPayments";
 import { inr, packUnits, showDate } from "../../components/pharmacy/format";
 import { toast } from "../../stores/uiStore";
-import { batchKeys, useBatchStock } from "../../queries/hooks/usePharmacyBatches";
+import { batchKeys } from "../../queries/hooks/usePharmacyBatches";
 import {
   pharmacyBillPdfUrl,
   useBill,
@@ -59,20 +62,6 @@ export function BillStatus({ status, due = 0 }) {
     </span>
   );
 }
-
-const useStockOptions = (q) => {
-  const search = useBatchStock({ q, filter: "in_stock", limit: 10 }, { enabled: Boolean(q) });
-  return { ...search, options: search.data?.rows ?? [] };
-};
-
-const describeStock = (m) =>
-  [
-    m.code,
-    `${packUnits(m.sellable_units, m)} in stock`,
-    m.batches[0]?.rack_no && `Rack ${m.batches[0].rack_no}`,
-  ]
-    .filter(Boolean)
-    .join(" · ");
 
 const lineInput = (l) => ({
   batch_id: l.batch_id,
@@ -175,8 +164,21 @@ function PatientStrip({ bill }) {
   );
 }
 
+const shownPackRate = (bill, line) =>
+  bill.gst_folded
+    ? toRupees(
+        inclusivePackRate({
+          packSaleRate: line.pack_sale_rate,
+          packMrp: line.pack_mrp,
+          gstRatePct: line.gst_rate_pct,
+          saleRateIncludesGst: bill.sale_rate_includes_gst,
+        }),
+      )
+    : line.pack_sale_rate;
+
 function LinesTable({ bill, onChange, onRemove, onDiscount, busy }) {
   const editable = Boolean(onChange);
+  const showGst = !bill.gst_folded;
   const showDiscount = editable || bill.lines.some((l) => lineDiscount(l) > 0);
   return (
     <div className="fset__scroll">
@@ -188,7 +190,7 @@ function LinesTable({ bill, onChange, onRemove, onDiscount, busy }) {
             <th className="phs-num">Quantity</th>
             <th className="phs-num">Rate / pack</th>
             {showDiscount ? <th className="phs-num">Disc %</th> : null}
-            <th className="phs-num">GST</th>
+            {showGst ? <th className="phs-num">GST</th> : null}
             <th className="phs-num">Amount</th>
             {editable ? <th aria-label="Actions" /> : null}
           </tr>
@@ -203,7 +205,7 @@ function LinesTable({ bill, onChange, onRemove, onDiscount, busy }) {
                     {SCHEDULE_LABEL[l.schedule] ?? l.schedule}
                   </span>
                 ) : null}
-                {l.hsn_code ? <span className="phs-meta">HSN {l.hsn_code}</span> : null}
+                {showGst && l.hsn_code ? <span className="phs-meta">HSN {l.hsn_code}</span> : null}
               </td>
               <td data-label="Batch">
                 <span className="phv-mono">{l.batch_no}</span>
@@ -220,7 +222,7 @@ function LinesTable({ bill, onChange, onRemove, onDiscount, busy }) {
                 </span>
               </td>
               <td data-label="Rate / pack" className="phs-num">
-                {inr(l.pack_sale_rate)}
+                {inr(shownPackRate(bill, l))}
                 <span className="phs-meta">MRP {inr(l.pack_mrp)}</span>
               </td>
               {showDiscount ? (
@@ -237,12 +239,11 @@ function LinesTable({ bill, onChange, onRemove, onDiscount, busy }) {
                   ) : null}
                 </td>
               ) : null}
-              <td data-label="GST" className="phs-num">
-                {Number(l.tax_rate_pct) ? `${Number(l.tax_rate_pct)}%` : "0%"}
-                {Number(l.folded_gst) ? (
-                  <span className="phs-meta">{Number(l.gst_rate_pct)}% in rate</span>
-                ) : null}
-              </td>
+              {showGst ? (
+                <td data-label="GST" className="phs-num">
+                  {Number(l.tax_rate_pct) ? `${Number(l.tax_rate_pct)}%` : "0%"}
+                </td>
+              ) : null}
               <td data-label="Amount" className="phs-num">
                 {inr(l.total)}
                 {l.mrp_capped ? <span className="phs-meta">Capped at MRP</span> : null}
@@ -361,15 +362,10 @@ function BillTotals({ bill }) {
         </div>
       ) : null}
       <div>
-        <dt>{folded ? "Amount (GST included in rates)" : "Taxable value"}</dt>
+        <dt>{folded ? "Amount" : "Taxable value"}</dt>
         <dd>{inr(bill.taxable_amount)}</dd>
       </div>
-      {folded ? (
-        <div className="phb-totals__note">
-          <dt>GST inside the rates</dt>
-          <dd>{inr(bill.folded_gst_amount)}</dd>
-        </div>
-      ) : (
+      {folded ? null : (
         <>
           <div>
             <dt>CGST</dt>
@@ -567,7 +563,7 @@ function CreditPanel({ request, canAsk, busy, onAsk, onWithdraw }) {
   );
 }
 
-function DraftBill({ bill }) {
+function DraftBill({ bill, renderPrescription, onDiscarded }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const save = useSaveBill();
@@ -587,6 +583,18 @@ function DraftBill({ bill }) {
   const withdraw = useWithdrawCredit();
   const request = bill.credit;
   const creditOpen = ["pending", "approved"].includes(request?.status);
+  const lastCreditStatus = useRef(request?.status);
+
+  useEffect(() => {
+    const was = lastCreditStatus.current;
+    lastCreditStatus.current = request?.status;
+    if (was !== "pending" || request?.status === "pending") return;
+    if (request?.status === "approved") {
+      toast(`Credit of ${inr(request.approved_amount)} approved. You can finalise the bill now.`);
+    } else if (request?.status === "rejected") {
+      toast("The credit request was refused. Collect the full amount or ask again.", "error");
+    }
+  }, [request?.status, request?.approved_amount]);
   const shortBy = request?.status === "approved" ? request.approved_amount : 0;
   const payNow = toRupees(toPaise(bill.net_amount) - toPaise(shortBy));
 
@@ -726,7 +734,8 @@ function DraftBill({ bill }) {
     try {
       await discard.mutateAsync({ id: bill.id, version: bill.version });
       toast("Draft bill discarded.");
-      navigate("/pharmacy/billing");
+      if (onDiscarded) onDiscarded();
+      else navigate("/pharmacy/billing");
     } catch (err) {
       setConfirmDiscard(false);
       setError(requestErrorOf(err, "Could not discard the draft"));
@@ -735,7 +744,9 @@ function DraftBill({ bill }) {
 
   return (
     <>
-      {bill.visit_id ? (
+      {renderPrescription ? (
+        renderPrescription({ bill, busy: busy || locked, openPicker })
+      ) : bill.visit_id ? (
         <PrescriptionPanel
           billId={bill.id}
           busy={busy || locked}
@@ -959,7 +970,7 @@ function ReturnsSection({ bill }) {
   );
 }
 
-function FinalBill({ bill }) {
+function FinalBill({ bill, renderPrescription }) {
   const navigate = useNavigate();
   const credit = bill.bill_type === "credit_note";
   const returns = useBillReturns(bill.id, { enabled: !credit });
@@ -971,6 +982,9 @@ function FinalBill({ bill }) {
   const returnable = bill.lines.some((l) => l.qty_units > (returned[l.id] ?? 0));
   return (
     <>
+      {renderPrescription && !credit
+        ? renderPrescription({ bill, busy: true, openPicker: null })
+        : null}
       {credit ? (
         <p className="phs-sub">
           Credit note against{" "}
@@ -1028,76 +1042,103 @@ function FinalBill({ bill }) {
   );
 }
 
-export default function PharmacyBillEditorPage() {
-  const { id } = useParams();
-  const query = useBill(id);
+export function BillWorkspace({ billId, renderPrescription, onDiscarded, compact = false }) {
+  const Title = compact ? "h2" : "h1";
+  const [creditPending, setCreditPending] = useState(false);
+  const [draft, setDraft] = useState(true);
+  const live = usePharmacyLive({ billId, enabled: draft });
+  const query = useBill(billId, {
+    refetchInterval: creditPending && live !== true ? 15000 : false,
+  });
   const bill = query.data;
 
+  useEffect(() => {
+    if (!bill) return;
+    setDraft(bill.status === "draft");
+    setCreditPending(bill.status === "draft" && bill.credit?.status === "pending");
+  }, [bill]);
+
+  if (query.isError) {
+    return (
+      <div className="phs-empty" role="alert">
+        <p>
+          {query.error?.response?.status === 404
+            ? "This bill no longer exists. A discarded draft is deleted."
+            : "Unable to load the bill. Please try again."}
+        </p>
+        <button type="button" className="flow-btn flow-btn-ghost" onClick={() => query.refetch()}>
+          Try again
+        </button>
+      </div>
+    );
+  }
+  if (!bill) {
+    return (
+      <p className="phs-empty" role="status">
+        Loading the bill…
+      </p>
+    );
+  }
+  return (
+    <>
+      <header className="phs-head">
+        <div>
+          <Title className={`phs-title${compact ? " phs-title--compact" : ""}`}>
+            {bill.bill_type === "credit_note"
+              ? `Credit note ${bill.bill_no}`
+              : bill.bill_no
+                ? `Bill ${bill.bill_no}`
+                : "New pharmacy bill"}{" "}
+            {bill.bill_type === "credit_note" ? (
+              <span className="bill-status phs-badge phs-badge--review">Refunded</span>
+            ) : (
+              <BillStatus status={bill.status} due={bill.due_amount} />
+            )}
+          </Title>
+          <p className="phs-sub">
+            {bill.status === "final"
+              ? `Finalised ${showDate(bill.bill_date)}${bill.finalised_by_name ? ` by ${bill.finalised_by_name}` : ""} · ${bill.location_name}`
+              : `Draft · ${bill.location_name}. Stock is only taken when the bill is finalised.`}
+          </p>
+        </div>
+        {bill.status === "final" ? (
+          <div className="phs-head__acts">
+            <PdfButton
+              className="flow-btn flow-btn-primary phs-upload"
+              href={pharmacyBillPdfUrl(bill.id)}
+              title={`${bill.bill_type === "credit_note" ? "Credit note" : "Pharmacy bill"} ${bill.bill_no}`}
+              fileName={`Pharmacy_${bill.bill_no}.pdf`}
+            >
+              <Printer size={15} aria-hidden="true" />
+              {bill.bill_type === "credit_note" ? "Print credit note" : "Print bill"}
+            </PdfButton>
+          </div>
+        ) : null}
+      </header>
+      <PatientStrip bill={bill} />
+      {bill.status === "draft" ? (
+        <DraftBill
+          key={bill.id}
+          bill={bill}
+          renderPrescription={renderPrescription}
+          onDiscarded={onDiscarded}
+        />
+      ) : (
+        <FinalBill key={bill.id} bill={bill} renderPrescription={renderPrescription} />
+      )}
+    </>
+  );
+}
+
+export default function PharmacyBillEditorPage() {
+  const { id } = useParams();
   return (
     <div className="flow-root fset bill-ui phs phb">
       <Link className="phb-back" to="/pharmacy/billing">
         <ArrowLeft size={14} aria-hidden="true" />
         Pharmacy bills
       </Link>
-      {query.isError ? (
-        <div className="phs-empty" role="alert">
-          <p>
-            {query.error?.response?.status === 404
-              ? "This bill no longer exists. A discarded draft is deleted."
-              : "Unable to load the bill. Please try again."}
-          </p>
-          <button type="button" className="flow-btn flow-btn-ghost" onClick={() => query.refetch()}>
-            Try again
-          </button>
-        </div>
-      ) : !bill ? (
-        <p className="phs-empty" role="status">
-          Loading the bill…
-        </p>
-      ) : (
-        <>
-          <header className="phs-head">
-            <div>
-              <h1 className="phs-title">
-                {bill.bill_type === "credit_note"
-                  ? `Credit note ${bill.bill_no}`
-                  : bill.bill_no
-                    ? `Bill ${bill.bill_no}`
-                    : "New pharmacy bill"}{" "}
-                {bill.bill_type === "credit_note" ? (
-                  <span className="bill-status phs-badge phs-badge--review">Refunded</span>
-                ) : (
-                  <BillStatus status={bill.status} due={bill.due_amount} />
-                )}
-              </h1>
-              <p className="phs-sub">
-                {bill.status === "final"
-                  ? `Finalised ${showDate(bill.bill_date)}${bill.finalised_by_name ? ` by ${bill.finalised_by_name}` : ""} · ${bill.location_name}`
-                  : `Draft · ${bill.location_name}. Stock is only taken when the bill is finalised.`}
-              </p>
-            </div>
-            {bill.status === "final" ? (
-              <div className="phs-head__acts">
-                <PdfButton
-                  className="flow-btn flow-btn-primary phs-upload"
-                  href={pharmacyBillPdfUrl(bill.id)}
-                  title={`${bill.bill_type === "credit_note" ? "Credit note" : "Pharmacy bill"} ${bill.bill_no}`}
-                  fileName={`Pharmacy_${bill.bill_no}.pdf`}
-                >
-                  <Printer size={15} aria-hidden="true" />
-                  {bill.bill_type === "credit_note" ? "Print credit note" : "Print bill"}
-                </PdfButton>
-              </div>
-            ) : null}
-          </header>
-          <PatientStrip bill={bill} />
-          {bill.status === "draft" ? (
-            <DraftBill key={bill.id} bill={bill} />
-          ) : (
-            <FinalBill key={bill.id} bill={bill} />
-          )}
-        </>
-      )}
+      <BillWorkspace billId={id} />
     </div>
   );
 }

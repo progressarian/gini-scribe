@@ -3,11 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import useAuthStore from "../../stores/authStore";
 import { CAPABILITIES, hasAnyCapability, hasCapability } from "../../../shared/permissions";
-import {
-  DepositDialog,
-  VoucherDialog,
-  WriteOffDialog,
-} from "../../components/pharmacy/AccountDialogs";
+import { DepositDialog, WriteOffDialog } from "../../components/pharmacy/AccountDialogs";
 import { inr, showDate } from "../../components/pharmacy/format";
 import { usePatientAccount } from "../../queries/hooks/usePharmacyAccounts";
 import { ACCOUNT_ENTRY_LABEL } from "../../../shared/pharmacyVocab";
@@ -75,15 +71,6 @@ export default function PharmacyPatientAccountPage() {
               </p>
             </div>
             <div className="phs-head__acts">
-              {canAdjust ? (
-                <button
-                  type="button"
-                  className="flow-btn flow-btn-ghost"
-                  onClick={() => setDialog({ kind: "voucher" })}
-                >
-                  Manual voucher
-                </button>
-              ) : null}
               {canMoney && Number(account.balance) > 0 ? (
                 <button
                   type="button"
@@ -220,9 +207,6 @@ export default function PharmacyPatientAccountPage() {
           ) : null}
           {dialog?.kind === "refund" ? (
             <DepositDialog account={account} refund onClose={() => setDialog(null)} />
-          ) : null}
-          {dialog?.kind === "voucher" ? (
-            <VoucherDialog account={account} onClose={() => setDialog(null)} />
           ) : null}
           {dialog?.kind === "writeoff" ? (
             <WriteOffDialog bill={dialog.bill} onClose={() => setDialog(null)} />
