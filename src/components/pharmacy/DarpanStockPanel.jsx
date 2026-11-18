@@ -6,7 +6,6 @@ import { rupees, requestErrorOf } from "../../components/billing/format";
 import { when } from "../../components/billing/importText";
 import StockUploadPreview from "../../components/pharmacy/StockUploadPreview";
 import StockLinkDialog from "../../components/pharmacy/StockLinkDialog";
-import NeededStock from "../../components/pharmacy/NeededStock";
 import Pagination from "../../components/ui/Pagination";
 import PillGroup from "./Pills";
 import useUrlState, { useUrlSearch, asNumber } from "../../hooks/useUrlState";
@@ -264,8 +263,6 @@ export default function DarpanStockPanel() {
       ) : null}
 
       <Summary summary={summary} withRates={canUpload} />
-
-      <NeededStock canOrder={canUpload} />
 
       <section className="flow-card" aria-labelledby="phs-list-title">
         <div className="fset__cardhead">

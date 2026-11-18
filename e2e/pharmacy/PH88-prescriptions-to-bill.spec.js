@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { apiAs, loginAs } from "../helpers/auth.mjs";
 import { gotoReady } from "../helpers/browser.mjs";
+import { pickOption } from "../helpers/pickers.mjs";
 import { one, query } from "../helpers/db.mjs";
 import { buildPatient, insertRow } from "../helpers/builders.mjs";
 import { financialYearOf } from "../../shared/billingVocab.js";
@@ -139,6 +140,7 @@ test.describe("PH88 the pharmacy works today's prescriptions like medicine colle
     await prescribe(people.done, "Telma 40");
     await prescribe(people.screen, "Telma 40");
     await prescribe(people.screen, "Brand Z 2");
+    await prescribe(people.screen, "Brand Q 9");
     await insertRow("medicine_collections", {
       medication_id: meds.telma.id,
       patient_id: people.ready.id,
@@ -249,7 +251,9 @@ test.describe("PH88 the pharmacy works today's prescriptions like medicine colle
     const notTheirs = await pharmacist.post(path, {
       data: {
         bill_id: bill.id,
-        outcomes: [{ medication_id: other.id, outcome: "not_given", reason: "other" }],
+        outcomes: [
+          { medication_id: other.id, outcome: "not_given", reason: "other", note: "Elsewhere" },
+        ],
       },
     });
     expect(notTheirs.status()).toBe(400);
@@ -258,7 +262,9 @@ test.describe("PH88 the pharmacy works today's prescriptions like medicine colle
       {
         data: {
           bill_id: bill.id,
-          outcomes: [{ medication_id: other.id, outcome: "not_given", reason: "other" }],
+          outcomes: [
+            { medication_id: other.id, outcome: "not_given", reason: "other", note: "Elsewhere" },
+          ],
         },
       },
     );
@@ -353,6 +359,14 @@ test.describe("PH88 the pharmacy works today's prescriptions like medicine colle
     await subPicker.getByRole("button", { name: "Add to bill" }).click();
     await expect(subPicker).toBeHidden();
     await expect(zRow).toContainText("Substitute on bill");
+
+    const qRow = rx.getByRole("row").filter({ hasText: `${TAG} Brand Q 9` });
+    await pickOption(qRow, `Why ${TAG} Brand Q 9 is not given`, "Other");
+    const note = qRow.getByPlaceholder("Write the reason");
+    await expect(qRow.getByRole("button", { name: "Save" })).toBeDisabled();
+    await note.fill("Doctor asked for a syrup instead");
+    await qRow.getByRole("button", { name: "Save" }).click();
+    await expect(qRow).toContainText("Not given · Doctor asked for a syrup instead");
 
     const lines = page.getByRole("table", { name: "Medicines on this bill" });
     await expect(lines).toContainText(`${TAG} Telma 40`);

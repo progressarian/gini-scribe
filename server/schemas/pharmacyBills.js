@@ -202,6 +202,8 @@ export const pharmacyCreditListQuerySchema = z.object({
   status: z
     .enum(["pending", "approved", "rejected", "withdrawn", "used", "all"])
     .default("pending"),
+  bill_id: z.string().uuid().optional(),
+  patient_id: z.coerce.number().int().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -280,10 +282,15 @@ const rxOutcome = z
     outcome: z.enum([...RX_OUTCOMES, "pending"]),
     medicine_id: z.preprocess(blankToNull, id.nullish()),
     reason: z.preprocess(blankToNull, z.enum(Object.keys(RX_NOT_GIVEN_REASON_LABEL)).nullish()),
+    note: z.preprocess(blankToNull, z.string().trim().max(300).nullish()),
   })
   .refine((o) => o.outcome !== "not_given" || Boolean(o.reason), {
     path: ["reason"],
     message: "is needed when a medicine is not given",
+  })
+  .refine((o) => o.reason !== "other" || Boolean(o.note), {
+    path: ["note"],
+    message: "need a written reason when the reason is Other",
   })
   .refine((o) => o.outcome !== "substitute" || Boolean(o.medicine_id), {
     path: ["medicine_id"],
@@ -304,6 +311,7 @@ export const pharmacyRxLabels = {
   lines: "Medicines",
   outcomes: "Prescription lines",
   reason: "Reason",
+  note: "Reason note",
   medicine_id: "Substitute",
   medication_id: "Prescribed medicine",
   date: "Date",

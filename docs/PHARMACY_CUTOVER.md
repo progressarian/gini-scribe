@@ -30,6 +30,7 @@ hospital cash-shift screens read `pharmacy_payments` from the moment the code is
 | 17    | `2027-01-19_notifications_role_audience.sql`  | Pharmacy alerts go to the pharmacy admin role only              |
 | 18    | `2027-01-20_pharmacy_bill_rx_outcomes.sql`    | First version of per-line outcomes (replaced by 19)             |
 | 19    | `2027-01-21_pharmacy_bill_med_outcomes.sql`   | Per-medicine outcomes keyed by `medications`; drops 18 if empty |
+| 20    | `2027-01-22_pharmacy_needed_reasons.sql`      | Note on not-given outcomes; reason/note/qty/date/source on medicine requests for the sheet import |
 
 ```bash
 cd server

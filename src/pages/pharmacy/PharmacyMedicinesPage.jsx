@@ -9,6 +9,11 @@ import { useMedicineList, useSetMedicineActive } from "../../queries/hooks/usePh
 import { SelectInput, optionsOf } from "../../components/pharmacy/Fields";
 import { Pill } from "../../components/pharmacy/Pills";
 import useUrlState, { asFlag } from "../../hooks/useUrlState";
+import SheetImportButton from "../../components/pharmacy/SheetImportButton";
+import { medicineKeys } from "../../queries/hooks/usePharmacyMedicines";
+import { fileSheetSource } from "../../queries/hooks/usePharmacySheets";
+
+const sheetSource = fileSheetSource("/api/pharmacy/medicines");
 
 const hooks = { useList: useMedicineList, useSetActive: useSetMedicineActive };
 
@@ -90,6 +95,25 @@ const COLUMNS = [
   { header: "Rack", render: (m) => m.default_rack ?? <span className="phs-meta">—</span> },
 ];
 
+function ImportActions() {
+  return (
+    <SheetImportButton
+      label="Import from Excel"
+      title="Import medicines from Excel"
+      intro="Download the sheet, add or change medicines, then upload it. Nothing is saved until you check the rows and confirm."
+      noun="medicine"
+      source={sheetSource}
+      sample={{
+        url: "/api/pharmacy/medicines/sample.xlsx",
+        name: "pharmacy-medicines-sample.xlsx",
+      }}
+      template={{ url: "/api/pharmacy/medicines/sheet.xlsx", name: "pharmacy-medicines.xlsx" }}
+      problemsName="pharmacy-medicines-to-fix.xlsx"
+      invalidate={[medicineKeys.all]}
+    />
+  );
+}
+
 export default function PharmacyMedicinesPage() {
   const role = useAuthStore((s) => s.currentDoctor?.role);
   const [form, setForm] = useUrlState("form", "");
@@ -112,6 +136,7 @@ export default function PharmacyMedicinesPage() {
       hooks={hooks}
       canManage={hasCapability(role, CAPABILITIES.PHARMACY_MASTER)}
       Dialog={MedicineDialog}
+      headerActions={<ImportActions />}
       filters={filters}
       filtersActive={Boolean(form || schedule || review)}
       onClearFilters={() => {

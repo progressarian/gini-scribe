@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { NEEDED_REASON_LABEL } from "../../shared/pharmacyVocab.js";
 
 export const pharmacyStockListQuerySchema = z.object({
   q: z.string().trim().max(80).optional(),
@@ -37,4 +38,10 @@ export const pharmacyNeededClearSchema = z.object({
 export const pharmacyMedicineRequestSchema = z.object({
   medicineName: z.string().trim().min(2, "Type the medicine name").max(200),
   visitId: z.string().uuid().nullish(),
+});
+
+export const pharmacyNeededQuerySchema = z.object({
+  days: z.coerce.number().int().min(1).max(365).default(30),
+  reason: z.enum(Object.keys(NEEDED_REASON_LABEL)).optional(),
+  q: z.string().trim().max(80).optional(),
 });

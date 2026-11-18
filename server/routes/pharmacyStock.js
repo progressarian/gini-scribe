@@ -10,7 +10,19 @@ import {
   pharmacyStockListQuerySchema,
   pharmacyNeededClearSchema,
   pharmacyNeededOrderSchema,
+  pharmacyNeededQuerySchema,
+  pharmacySheetDecisionQuerySchema,
 } from "../schemas/index.js";
+import { readSheetUpload, sendSheet } from "../middleware/sheetUpload.js";
+import { auditContext } from "../services/billing/audit.js";
+import { decisionsFrom, publicPreview } from "../services/pharmacy/sheetImport.js";
+import {
+  applyNeededSheet,
+  neededProblemFile,
+  neededReportFile,
+  neededSample,
+  previewNeededSheet,
+} from "../services/pharmacy/neededSheet.js";
 import { MAX_STOCK_UPLOAD_BYTES } from "../services/pharmacy/stockParse.js";
 import {
   commitUpload,
@@ -132,7 +144,61 @@ router.delete(
 router.get(
   `${BASE}/needed`,
   canView,
-  route("Medicines needed in stock", () => listNeeded()),
+  validateQuery(pharmacyNeededQuerySchema),
+  route("Medicines needed in stock", (req) => listNeeded(req.query)),
+);
+
+const sheetDownload = (label, work, fileName) => async (req, res) => {
+  try {
+    sendSheet(res, await work(req), fileName);
+  } catch (e) {
+    handleError(res, e, label);
+  }
+};
+
+router.get(
+  `${BASE}/needed/export.xlsx`,
+  canView,
+  validateQuery(pharmacyNeededQuerySchema),
+  sheetDownload(
+    "Needed in stock export",
+    (req) => neededReportFile(req.query, listNeeded),
+    "needed-in-stock.xlsx",
+  ),
+);
+
+router.get(
+  `${BASE}/needed/sample.xlsx`,
+  canUpload,
+  sheetDownload("Needed sample", () => neededSample(), "needed-in-stock-sample.xlsx"),
+);
+
+router.post(
+  `${BASE}/needed/import/preview`,
+  canUpload,
+  readSheetUpload,
+  route("Check needed sheet", async (req) => publicPreview(await previewNeededSheet(req.body))),
+);
+
+router.post(
+  `${BASE}/needed/import/problems.xlsx`,
+  canUpload,
+  readSheetUpload,
+  sheetDownload(
+    "Needed rows to fix",
+    (req) => neededProblemFile(req.body),
+    "needed-in-stock-to-fix.xlsx",
+  ),
+);
+
+router.post(
+  `${BASE}/needed/import`,
+  canUpload,
+  validateQuery(pharmacySheetDecisionQuerySchema),
+  readSheetUpload,
+  route("Import needed sheet", (req) =>
+    applyNeededSheet(req.body, decisionsFrom(req.query), auditContext(req)),
+  ),
 );
 
 router.post(

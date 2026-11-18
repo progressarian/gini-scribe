@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { BellPlus, History, Plus, Replace, Undo2 } from "lucide-react";
 import MedicinePicker from "../MedicinePicker";
 import { SelectInput, optionsOf } from "../Fields";
@@ -32,11 +32,57 @@ function statusOf(item, outcome, bill) {
   if (outcome?.outcome === "substitute") return { tone: "rx", text: "Substitute chosen" };
   if (outcome?.outcome === "requested") return { tone: "rx", text: "Collect later" };
   if (outcome?.outcome === "not_given") {
-    return { tone: "none", text: `Not given · ${RX_NOT_GIVEN_REASON_LABEL[outcome.reason] ?? ""}` };
+    const why =
+      outcome.reason === "other" && outcome.note
+        ? outcome.note
+        : (RX_NOT_GIVEN_REASON_LABEL[outcome.reason] ?? "");
+    return { tone: "none", text: `Not given · ${why}` };
   }
   if (!item.medicine) return { tone: "none", text: "Not stocked" };
   if (!item.medicine.sellable_units) return { tone: "none", text: "Out of stock" };
   return { tone: "early", text: "To give" };
+}
+
+function ReasonNote({ item, saved, required, disabled, onSave, onCancel }) {
+  const [text, setText] = useState(saved ?? "");
+  useEffect(() => setText(saved ?? ""), [saved]);
+  const changed = text.trim() !== (saved ?? "");
+  const submit = (e) => {
+    e.preventDefault();
+    if (required && !text.trim()) return;
+    if (changed || required) onSave(text.trim());
+  };
+  return (
+    <form className="prx-rx__note" onSubmit={submit}>
+      <label className="sr-only" htmlFor={`prx-note-${item.medication_id}`}>
+        {required ? "Write the reason" : "Note"} for {item.medicine_name}
+      </label>
+      <input
+        id={`prx-note-${item.medication_id}`}
+        className="jb-assign"
+        maxLength={300}
+        value={text}
+        disabled={disabled}
+        autoFocus={required}
+        placeholder={required ? "Write the reason" : "Add a note (optional)"}
+        onChange={(e) => setText(e.target.value)}
+      />
+      {changed || required ? (
+        <button
+          type="submit"
+          className="flow-btn flow-btn-ghost prx-med__small"
+          disabled={disabled || (required && !text.trim())}
+        >
+          Save
+        </button>
+      ) : null}
+      {onCancel ? (
+        <button type="button" className="flow-btn flow-btn-ghost prx-med__small" onClick={onCancel}>
+          Cancel
+        </button>
+      ) : null}
+    </form>
+  );
 }
 
 export default function RxPrescriptionPanel({ data, bill, busy, openPicker }) {
@@ -44,6 +90,7 @@ export default function RxPrescriptionPanel({ data, bill, busy, openPicker }) {
   const request = useRequestRxMedicine();
   const [picking, setPicking] = useState(null);
   const [working, setWorking] = useState(null);
+  const [writing, setWriting] = useState(null);
   const editable = Boolean(openPicker && bill?.status === "draft");
   const outcomes = Object.fromEntries(data.outcomes.map((o) => [o.medication_id, o]));
   const counts = data.items.reduce(
@@ -253,15 +300,53 @@ export default function RxPrescriptionPanel({ data, bill, busy, openPicker }) {
                         {!onBill && !substitute && item.today_status !== "given" ? (
                           <SelectInput
                             className="prx-rx__reason"
-                            value={outcome?.outcome === "not_given" ? outcome.reason : ""}
+                            value={
+                              writing === item.medication_id
+                                ? "other"
+                                : outcome?.outcome === "not_given"
+                                  ? outcome.reason
+                                  : ""
+                            }
                             disabled={rowBusy}
                             ariaLabel={`Why ${item.medicine_name} is not given`}
                             options={REASONS}
-                            onChange={(reason) =>
+                            onChange={(reason) => {
+                              if (reason === "other") {
+                                setWriting(item.medication_id);
+                                return;
+                              }
+                              setWriting(null);
                               decide(
                                 item,
-                                reason ? { outcome: "not_given", reason } : { outcome: "pending" },
+                                reason
+                                  ? { outcome: "not_given", reason, note: outcome?.note ?? null }
+                                  : { outcome: "pending" },
+                              );
+                            }}
+                          />
+                        ) : null}
+                        {writing === item.medication_id ? (
+                          <ReasonNote
+                            item={item}
+                            saved={outcome?.reason === "other" ? outcome.note : ""}
+                            required
+                            disabled={rowBusy}
+                            onSave={async (note) => {
+                              if (
+                                await decide(item, { outcome: "not_given", reason: "other", note })
                               )
+                                setWriting(null);
+                            }}
+                            onCancel={() => setWriting(null)}
+                          />
+                        ) : outcome?.outcome === "not_given" ? (
+                          <ReasonNote
+                            item={item}
+                            saved={outcome.note}
+                            required={false}
+                            disabled={rowBusy}
+                            onSave={(note) =>
+                              decide(item, { outcome: "not_given", reason: outcome.reason, note })
                             }
                           />
                         ) : null}

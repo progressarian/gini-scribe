@@ -216,7 +216,7 @@ export async function prescriptionPatient(patientId, { date = today() } = {}, db
     draftId
       ? db
           .query(
-            `SELECT o.medication_id, o.outcome, o.reason, o.medicine_id
+            `SELECT o.medication_id, o.outcome, o.reason, o.note, o.medicine_id
                FROM pharmacy_bill_med_outcomes o WHERE o.bill_id = $1`,
             [draftId],
           )
@@ -307,17 +307,19 @@ export async function saveOutcomes(patientId, { bill_id: billId, outcomes }, ctx
       }
       await client.query(
         `INSERT INTO pharmacy_bill_med_outcomes
-           (bill_id, medication_id, outcome, medicine_id, reason, decided_by)
-         VALUES ($1, $2, $3, $4, $5, $6)
+           (bill_id, medication_id, outcome, medicine_id, reason, note, decided_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (bill_id, medication_id) DO UPDATE
            SET outcome = EXCLUDED.outcome, medicine_id = EXCLUDED.medicine_id,
-               reason = EXCLUDED.reason, decided_by = EXCLUDED.decided_by, decided_at = NOW()`,
+               reason = EXCLUDED.reason, note = EXCLUDED.note,
+               decided_by = EXCLUDED.decided_by, decided_at = NOW()`,
         [
           billId,
           o.medication_id,
           o.outcome,
           o.medicine_id ?? null,
           o.outcome === "requested" ? (o.reason ?? RX_REQUESTED_REASON) : (o.reason ?? null),
+          o.outcome === "not_given" ? (o.note ?? null) : null,
           ctx.actorId ?? null,
         ],
       );
@@ -334,7 +336,7 @@ export async function saveOutcomes(patientId, { bill_id: billId, outcomes }, ctx
       ip: ctx.ip,
     });
     const { rows } = await client.query(
-      `SELECT medication_id, outcome, reason, medicine_id FROM pharmacy_bill_med_outcomes
+      `SELECT medication_id, outcome, reason, note, medicine_id FROM pharmacy_bill_med_outcomes
         WHERE bill_id = $1`,
       [billId],
     );
@@ -377,7 +379,7 @@ export async function requestFromPrescription(patientId, { medication_id }, ctx 
         count > 1
           ? `${count} patients are waiting for it, latest ${patientName}.`
           : `${patientName} will collect it when it is in stock.`,
-      link: "/pharmacy/stock?tab=darpan",
+      link: "/pharmacy/needed",
       entityType: "pharmacy_medicine_requests",
       entityId: request.medicineKey,
       dedupeKey: `pharmacy:needed:${request.medicineKey}`,

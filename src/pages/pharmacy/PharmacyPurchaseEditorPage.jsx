@@ -1,7 +1,6 @@
 import { useId, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Download, Upload } from "lucide-react";
-import { downloadFile } from "../../lib/downloadBlob";
+import { ArrowLeft } from "lucide-react";
 import { requestErrorOf } from "../../components/billing/format";
 import FormField from "../../components/ui/FormField";
 import ConfirmModal from "../../components/ui/ConfirmModal";
@@ -16,11 +15,13 @@ import { inr, localDate, showDate } from "../../components/pharmacy/format";
 import { when } from "../../components/billing/importText";
 import { toast } from "../../stores/uiStore";
 import { PurchaseStatus } from "./PharmacyPurchasesPage";
+import SheetImportButton from "../../components/pharmacy/SheetImportButton";
+import { fileSheetSource } from "../../queries/hooks/usePharmacySheets";
 import { useVendorList } from "../../queries/hooks/usePharmacyVendors";
 import {
   RECEIPT_TEMPLATE_URL,
+  purchaseKeys,
   useCancelPurchase,
-  useImportReceipt,
   usePostPurchase,
   usePurchase,
   useSavePurchase,
@@ -136,10 +137,16 @@ function DraftReceipt({ purchase: loaded }) {
   const post = usePostPurchase();
   const cancel = useCancelPurchase();
   const initial = useMemo(() => formFrom(purchase), [purchase]);
-  const importer = useImportReceipt();
   const fileId = useId();
-  const fileRef = useRef(null);
-  const [report, setReport] = useState(null);
+  const versionRef = useRef(purchase.version);
+  versionRef.current = purchase.version;
+  const sheetSource = useMemo(
+    () =>
+      fileSheetSource(`/api/pharmacy/purchases/${purchase.id}`, () => ({
+        version: versionRef.current,
+      })),
+    [purchase.id],
+  );
   const [form, setForm] = useState(initial);
   const [touched, setTouched] = useState(false);
   const [error, setError] = useState("");
@@ -234,35 +241,6 @@ function DraftReceipt({ purchase: loaded }) {
     }
   };
 
-  const onTemplate = async () => {
-    setError("");
-    try {
-      await downloadFile(RECEIPT_TEMPLATE_URL, "pharmacy-stock-template.xlsx");
-    } catch (err) {
-      setError(err.message || "Could not download the template");
-    }
-  };
-
-  const onImport = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setError("");
-    setReport(null);
-    try {
-      const result = await importer.mutateAsync({
-        id: purchase.id,
-        version: purchase.version,
-        file,
-      });
-      setPurchase(result.purchase);
-      setForm(formFrom(result.purchase));
-      setReport({ added: result.added, skipped: result.skipped });
-    } catch (err) {
-      setError(requestErrorOf(err, "Could not import the file"));
-    }
-  };
-
   const onCancel = async () => {
     if (reason.trim().length < 3) {
       setCancelError("Say why this receipt is cancelled.");
@@ -345,33 +323,28 @@ function DraftReceipt({ purchase: loaded }) {
             <MedicinePicker label="Add a medicine" onSelect={addMedicine} />
           </div>
           <div className="pur-import">
-            <button
-              type="button"
-              className="flow-btn flow-btn-ghost phs-upload"
-              onClick={onTemplate}
-            >
-              <Download size={15} aria-hidden="true" />
-              Download template
-            </button>
-            <button
-              type="button"
-              className="flow-btn flow-btn-ghost phs-upload"
-              disabled={dirty || importer.isPending}
-              onClick={() => fileRef.current?.click()}
-              aria-describedby={dirty ? `${fileId}-hint` : undefined}
-            >
-              <Upload size={15} aria-hidden="true" />
-              {importer.isPending ? "Importing…" : "Import from Excel"}
-            </button>
-            <input
-              ref={fileRef}
-              id={fileId}
-              type="file"
-              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              className="sr-only"
-              tabIndex={-1}
-              aria-label="Filled stock template"
-              onChange={onImport}
+            <SheetImportButton
+              label="Import from Excel"
+              title={
+                opening ? "Import opening stock from Excel" : "Import receipt lines from Excel"
+              }
+              intro="Download the sheet, fill a batch, expiry and quantity on each medicine you hold, then upload it. Nothing is added until you check the rows and confirm."
+              noun="line"
+              source={sheetSource}
+              sample={{
+                url: "/api/pharmacy/purchases/sample.xlsx",
+                name: "pharmacy-stock-sample.xlsx",
+              }}
+              template={{ url: RECEIPT_TEMPLATE_URL, name: "pharmacy-stock-template.xlsx" }}
+              problemsName="pharmacy-stock-to-fix.xlsx"
+              disabled={dirty}
+              describedBy={dirty ? `${fileId}-hint` : undefined}
+              invalidate={[[...purchaseKeys.all, "list"]]}
+              onImported={(result) => {
+                if (!result.purchase) return;
+                setPurchase(result.purchase);
+                setForm(formFrom(result.purchase));
+              }}
             />
             {dirty ? (
               <span id={`${fileId}-hint`} className="phs-meta">
@@ -380,28 +353,6 @@ function DraftReceipt({ purchase: loaded }) {
             ) : null}
           </div>
         </div>
-        {report ? (
-          <div className="pur-report" role="status">
-            <p>
-              {report.added} row{report.added === 1 ? "" : "s"} added from the file.
-              {report.skipped.length
-                ? ` ${report.skipped.length} row${report.skipped.length === 1 ? " was" : "s were"} skipped:`
-                : ""}
-            </p>
-            {report.skipped.length ? (
-              <ul>
-                {report.skipped.slice(0, 50).map((r) => (
-                  <li key={r.row}>
-                    Row {r.row}: {r.reason}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            {report.skipped.length > 50 ? (
-              <p>and {report.skipped.length - 50} more. Fix them in the file and import again.</p>
-            ) : null}
-          </div>
-        ) : null}
         {form.lines.length ? (
           <PurchaseLinesEditor
             lines={form.lines}

@@ -1,6 +1,6 @@
 import { masterRecords } from "./masterRecords.js";
 
-const vendors = masterRecords({
+export const vendorRecords = masterRecords({
   table: "pharmacy_vendors",
   noun: "vendor",
   fields: [
@@ -31,9 +31,9 @@ const vendors = masterRecords({
   prepare: (input) => ({ ...input, payment_terms_days: input.payment_terms_days ?? 0 }),
 });
 
-export const listVendors = (params) => vendors.list(params);
+export const listVendors = (params) => vendorRecords.list(params);
 
-export const getVendor = (id) => vendors.get(id);
-export const createVendor = (input, ctx) => vendors.create(input, ctx);
-export const updateVendor = (id, input, ctx) => vendors.update(id, input, ctx);
-export const setVendorActive = (id, isActive, ctx) => vendors.setActive(id, isActive, ctx);
+export const getVendor = (id) => vendorRecords.get(id);
+export const createVendor = (input, ctx) => vendorRecords.create(input, ctx);
+export const updateVendor = (id, input, ctx) => vendorRecords.update(id, input, ctx);
+export const setVendorActive = (id, isActive, ctx) => vendorRecords.setActive(id, isActive, ctx);

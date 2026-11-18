@@ -115,12 +115,15 @@ export const useRemoveStockLink = () =>
       ).data,
   );
 
-export function useNeededStock() {
+export function useNeededStock(params = {}) {
   return useQuery({
-    queryKey: stockKeys.needed,
-    queryFn: async () => (await api.get(`${BASE}/needed`)).data,
+    queryKey: [...stockKeys.needed, params],
+    queryFn: async () => (await api.get(`${BASE}/needed`, { params })).data,
+    placeholderData: keepPreviousData,
   });
 }
+
+export const NEEDED_URL = `${BASE}/needed`;
 
 function useNeededMutation(mutationFn) {
   const queryClient = useQueryClient();

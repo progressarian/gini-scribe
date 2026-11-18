@@ -26,6 +26,9 @@ const when = (value) =>
     minute: "2-digit",
   });
 
+import PatientCreditRequests from "../../components/pharmacy/PatientCreditRequests";
+import { usePharmacyLive } from "../../queries/hooks/usePharmacyLive";
+
 export default function PharmacyPatientAccountPage() {
   const { patientId } = useParams();
   const role = useAuthStore((s) => s.currentDoctor?.role);
@@ -39,6 +42,7 @@ export default function PharmacyPatientAccountPage() {
     CAPABILITIES.PHARMACY_CREDIT_APPROVE,
   ]);
   const query = usePatientAccount(patientId);
+  usePharmacyLive({ enabled: canAdjust });
   const [dialog, setDialog] = useState(null);
   const account = query.data;
 
@@ -108,6 +112,8 @@ export default function PharmacyPatientAccountPage() {
               </div>
             </dl>
           </section>
+
+          {canAdjust ? <PatientCreditRequests patientId={Number(patientId)} /> : null}
 
           {account.open_bills.length ? (
             <section className="flow-card" aria-labelledby="pac-open-title">

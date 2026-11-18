@@ -23,7 +23,7 @@ export const pharmacySettingsSchema = z
     sale_rate_includes_gst: z.boolean(),
     near_expiry_warn_days: z.coerce.number().int().min(0).max(365),
     expiry_alert_days: z.coerce.number().int().min(1).max(730),
-    stock_source: z.enum(["darpan", "scribe"]),
+    stock_source: z.enum(["darpan", "scribe"]).optional(),
     max_discount_pct: z.preprocess(
       blankToNull,
       z.coerce

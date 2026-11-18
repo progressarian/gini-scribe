@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import {
   ArrowLeftRight,
+  PackageX,
   BookOpen,
   Building2,
   ClipboardCheck,
@@ -214,6 +215,15 @@ const NAV_ITEMS = [
     label: "Stock",
     icon: Package,
     cap: C["/pharmacy/stock"],
+    show: () => true,
+  },
+  {
+    path: "/pharmacy/needed",
+    deskGroup: "inventory",
+    group: "pharmacy",
+    label: "Needed in Stock",
+    icon: PackageX,
+    cap: C["/pharmacy/needed"],
     show: () => true,
   },
   {

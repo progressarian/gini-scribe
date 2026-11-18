@@ -1,7 +1,8 @@
-import express, { Router } from "express";
+import { Router } from "express";
 import { CAPABILITIES as CAP, hasAnyCapability } from "../../shared/permissions.js";
 import { validate, validateQuery } from "../middleware/validate.js";
 import { handleError } from "../utils/errorHandler.js";
+import { XLSX, readSheetUpload, sendSheet } from "../middleware/sheetUpload.js";
 import {
   pharmacyAdjustmentLabels,
   pharmacyAdjustmentListQuerySchema,
@@ -17,6 +18,7 @@ import {
   pharmacyPurchaseListQuerySchema,
   pharmacyPurchaseUpdateSchema,
   pharmacyPurchaseVersionSchema,
+  pharmacySheetDecisionFields,
 } from "../schemas/index.js";
 import { auditContext } from "../services/billing/audit.js";
 import {
@@ -29,10 +31,13 @@ import {
 } from "../services/pharmacy/purchases.js";
 import { adjustStock, listAdjustments } from "../services/pharmacy/adjustments.js";
 import {
-  MAX_RECEIPT_UPLOAD_BYTES,
   importReceiptLines,
+  previewReceiptSheet,
+  receiptProblemFile,
+  receiptSample,
   receiptTemplate,
 } from "../services/pharmacy/receiptImport.js";
+import { decisionsFrom, publicPreview } from "../services/pharmacy/sheetImport.js";
 import {
   batchMovements,
   listStock,
@@ -67,7 +72,13 @@ router.get(
   route("Goods receipts", (req) => listPurchases(req.query)),
 );
 
-const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+router.get(`${PURCHASES}/sample.xlsx`, async (req, res) => {
+  try {
+    sendSheet(res, await receiptSample(), "pharmacy-stock-sample.xlsx");
+  } catch (e) {
+    handleError(res, e, "Stock sample");
+  }
+});
 
 router.get(`${PURCHASES}/template.xlsx`, async (req, res) => {
   try {
@@ -80,26 +91,45 @@ router.get(`${PURCHASES}/template.xlsx`, async (req, res) => {
   }
 });
 
-const rawBody = express.raw({ type: "*/*", limit: MAX_RECEIPT_UPLOAD_BYTES });
-const readFile = (req, res, next) =>
-  rawBody(req, res, (e) => {
-    if (e?.type === "entity.too.large") {
-      return res.status(413).json({ error: "The file is larger than 5 MB" });
+router.post(
+  `${PURCHASES}/:id/import/preview`,
+  purchaseId,
+  readSheetUpload,
+  route("Check receipt sheet", async (req) =>
+    publicPreview(await previewReceiptSheet(Number(req.params.id), req.body)),
+  ),
+);
+
+router.post(
+  `${PURCHASES}/:id/import/problems.xlsx`,
+  purchaseId,
+  readSheetUpload,
+  async (req, res) => {
+    try {
+      sendSheet(
+        res,
+        await receiptProblemFile(Number(req.params.id), req.body),
+        "pharmacy-stock-to-fix.xlsx",
+      );
+    } catch (e) {
+      handleError(res, e, "Receipt rows to fix");
     }
-    if (e) return res.status(400).json({ error: "The file could not be read" });
-    if (!Buffer.isBuffer(req.body) || !req.body.length) {
-      return res.status(400).json({ error: "Attach the filled template .xlsx file" });
-    }
-    next();
-  });
+  },
+);
 
 router.post(
   `${PURCHASES}/:id/import`,
   purchaseId,
-  validateQuery(pharmacyPurchaseVersionSchema),
-  readFile,
+  validateQuery(pharmacyPurchaseVersionSchema.extend(pharmacySheetDecisionFields)),
+  readSheetUpload,
   route("Import receipt lines", (req) =>
-    importReceiptLines(Number(req.params.id), req.body, req.query, auditContext(req)),
+    importReceiptLines(
+      Number(req.params.id),
+      req.body,
+      { version: req.query.version },
+      decisionsFrom(req.query),
+      auditContext(req),
+    ),
   ),
 );
 

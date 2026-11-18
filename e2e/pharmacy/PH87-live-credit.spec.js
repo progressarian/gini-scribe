@@ -163,7 +163,129 @@ test.describe("PH87 credit decisions reach open screens without a refresh", () =
       { timeout: 30000 },
     );
     await page.waitForTimeout(500);
+    await expect(page.getByRole("status").filter({ hasText: "Live" })).toBeVisible(LIVE_WITHIN);
     await draftWithCredit(12);
     await expect(page.getByText(`${TAG} Buyer`).first()).toBeVisible(LIVE_WITHIN);
+  });
+
+  test("the pharmacy admin can approve a request they raised themselves", async ({ page }) => {
+    const created = await (
+      await admin.post("/api/pharmacy/bills", {
+        data: { patient_id: patient.id, sale_type: "walkin" },
+      })
+    ).json();
+    const saved = await (
+      await admin.put(`/api/pharmacy/bills/${created.id}`, {
+        data: {
+          version: created.version,
+          sale_type: "walkin",
+          lines: [{ batch_id: batchId, qty_units: 10 }],
+        },
+      })
+    ).json();
+    const asked = await admin.post(`/api/pharmacy/credit/bills/${saved.id}/requests`, {
+      data: { version: saved.version, amount: 5, reason: "Short today" },
+    });
+    expect(asked.status(), await asked.text()).toBe(201);
+    await loginAs(page, "pharmacy_admin");
+    await gotoReady(
+      page,
+      "/pharmacy/credit?status=pending",
+      () => page.getByRole("status").filter({ hasText: "Live" }),
+      { timeout: 30000 },
+    );
+    const row = page
+      .getByRole("row")
+      .filter({ hasText: "₹5.00" })
+      .filter({ hasText: `${TAG} Buyer` });
+    await expect(row.getByRole("button", { name: /Approve credit/ })).toBeVisible();
+    const decided = await admin.post(
+      `/api/pharmacy/credit/requests/${(await asked.json()).credit.id}/decision`,
+      { data: { decision: "approve", note: "Own request" } },
+    );
+    expect(decided.status(), await decided.text()).toBe(200);
+    await admin.post(`/api/pharmacy/bills/${saved.id}/discard`, {
+      data: { version: saved.version },
+    });
+  });
+
+  test("the admin approves a waiting request from the bill page", async ({ page }) => {
+    const bill = await draftWithCredit(8);
+    await loginAs(page, "pharmacy_admin");
+    await gotoReady(
+      page,
+      `/pharmacy/billing/${bill.id}`,
+      () => page.getByText(/is waiting for approval/),
+      { timeout: 30000 },
+    );
+    await page.getByRole("button", { name: `Approve credit for ${TAG} Buyer` }).click();
+    const dialog = page.getByRole("dialog", { name: "Approve credit" });
+    await dialog.getByRole("button", { name: "Approve credit" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText(/Credit of ₹8\.00 approved by/)).toBeVisible(LIVE_WITHIN);
+    await pharmacist.post(`/api/pharmacy/credit/requests/${bill.credit.id}/withdraw`);
+  });
+
+  test("the pharmacist sees no approve button on the bill", async ({ page }) => {
+    const bill = await draftWithCredit(6);
+    await openBill(page, bill);
+    await expect(page.getByRole("button", { name: /Approve credit for/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Withdraw request" })).toBeVisible();
+    await pharmacist.post(`/api/pharmacy/credit/requests/${bill.credit.id}/withdraw`);
+  });
+
+  test("the patient's account shows credit requests to the admin only", async ({ page }) => {
+    const bill = await draftWithCredit(7);
+    await loginAs(page, "pharmacy_admin");
+    await gotoReady(
+      page,
+      `/pharmacy/accounts/${patient.id}`,
+      () => page.getByRole("heading", { name: "Credit requests" }),
+      { timeout: 30000 },
+    );
+    const section = page.getByRole("table", { name: "Credit requests for this patient" });
+    const row = section.getByRole("row").filter({ hasText: "₹7.00" });
+    await expect(row.getByText("Waiting")).toBeVisible();
+    await row.getByRole("button", { name: `Refuse credit for ${TAG} Buyer` }).click();
+    const dialog = page.getByRole("dialog", { name: "Refuse credit" });
+    await dialog.getByLabel(/Why it is refused/).fill("Collect in full today");
+    await dialog.getByRole("button", { name: "Refuse credit" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(row.getByText("Rejected")).toBeVisible(LIVE_WITHIN);
+
+    await loginAs(page, "pharmacy");
+    await gotoReady(
+      page,
+      `/pharmacy/accounts/${patient.id}`,
+      () => page.getByText("pharmacy account"),
+      { timeout: 30000 },
+    );
+    await expect(page.getByRole("heading", { name: "Credit requests" })).toHaveCount(0);
+    expect(bill.id).toBeTruthy();
+  });
+
+  test("a bill finalised on credit appears under Dues on its own", async ({ page }) => {
+    const asked = await draftWithCredit(12);
+    await admin.post(`/api/pharmacy/credit/requests/${asked.credit.id}/decision`, {
+      data: { decision: "approve", note: "Regular patient" },
+    });
+    await loginAs(page, "pharmacy_admin");
+    await gotoReady(
+      page,
+      "/pharmacy/credit?tab=dues",
+      () => page.getByRole("status").filter({ hasText: "Live" }),
+      { timeout: 30000 },
+    );
+    const row = page.getByRole("row").filter({ hasText: `${TAG} Buyer` });
+    await expect(row).toHaveCount(0);
+    const bill = await (await pharmacist.get(`/api/pharmacy/bills/${asked.id}`)).json();
+    const done = await pharmacist.post(`/api/pharmacy/bills/${bill.id}/finalise`, {
+      data: {
+        version: bill.version,
+        payments: [{ mode: "cash", amount: (Number(bill.net_amount) - 12).toFixed(2) }],
+      },
+    });
+    expect(done.status(), await done.text()).toBe(200);
+    await expect(row).toHaveCount(1, LIVE_WITHIN);
   });
 });

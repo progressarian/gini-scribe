@@ -71,12 +71,15 @@ function TableState({ query, empty, children }) {
   return children;
 }
 
-function RequestsPanel({ canApprove, myId }) {
+function RequestsPanel({ canApprove, refetchInterval }) {
   const [status, setStatus] = useUrlState("status", "pending");
   const [page, setPage] = useUrlState("page", 1, asNumber);
   const [pageSize, setPageSize] = useUrlState("size", 25, asNumber);
   const [deciding, setDeciding] = useState(null);
-  const query = useCreditRequests({ status, limit: pageSize, offset: (page - 1) * pageSize });
+  const query = useCreditRequests(
+    { status, limit: pageSize, offset: (page - 1) * pageSize },
+    { refetchInterval },
+  );
   const rows = query.data?.rows ?? [];
 
   return (
@@ -163,7 +166,7 @@ function RequestsPanel({ canApprove, myId }) {
                   </td>
                   {canApprove ? (
                     <td className="phb-line-acts">
-                      {r.status === "pending" && r.requested_by !== myId ? (
+                      {r.status === "pending" ? (
                         <>
                           <button
                             type="button"
@@ -182,8 +185,6 @@ function RequestsPanel({ canApprove, myId }) {
                             Refuse
                           </button>
                         </>
-                      ) : r.status === "pending" ? (
-                        <span className="phs-meta">Another approver decides</span>
                       ) : null}
                     </td>
                   ) : null}
@@ -216,13 +217,16 @@ function RequestsPanel({ canApprove, myId }) {
   );
 }
 
-function DuesPanel() {
+function DuesPanel({ refetchInterval }) {
   const { search, setSearch, q } = useUrlSearch("d_q", () => setPage(1));
   const [page, setPage] = useUrlState("d_page", 1, asNumber);
   const [pageSize, setPageSize] = useUrlState("d_size", 25, asNumber);
   const [collecting, setCollecting] = useState(null);
 
-  const query = useDues({ ...(q ? { q } : {}), limit: pageSize, offset: (page - 1) * pageSize });
+  const query = useDues(
+    { ...(q ? { q } : {}), limit: pageSize, offset: (page - 1) * pageSize },
+    { refetchInterval },
+  );
   const rows = query.data?.rows ?? [];
 
   return (
@@ -326,7 +330,8 @@ function DuesPanel() {
 
 export default function PharmacyCreditPage() {
   const me = useAuthStore((s) => s.currentDoctor);
-  usePharmacyLive();
+  const live = usePharmacyLive();
+  const refetchInterval = live === true ? false : 15000;
   const canApprove = hasCapability(me?.role, CAPABILITIES.PHARMACY_CREDIT_APPROVE);
   const [tabParam, setTab] = useUrlState("tab", "requests");
   const tab = TABS.some((t) => t.key === tabParam) ? tabParam : "requests";
@@ -354,6 +359,18 @@ export default function PharmacyCreditPage() {
               : "Track the credit you asked for, and collect money still due on pharmacy bills."}
           </p>
         </div>
+        <span
+          className={`flow-live pcr-live${live === true ? "" : " is-off"}`}
+          role="status"
+          title={
+            live === true
+              ? "New credit requests and decisions appear here straight away."
+              : "This page refreshes itself every 15 seconds."
+          }
+        >
+          <span className="flow-dot" aria-hidden="true" />
+          {live === true ? "Live" : live === null ? "Connecting…" : "Refreshes every 15 sec"}
+        </span>
       </header>
 
       <div className="bst-tabs" role="tablist" aria-label="Credit views" onKeyDown={onKeyDown}>
@@ -379,9 +396,9 @@ export default function PharmacyCreditPage() {
 
       <div role="tabpanel" id={`pcr-panel-${tab}`} aria-labelledby={`pcr-tab-${tab}`}>
         {tab === "requests" ? (
-          <RequestsPanel canApprove={canApprove} myId={me?.id} />
+          <RequestsPanel canApprove={canApprove} refetchInterval={refetchInterval} />
         ) : (
-          <DuesPanel />
+          <DuesPanel refetchInterval={refetchInterval} />
         )}
       </div>
     </div>

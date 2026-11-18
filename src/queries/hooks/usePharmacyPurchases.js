@@ -56,23 +56,4 @@ export const useCancelPurchase = () =>
     api.post(`${BASE}/${id}/cancel`, { version, reason }),
   );
 
-const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-
-export function useImportReceipt() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ id, version, file }) =>
-      (
-        await api.post(`${BASE}/${id}/import`, file, {
-          params: { version },
-          headers: { "Content-Type": XLSX },
-        })
-      ).data,
-    onSuccess: ({ purchase }) => {
-      queryClient.setQueryData(purchaseKeys.one(purchase.id), purchase);
-      queryClient.invalidateQueries({ queryKey: [...purchaseKeys.all, "list"] });
-    },
-  });
-}
-
 export const RECEIPT_TEMPLATE_URL = `${BASE}/template.xlsx`;

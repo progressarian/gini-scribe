@@ -3,7 +3,15 @@ import { CAPABILITIES, hasCapability } from "../../../shared/permissions";
 import MasterListPage from "../../components/pharmacy/MasterListPage";
 import VendorDialog from "../../components/pharmacy/VendorDialog";
 import { showDate, localDate } from "../../components/pharmacy/format";
-import { useSetVendorActive, useVendorList } from "../../queries/hooks/usePharmacyVendors";
+import {
+  useSetVendorActive,
+  useVendorList,
+  vendorKeys,
+} from "../../queries/hooks/usePharmacyVendors";
+import SheetImportButton from "../../components/pharmacy/SheetImportButton";
+import { fileSheetSource } from "../../queries/hooks/usePharmacySheets";
+
+const sheetSource = fileSheetSource("/api/pharmacy/vendors");
 
 const LICENCE_WARN_DAYS = 30;
 
@@ -72,6 +80,22 @@ export default function PharmacyVendorsPage() {
       hooks={hooks}
       canManage={hasCapability(role, CAPABILITIES.PHARMACY_MASTER)}
       Dialog={VendorDialog}
+      headerActions={
+        <SheetImportButton
+          label="Import from Excel"
+          title="Import vendors from Excel"
+          intro="Download the sheet, add or change vendors, then upload it. Nothing is saved until you check the rows and confirm."
+          noun="vendor"
+          source={sheetSource}
+          sample={{
+            url: "/api/pharmacy/vendors/sample.xlsx",
+            name: "pharmacy-vendors-sample.xlsx",
+          }}
+          template={{ url: "/api/pharmacy/vendors/sheet.xlsx", name: "pharmacy-vendors.xlsx" }}
+          problemsName="pharmacy-vendors-to-fix.xlsx"
+          invalidate={[vendorKeys.all]}
+        />
+      }
       statusMessages={{
         deactivate:
           "New purchases can no longer be recorded against this vendor. Past purchases and their history stay as they are. You can activate the vendor again at any time.",

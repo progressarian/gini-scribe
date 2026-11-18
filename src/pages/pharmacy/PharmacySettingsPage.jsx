@@ -1,6 +1,5 @@
 import { useState } from "react";
 import FormField from "../../components/ui/FormField";
-import ConfirmModal from "../../components/ui/ConfirmModal";
 import { requestErrorOf } from "../../components/billing/format";
 import { when } from "../../components/billing/importText";
 import { toast } from "../../stores/uiStore";
@@ -32,7 +31,6 @@ const text = (v) => (v === null || v === undefined ? "" : String(v));
 const formOf = (s) => ({
   ...Object.fromEntries(TEXT.map((f) => [f, text(s[f])])),
   sale_rate_includes_gst: s.sale_rate_includes_gst,
-  stock_source: s.stock_source,
   near_expiry_warn_days: text(s.near_expiry_warn_days),
   expiry_alert_days: text(s.expiry_alert_days),
   credit_limit:
@@ -76,8 +74,6 @@ function SettingsForm({ settings }) {
   const [form, setForm] = useState(() => formOf(settings));
   const [touched, setTouched] = useState(false);
   const [error, setError] = useState("");
-  const [confirmSource, setConfirmSource] = useState(false);
-  const sourceChanged = form.stock_source !== settings.stock_source;
   const errors = touched ? validate(form) : {};
   const dirty = JSON.stringify(form) !== JSON.stringify(formOf(settings));
 
@@ -105,17 +101,14 @@ function SettingsForm({ settings }) {
       setError("Fix the highlighted fields, then save again.");
       return;
     }
-    if (sourceChanged) setConfirmSource(true);
-    else persist();
+    persist();
   };
 
   const persist = async () => {
-    setConfirmSource(false);
     try {
       await save.mutateAsync({
         ...Object.fromEntries(TEXT.map((f) => [f, form[f].trim() || null])),
         sale_rate_includes_gst: form.sale_rate_includes_gst,
-        stock_source: form.stock_source,
         near_expiry_warn_days: Number(form.near_expiry_warn_days),
         expiry_alert_days: Number(form.expiry_alert_days),
         credit_limit: form.credit_limit === "" ? null : Number(form.credit_limit),
@@ -218,34 +211,6 @@ function SettingsForm({ settings }) {
         )}
       </div>
 
-      <fieldset className="phset__source">
-        <legend className="flow-sec-title">Stock shown to doctors and the pharmacy station</legend>
-        <label className="fset__check">
-          <input
-            type="radio"
-            name="stock_source"
-            value="darpan"
-            checked={form.stock_source === "darpan"}
-            onChange={set("stock_source")}
-          />
-          DARPAN upload (while both systems run side by side)
-        </label>
-        <label className="fset__check">
-          <input
-            type="radio"
-            name="stock_source"
-            value="scribe"
-            checked={form.stock_source === "scribe"}
-            onChange={set("stock_source")}
-          />
-          Scribe batch stock (after the cut-over)
-        </label>
-        <p className="flow-muted">
-          The prescription screen, the pharmacy station queue and "needed in stock" read stock from
-          this source. DARPAN uploads are still kept for comparison after switching to Scribe.
-        </p>
-      </fieldset>
-
       {error ? (
         <p className="bill-dialog__error" role="alert">
           {error}
@@ -265,24 +230,6 @@ function SettingsForm({ settings }) {
           {save.isPending ? "Saving…" : "Save settings"}
         </button>
       </div>
-      <ConfirmModal
-        open={confirmSource}
-        title={
-          form.stock_source === "scribe"
-            ? "Switch stock to Scribe batch stock?"
-            : "Switch stock back to DARPAN?"
-        }
-        message={
-          form.stock_source === "scribe"
-            ? "Doctors and the pharmacy station will see the main pharmacy's Scribe stock straight away. Medicines with no Scribe stock will show as out of stock. Later DARPAN uploads will no longer change what they see."
-            : "Doctors and the pharmacy station will see the stock from the last DARPAN upload straight away. Scribe stock keeps being recorded but is no longer shown to them."
-        }
-        confirmLabel="Switch and save"
-        variant="primary"
-        busy={save.isPending}
-        onConfirm={persist}
-        onCancel={() => setConfirmSource(false)}
-      />
     </form>
   );
 }

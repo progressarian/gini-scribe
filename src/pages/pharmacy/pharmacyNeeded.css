@@ -1,0 +1,90 @@
+.pnd {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.pnd-tiles .phs-tile dd {
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+.pnd .phs-filters .ph-pills {
+  min-width: 0;
+}
+.pnd-reasonbar {
+  margin-bottom: 12px;
+  min-width: 0;
+}
+.pnd-reasons {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 280px;
+}
+.pnd-reason {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fink2);
+  background: var(--fbg);
+  border: 1px solid var(--fbd);
+}
+.pnd-reason strong {
+  color: var(--fink);
+}
+.pnd-reason--out_of_stock,
+.pnd-reason--prescribed,
+.pnd-reason--not_available {
+  color: var(--fre);
+  background: var(--frel);
+  border-color: transparent;
+}
+.pnd-reason--buying_outside,
+.pnd-reason--requested {
+  color: var(--fam);
+  background: var(--faml);
+  border-color: transparent;
+}
+.pnd-reason--patient_declined,
+.pnd-reason--has_at_home {
+  color: var(--flv);
+  background: var(--flvl);
+  border-color: transparent;
+}
+.pnd-reason--imported {
+  color: var(--fsk);
+  background: var(--fskl);
+  border-color: transparent;
+}
+.pnd-notes {
+  max-width: 280px;
+  font-size: 13px;
+}
+.pnd-notes p {
+  margin: 0 0 4px;
+  overflow-wrap: anywhere;
+}
+.pnd-notes .phs-meta {
+  display: inline;
+}
+.pnd-notes summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fsk);
+}
+.pnd-order {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.pnd .phs-table {
+  min-width: 960px;
+}

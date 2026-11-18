@@ -155,7 +155,7 @@ test.describe("PH40 credit on pharmacy bills", () => {
     expect(discard.status()).toBe(409);
   });
 
-  test("only an approver who did not raise it can decide, and a refusal needs a reason", async () => {
+  test("only an approver can decide, and a refusal needs a reason", async () => {
     const list = await (await admin.get("/api/pharmacy/credit/requests")).json();
     const request = list.rows.find((r) => r.bill_id === bill.id);
     expect(request).toMatchObject({ amount: "48.00", bill_amount: "98.00", patient_due: "0.00" });
@@ -187,14 +187,11 @@ test.describe("PH40 credit on pharmacy bills", () => {
     expect(ownAsk.status()).toBe(201);
     const ownRequest = (await ownAsk.json()).credit;
     const self = await admin.post(`/api/pharmacy/credit/requests/${ownRequest.id}/decision`, {
-      data: { decision: "approve" },
+      data: { decision: "reject", note: "Raised by mistake" },
     });
-    expect(self.status()).toBe(403);
-    expect(
-      (await pharmacist.post(`/api/pharmacy/credit/requests/${ownRequest.id}/withdraw`)).status(),
-    ).toBe(200);
+    expect(self.status(), await self.text()).toBe(200);
     const freed = await reload(own.id);
-    expect(freed.credit.status).toBe("withdrawn");
+    expect(freed.credit.status).toBe("rejected");
     expect(
       (
         await pharmacist.post(`/api/pharmacy/bills/${own.id}/discard`, {

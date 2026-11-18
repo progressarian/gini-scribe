@@ -36,6 +36,7 @@ export default function MasterListPage({
   statusMessages,
   rowActions,
   canToggle = () => true,
+  headerActions = null,
 }) {
   const { search, setSearch, q, clear: clearSearch } = useUrlSearch("q", () => setPage(1));
   const [status, setStatus] = useUrlState("status", "active");
@@ -97,6 +98,7 @@ export default function MasterListPage({
         </div>
         {canManage ? (
           <div className="phs-head__acts">
+            {headerActions}
             <button
               type="button"
               className="flow-btn flow-btn-primary phs-upload"

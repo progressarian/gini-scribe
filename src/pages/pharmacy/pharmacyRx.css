@@ -358,3 +358,17 @@
     min-width: 0;
   }
 }
+.prx-rx__note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  width: 100%;
+}
+.prx-rx__note .jb-assign {
+  flex: 1 1 160px;
+  min-width: 0;
+  height: 32px;
+  font-size: 13px;
+}

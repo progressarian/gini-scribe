@@ -660,7 +660,7 @@ async function markDispensed(client, bill, lines, ctx) {
 
 async function applyMedOutcomes(client, bill, already, ctx) {
   const { rows: outcomes } = await client.query(
-    `SELECT o.medication_id, o.outcome, o.reason, m.name AS substitute_name
+    `SELECT o.medication_id, o.outcome, o.reason, o.note, m.name AS substitute_name
        FROM pharmacy_bill_med_outcomes o
        JOIN medications med ON med.id = o.medication_id AND med.patient_id = $2
        LEFT JOIN pharmacy_medicines m ON m.id = o.medicine_id
@@ -693,7 +693,7 @@ async function applyMedOutcomes(client, bill, already, ctx) {
             ? `On bill ${bill.bill_no}`
             : o.outcome === "requested"
               ? "Requested; patient will collect later"
-              : null,
+              : (o.note ?? null),
       markedBy: ctx.actorName ?? null,
     });
     marked.push(o.medication_id);

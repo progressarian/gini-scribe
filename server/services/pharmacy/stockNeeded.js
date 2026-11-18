@@ -1,6 +1,7 @@
 import pool from "../../config/db.js";
 import { medicineKey } from "./stockMatch.js";
 import { resolveNotifications } from "../notifications.js";
+import { NEEDED_REASON_LABEL, notGivenReasonOf } from "../../../shared/pharmacyVocab.js";
 
 export const NEEDED_DAYS = 30;
 const PRESCRIBED_STATUSES = [
@@ -28,92 +29,169 @@ const keysFor = (item) =>
       .toUpperCase(),
   ].filter(Boolean);
 
-export async function listNeeded({ days = NEEDED_DAYS } = {}, db = pool) {
-  const [{ rows: items }, { rows: stock }, { rows: marks }] = await Promise.all([
+export { NEEDED_REASON_LABEL };
+
+const SYSTEM_NOTES = /^(On bill|Substitute |Requested; patient will collect later)/;
+
+const dayKey = (row) => `${row.patient_id}|${row.key}|${row.on_date}`;
+
+export async function listNeeded({ days = NEEDED_DAYS, reason = null, q = null } = {}, db = pool) {
+  const [
+    { rows: prescribed },
+    { rows: notGiven },
+    { rows: requests },
+    { rows: stock },
+    { rows: marks },
+  ] = await Promise.all([
     db.query(
-      `SELECT i.medicine_name, i.pharmacy_match, v.patient_id, v.visit_date::text AS visit_date,
-              d.name AS doctor_name, i.visit_id, NULL::uuid AS request_id
-         FROM giniflow_rx_items i
-         JOIN giniflow_visits v ON v.id = i.visit_id
-         LEFT JOIN doctors d ON d.id = v.assigned_doctor_id
-        WHERE v.visit_date >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - $1::int
-          AND v.current_status = ANY($2::text[])
-          AND i.change_type = ANY($3::text[])
-       UNION ALL
-       SELECT r.medicine_name, NULL, r.patient_id,
-              (r.requested_at AT TIME ZONE 'Asia/Kolkata')::date::text, d.name, r.visit_id, r.id
-         FROM pharmacy_medicine_requests r
-         LEFT JOIN doctors d ON d.id = r.requested_by
-        WHERE r.requested_at >= NOW() - make_interval(days => $1::int)`,
+      `SELECT i.medicine_name, i.pharmacy_match, v.patient_id, v.visit_date::text AS on_date,
+                d.name AS doctor_name, i.visit_id::text AS seen
+           FROM giniflow_rx_items i
+           JOIN giniflow_visits v ON v.id = i.visit_id
+           LEFT JOIN doctors d ON d.id = v.assigned_doctor_id
+          WHERE v.visit_date >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - $1::int
+            AND v.current_status = ANY($2::text[])
+            AND i.change_type = ANY($3::text[])`,
       [days, PRESCRIBED_STATUSES, DISPENSABLE],
+    ),
+    db.query(
+      `SELECT m.name AS medicine_name, m.pharmacy_match, mc.patient_id,
+                mc.collected_date::text AS on_date, mc.reason, mc.qty_note AS note,
+                m.prescriber AS doctor_name, mc.id::text AS seen
+           FROM medicine_collections mc
+           JOIN medications m ON m.id = mc.medication_id
+          WHERE mc.status IN ('not_given', 'partial')
+            AND mc.collected_date >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - $1::int`,
+      [days],
+    ),
+    db.query(
+      `SELECT r.medicine_name, NULL AS pharmacy_match, r.patient_id, r.source, r.reason, r.note,
+                r.qty_units,
+                COALESCE(r.needed_on, (r.requested_at AT TIME ZONE 'Asia/Kolkata')::date)::text AS on_date,
+                d.name AS doctor_name, r.id::text AS seen
+           FROM pharmacy_medicine_requests r
+           LEFT JOIN doctors d ON d.id = r.requested_by
+          WHERE COALESCE(r.needed_on, (r.requested_at AT TIME ZONE 'Asia/Kolkata')::date)
+                >= (NOW() AT TIME ZONE 'Asia/Kolkata')::date - $1::int`,
+      [days],
     ),
     db.query(`SELECT UPPER(medicine_name) AS key, stock_qty FROM pharmacy_inventory`),
     db.query(
       `SELECT o.medicine_key, o.note, o.ordered_at, d.name AS ordered_by_name
-         FROM pharmacy_needed_orders o LEFT JOIN doctors d ON d.id = o.ordered_by
-        WHERE o.ordered_at >= NOW() - make_interval(days => $1::int)`,
+           FROM pharmacy_needed_orders o LEFT JOIN doctors d ON d.id = o.ordered_by
+          WHERE o.ordered_at >= NOW() - make_interval(days => $1::int)`,
       [days],
     ),
   ]);
   const qtyOf = new Map(stock.map((row) => [row.key, Number(row.stock_qty) || 0]));
   const markOf = new Map(marks.map((row) => [row.medicine_key, row]));
+  const stockOf = (keys) => {
+    const known = keys.find((k) => qtyOf.has(k));
+    return !known ? "not_stocked" : qtyOf.get(known) > 0 ? "in_stock" : "out_of_stock";
+  };
+
+  const entries = [];
+  const withKey = (item) => {
+    const keys = keysFor(item);
+    return keys[0] ? { ...item, keys, key: keys[0], stock: stockOf(keys) } : null;
+  };
+  for (const item of prescribed.map(withKey).filter(Boolean)) {
+    if (item.stock !== "in_stock") entries.push({ ...item, reason: "prescribed" });
+  }
+  const marked = new Set();
+  for (const item of notGiven.map(withKey).filter(Boolean)) {
+    marked.add(dayKey(item));
+    const { reason: code, note } = notGivenReasonOf(item.reason);
+    entries.push({ ...item, reason: code, note: item.note || note });
+  }
+  for (const item of requests.map(withKey).filter(Boolean)) {
+    if (item.source === "import") {
+      entries.push({ ...item, reason: item.reason || "imported" });
+    } else if (item.stock !== "in_stock" && !marked.has(dayKey(item))) {
+      entries.push({ ...item, reason: "requested" });
+    }
+  }
+
+  const search = q ? String(q).trim().toUpperCase() : "";
+  const shown = entries.filter(
+    (e) =>
+      (!reason || e.reason === reason) &&
+      (!search || String(e.medicine_name).toUpperCase().includes(search)),
+  );
 
   const groups = new Map();
-  for (const item of items) {
-    const keys = keysFor(item);
-    const key = keys[0];
-    if (!key) continue;
-    const known = keys.find((k) => qtyOf.has(k));
-    if (known && qtyOf.get(known) > 0) continue;
-    const group = groups.get(key) || {
-      medicineKey: key,
+  const byReason = {};
+  const allPatients = new Set();
+  for (const item of shown) {
+    byReason[item.reason] = (byReason[item.reason] || 0) + 1;
+    if (item.patient_id) allPatients.add(item.patient_id);
+    const group = groups.get(item.key) || {
+      medicineKey: item.key,
       names: new Map(),
       patients: new Set(),
-      prescribed: new Set(),
+      seen: new Set(),
       doctors: new Set(),
-      prescriptions: 0,
-      lastPrescribed: null,
-      status: known ? "out_of_stock" : "not_stocked",
+      reasons: {},
+      notes: [],
+      qtyUnits: 0,
+      lastDate: null,
+      status: item.stock,
     };
     group.names.set(item.medicine_name, (group.names.get(item.medicine_name) || 0) + 1);
     if (item.patient_id) group.patients.add(item.patient_id);
     if (item.doctor_name) group.doctors.add(item.doctor_name);
-    const seen = item.visit_id || item.request_id;
-    if (!group.prescribed.has(seen)) {
-      group.prescribed.add(seen);
-      group.prescriptions += 1;
+    group.seen.add(`${item.reason}|${item.seen}`);
+    group.reasons[item.reason] = (group.reasons[item.reason] || 0) + 1;
+    if (item.note && !SYSTEM_NOTES.test(item.note)) {
+      group.notes.push({ text: item.note, date: item.on_date });
     }
-    if (!group.lastPrescribed || item.visit_date > group.lastPrescribed) {
-      group.lastPrescribed = item.visit_date;
-    }
-    groups.set(key, group);
+    if (item.qty_units) group.qtyUnits += Number(item.qty_units);
+    if (!group.lastDate || item.on_date > group.lastDate) group.lastDate = item.on_date;
+    groups.set(item.key, group);
   }
+
+  const items = [...groups.values()]
+    .map((group) => {
+      const mark = markOf.get(group.medicineKey);
+      const notes = [];
+      for (const note of group.notes.sort((a, b) => b.date.localeCompare(a.date))) {
+        if (!notes.some((n) => n.text === note.text)) notes.push(note);
+      }
+      return {
+        medicineKey: group.medicineKey,
+        medicineName: [...group.names].sort((a, b) => b[1] - a[1])[0][0],
+        status: group.status,
+        times: group.seen.size,
+        patients: group.patients.size,
+        prescriptions: group.seen.size,
+        reasons: group.reasons,
+        notes: notes.slice(0, 5),
+        qtyUnits: group.qtyUnits || null,
+        doctors: [...group.doctors].sort(),
+        lastPrescribed: group.lastDate,
+        ordered: mark
+          ? { at: mark.ordered_at, by: mark.ordered_by_name ?? null, note: mark.note ?? null }
+          : null,
+      };
+    })
+    .sort(
+      (a, b) =>
+        Number(Boolean(a.ordered)) - Number(Boolean(b.ordered)) ||
+        b.times - a.times ||
+        b.patients - a.patients ||
+        String(b.lastPrescribed).localeCompare(String(a.lastPrescribed)) ||
+        a.medicineName.localeCompare(b.medicineName),
+    );
 
   return {
     days,
-    items: [...groups.values()]
-      .map((group) => {
-        const mark = markOf.get(group.medicineKey);
-        return {
-          medicineKey: group.medicineKey,
-          medicineName: [...group.names].sort((a, b) => b[1] - a[1])[0][0],
-          status: group.status,
-          patients: group.patients.size,
-          prescriptions: group.prescriptions,
-          doctors: [...group.doctors].sort(),
-          lastPrescribed: group.lastPrescribed,
-          ordered: mark
-            ? { at: mark.ordered_at, by: mark.ordered_by_name ?? null, note: mark.note ?? null }
-            : null,
-        };
-      })
-      .sort(
-        (a, b) =>
-          Number(Boolean(a.ordered)) - Number(Boolean(b.ordered)) ||
-          b.patients - a.patients ||
-          String(b.lastPrescribed).localeCompare(String(a.lastPrescribed)) ||
-          a.medicineName.localeCompare(b.medicineName),
-      ),
+    summary: {
+      medicines: items.length,
+      times: shown.length,
+      patients: allPatients.size,
+      byReason,
+    },
+    items,
   };
 }
 

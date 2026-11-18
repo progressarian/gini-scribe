@@ -4,7 +4,7 @@ import { mainLocationId } from "./stockLedger.js";
 import { canonicalMedKey } from "../medication/normalize.js";
 import { masterRecords } from "./masterRecords.js";
 
-const medicines = masterRecords({
+export const medicineRecords = masterRecords({
   table: "pharmacy_medicines",
   noun: "medicine",
   fields: [
@@ -38,8 +38,8 @@ const medicines = masterRecords({
   prepare: (input) => ({
     ...input,
     code: input.code ?? undefined,
-    medicine_key: canonicalMedKey(input.name),
-    needs_review: false,
+    medicine_key: input.medicine_key ?? canonicalMedKey(input.name),
+    needs_review: input.needs_review ?? false,
   }),
 });
 
@@ -48,13 +48,23 @@ export function listMedicines({ schedule, form, review, ...params }) {
   if (review) filters.push({ sql: "needs_review = ?", value: true });
   if (schedule) filters.push({ sql: "schedule = ?", value: schedule });
   if (form) filters.push({ sql: "form = ?", value: form });
-  return medicines.list({ ...params, filters });
+  return medicineRecords.list({ ...params, filters });
 }
 
-export const getMedicine = (id) => medicines.get(id);
-export const createMedicine = (input, ctx) => medicines.create(input, ctx);
+export const getMedicine = (id) => medicineRecords.get(id);
+export const createMedicine = (input, ctx) => medicineRecords.create(input, ctx);
 export async function updateMedicine(id, input, ctx) {
-  const saved = await medicines.update(id, input, ctx);
+  const before = await medicineRecords.get(id);
+  const sameName =
+    before.name.trim().toLowerCase() ===
+    String(input.name ?? "")
+      .trim()
+      .toLowerCase();
+  const saved = await medicineRecords.update(
+    id,
+    sameName ? { ...input, medicine_key: before.medicine_key } : input,
+    ctx,
+  );
   try {
     const main = await mainLocationId(pool);
     await checkStockLevels(pool, [{ locationId: main, medicineId: saved.id }]);
@@ -63,4 +73,5 @@ export async function updateMedicine(id, input, ctx) {
   }
   return saved;
 }
-export const setMedicineActive = (id, isActive, ctx) => medicines.setActive(id, isActive, ctx);
+export const setMedicineActive = (id, isActive, ctx) =>
+  medicineRecords.setActive(id, isActive, ctx);

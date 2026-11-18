@@ -10,19 +10,21 @@ export const creditKeys = {
   dues: (params) => ["pharmacy-credit", "dues", params],
 };
 
-export function useCreditRequests(params) {
+export function useCreditRequests(params, options = {}) {
   return useQuery({
     queryKey: creditKeys.requests(params),
     queryFn: async () => (await api.get(`${BASE}/requests`, { params })).data,
     placeholderData: keepPreviousData,
+    ...options,
   });
 }
 
-export function useDues(params) {
+export function useDues(params, options = {}) {
   return useQuery({
     queryKey: creditKeys.dues(params),
     queryFn: async () => (await api.get(`${BASE}/dues`, { params })).data,
     placeholderData: keepPreviousData,
+    ...options,
   });
 }
 

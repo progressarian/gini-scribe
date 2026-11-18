@@ -8,6 +8,11 @@ import useAuthStore from "../../stores/authStore";
 import { CAPABILITIES, hasCapability } from "../../../shared/permissions";
 import { useWithdrawCredit } from "../../queries/hooks/usePharmacyCredit";
 import { usePharmacyLive } from "../../queries/hooks/usePharmacyLive";
+import {
+  DecideButtons,
+  DecideCreditFor,
+  useBillCreditRequest,
+} from "../../components/pharmacy/PatientCreditRequests";
 import { toPaise, toRupees } from "../../../shared/pharmacyMoney";
 import { inclusivePackRate } from "../../../shared/pharmacyPricing";
 import { PdfButton } from "../../components/billing/counter/PdfViewer";
@@ -522,7 +527,7 @@ function PrescriptionPanel({ billId, busy, onAdd }) {
   );
 }
 
-function CreditPanel({ request, canAsk, busy, onAsk, onWithdraw }) {
+function CreditPanel({ request, canAsk, busy, onAsk, onWithdraw, decideRow, onDecide }) {
   const open = ["pending", "approved"].includes(request?.status);
   if (!open) {
     return (
@@ -551,14 +556,19 @@ function CreditPanel({ request, canAsk, busy, onAsk, onWithdraw }) {
               request.decision_note ? ` (${request.decision_note})` : ""
             }. Collect the rest now; the credit is collected later.`}
       </p>
-      <button
-        type="button"
-        className="flow-btn flow-btn-ghost"
-        disabled={busy}
-        onClick={onWithdraw}
-      >
-        {request.status === "pending" ? "Withdraw request" : "Withdraw credit and edit bill"}
-      </button>
+      <div className="phb-credit__acts">
+        {request.status === "pending" && decideRow ? (
+          <DecideButtons request={decideRow} onDecide={onDecide} />
+        ) : null}
+        <button
+          type="button"
+          className="flow-btn flow-btn-ghost"
+          disabled={busy}
+          onClick={onWithdraw}
+        >
+          {request.status === "pending" ? "Withdraw request" : "Withdraw credit and edit bill"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -580,8 +590,11 @@ function DraftBill({ bill, renderPrescription, onDiscarded }) {
   const [askingCredit, setAskingCredit] = useState(false);
   const role = useAuthStore((st) => st.currentDoctor?.role);
   const canAskCredit = hasCapability(role, CAPABILITIES.PHARMACY_CREDIT_REQUEST);
+  const canDecideCredit = hasCapability(role, CAPABILITIES.PHARMACY_CREDIT_APPROVE);
   const withdraw = useWithdrawCredit();
   const request = bill.credit;
+  const [decidingCredit, setDecidingCredit] = useState(null);
+  const decideRow = useBillCreditRequest(bill.id, canDecideCredit && request?.status === "pending");
   const creditOpen = ["pending", "approved"].includes(request?.status);
   const lastCreditStatus = useRef(request?.status);
 
@@ -821,7 +834,10 @@ function DraftBill({ bill, renderPrescription, onDiscarded }) {
             busy={busy}
             onAsk={() => setAskingCredit(true)}
             onWithdraw={doWithdraw}
+            decideRow={decideRow}
+            onDecide={setDecidingCredit}
           />
+          <DecideCreditFor deciding={decidingCredit} onClose={() => setDecidingCredit(null)} />
           {request?.status === "pending" ? null : (
             <BillPayments
               rows={payments}

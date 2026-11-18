@@ -137,6 +137,18 @@ test.describe("PH22 opening stock from the Excel template", () => {
       });
     });
 
+    const checked = await admin.post(`/api/pharmacy/purchases/${receipt.id}/import/preview`, {
+      headers: { "Content-Type": XLSX },
+      data: file,
+    });
+    const preview = await checked.json();
+    expect(checked.status(), JSON.stringify(preview)).toBe(200);
+    expect(preview.counts).toMatchObject({ new: 2, error: 3 });
+    const reasons = preview.rows.flatMap((r) => r.errors.map((e) => e.message)).join(" | ");
+    expect(reasons).toContain("Same batch as row");
+    expect(reasons).toContain("cannot be more than the MRP");
+    expect(reasons).toContain("No medicine has the code NOPE-404");
+
     const response = await admin.post(`/api/pharmacy/purchases/${receipt.id}/import`, {
       params: { version: receipt.version },
       headers: { "Content-Type": XLSX },
@@ -144,12 +156,8 @@ test.describe("PH22 opening stock from the Excel template", () => {
     });
     const body = await response.json();
     expect(response.status(), JSON.stringify(body)).toBe(200);
-    expect(body.added).toBe(2);
-    const reasons = body.skipped.map((s) => s.reason).join(" | ");
-    expect(body.skipped).toHaveLength(3);
-    expect(reasons).toContain("is already on this receipt");
-    expect(reasons).toContain("cannot be more than the MRP");
-    expect(reasons).toContain("No medicine has the code NOPE-404");
+    expect(body.created).toBe(2);
+    expect(body.skipped).toBe(3);
 
     receipt = body.purchase;
     expect(receipt.lines.map((l) => [l.batch_no, l.expiry_date, l.qty_packs, l.rack_no])).toEqual([
@@ -178,7 +186,7 @@ test.describe("PH22 opening stock from the Excel template", () => {
       data: Buffer.from(await wb.xlsx.writeBuffer()),
     });
     expect(response.status()).toBe(400);
-    expect((await response.json()).error).toContain('"Medicine code" column is missing');
+    expect((await response.json()).error).toMatch(/"Medicine code".*missing/);
   });
 
   test("the imported opening stock posts like any receipt", async () => {
@@ -215,12 +223,16 @@ test.describe("PH22 opening stock from the Excel template", () => {
       () => page.getByRole("button", { name: "Import from Excel" }),
       { timeout: 30000 },
     );
-    await page.getByLabel("Filled stock template").setInputFiles({
+    await page.getByRole("button", { name: "Import from Excel" }).click();
+    const dialog = page.getByRole("dialog", { name: "Import opening stock from Excel" });
+    await dialog.getByLabel("Import opening stock from Excel file").setInputFiles({
       name: "stock.xlsx",
       mimeType: XLSX,
       buffer: file,
     });
-    await expect(page.getByText("1 row added from the file.")).toBeVisible();
+    await dialog.getByRole("button", { name: "Import 1 row" }).click();
+    await expect(dialog.getByText("Import finished")).toBeVisible();
+    await dialog.getByRole("button", { name: "Close" }).click();
     await expect(
       page.getByLabel(`Batch for line 1, ${TAG} Antacid Gel`, { exact: true }),
     ).toHaveValue("GEL9");

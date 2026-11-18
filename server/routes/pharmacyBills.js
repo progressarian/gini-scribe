@@ -25,6 +25,7 @@ import {
   listBills,
   updateBill,
 } from "../services/pharmacy/bills.js";
+import { signalPharmacy } from "../services/pharmacy/live.js";
 
 const router = Router();
 const BILLS = "/pharmacy/bills";
@@ -102,12 +103,14 @@ router.post(
   `${BILLS}/:id/finalise`,
   billId,
   validate(pharmacyBillFinaliseSchema, pharmacyBillLabels),
-  route("Finalise pharmacy bill", (req) =>
-    finaliseBill(req.params.id, req.body, {
+  route("Finalise pharmacy bill", async (req) => {
+    const bill = await finaliseBill(req.params.id, req.body, {
       ...auditContext(req),
       actorName: req.doctor?.doctor_name ?? null,
-    }),
-  ),
+    });
+    signalPharmacy("bill", req.params.id);
+    return bill;
+  }),
 );
 
 router.get(
@@ -126,7 +129,11 @@ router.post(
   }),
   route(
     "Pharmacy sale return",
-    (req) => createSaleReturn(req.params.id, req.body, auditContext(req)),
+    async (req) => {
+      const made = await createSaleReturn(req.params.id, req.body, auditContext(req));
+      signalPharmacy("bill", req.params.id);
+      return made;
+    },
     201,
   ),
 );
@@ -135,7 +142,11 @@ router.post(
   `${BILLS}/:id/discard`,
   billId,
   validate(pharmacyBillVersionSchema),
-  route("Discard pharmacy bill", (req) => discardBill(req.params.id, req.body, auditContext(req))),
+  route("Discard pharmacy bill", async (req) => {
+    const done = await discardBill(req.params.id, req.body, auditContext(req));
+    signalPharmacy("bill", req.params.id);
+    return done;
+  }),
 );
 
 export default router;

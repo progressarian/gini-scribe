@@ -87,6 +87,7 @@ export const PAGE_CAPABILITIES = {
   // Medication
   "/refills": CAP.REFILLS,
   "/pharmacy/stock": CAP.PHARMACY_STOCK_VIEW,
+  "/pharmacy/needed": CAP.PHARMACY_STOCK_VIEW,
   "/pharmacy/vendors": CAP.PHARMACY_MASTER,
   "/pharmacy/medicines": CAP.PHARMACY_MASTER,
   "/pharmacy/departments": [CAP.PHARMACY_MASTER, CAP.PHARMACY_DEPT_MANAGE],

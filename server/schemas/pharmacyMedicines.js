@@ -117,3 +117,25 @@ export const pharmacyMedicineListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
+
+const rowList = z.preprocess(
+  (v) =>
+    typeof v === "string"
+      ? v
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : (v ?? []),
+  z.array(z.coerce.number().int().min(1).max(1000000)).max(5000),
+);
+
+export const pharmacySheetDecisionFields = {
+  default: z.enum(["sheet", "keep", "add", "skip"]).default("sheet"),
+  keep: rowList,
+  sheet: rowList,
+  add: rowList,
+  skip: rowList,
+};
+
+export const pharmacySheetDecisionQuerySchema = z.object(pharmacySheetDecisionFields);
+export const pharmacySheetDecisionBodySchema = z.strictObject(pharmacySheetDecisionFields);

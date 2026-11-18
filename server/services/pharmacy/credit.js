@@ -177,9 +177,6 @@ export async function decideCredit(id, input, ctx = {}, db = pool) {
     if (request.status !== "pending") {
       throw httpError(409, `This credit request is already ${request.status}`);
     }
-    if (request.requested_by && request.requested_by === ctx.actorId) {
-      throw httpError(403, "Someone else must approve or reject a credit request you raised");
-    }
     if (bill.status !== "draft") throw httpError(409, "The bill is no longer a draft");
     const approve = input.decision === "approve";
     const approved = approve ? toPaise(input.approved_amount ?? request.amount) : null;
@@ -236,12 +233,24 @@ export async function decideCredit(id, input, ctx = {}, db = pool) {
 }
 
 export async function listCreditRequests(
-  { status = "pending", limit = 50, offset = 0 } = {},
+  { status = "pending", bill_id: billId, patient_id: patientId, limit = 50, offset = 0 } = {},
   db = pool,
 ) {
   const params = [limit, offset];
-  const where = status === "all" ? "TRUE" : "r.status = $3";
-  if (status !== "all") params.push(status);
+  const filters = [];
+  if (status !== "all") {
+    params.push(status);
+    filters.push(`r.status = $${params.length}`);
+  }
+  if (billId) {
+    params.push(billId);
+    filters.push(`r.bill_id = $${params.length}`);
+  }
+  if (patientId) {
+    params.push(patientId);
+    filters.push(`r.patient_id = $${params.length}`);
+  }
+  const where = filters.length ? filters.join(" AND ") : "TRUE";
   const { rows } = await db.query(
     `SELECT r.id, r.bill_id, r.status, r.amount, r.approved_amount, r.bill_amount, r.reason,
             r.decision_note, r.requested_at, r.decided_at, r.requested_by,

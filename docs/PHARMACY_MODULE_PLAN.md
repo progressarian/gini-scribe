@@ -334,6 +334,31 @@ P6 notes:
 - [x] The right pane is the bill itself: the same `BillWorkspace` as `/pharmacy/billing/:id` (patient strip, medicines, discounts, totals, credit, payment, finalise, print) with an extra **Prescription medicines** section. Before a draft exists it shows the prescription and **Start bill** (OPD / IPD). Each prescribed medicine is matched on `medicine_key` and shows the pharmacy item with stock, the last date and note it was given, and a status (To give / On bill / Substitute on bill / Collect later / Not given / Given today / Not stocked / Out of stock). **Add / Change** opens the bill's own batch picker; **Substitute** picks another in-stock medicine and opens the picker for it; **Collect later** records a `pharmacy_medicine_requests` row and alerts the pharmacy admin role; **Not given** saves a reason. The two columns scroll separately on desktop and stack on narrow screens.
 - [x] Decisions are saved per medicine against the patient's draft (`POST /pharmacy/prescriptions/patients/:id/outcomes`, table `pharmacy_bill_med_outcomes`, migration `2027-01-21`, which replaces the empty `2027-01-20` table). Finalising marks billed medicines given (existing `markDispensed`), substitutes given only if the substitute is on the bill, and the rest not given with their reason, behind the same Rx-desk check `/medicine-collection` uses. Spec PH88.
 
+### P10 — Excel import everywhere (2026-11-18)
+
+- [x] One import engine (`server/services/pharmacy/sheetImport.js`): read the sheet, check every row, then save in batches of 100 with a savepoint per row. Each row comes back as **new**, **no change**, **conflict** or **needs fixing**. A conflict lists every changed column with the current and the sheet value.
+- [x] The user decides each conflict in the popup (`SheetImportDialog`): **Use the sheet**, **Keep current**, or **Add quantities together** for a batch already on the receipt. A batch already in stock at another price offers **Use the rates already in stock** or **Leave this row out**. Import stays disabled until every conflict is decided. Rows that need fixing are skipped and can be downloaded as a sheet with an Errors column, fixed and uploaded again.
+- [x] Blank cells keep what Scribe has, so a sheet can change one column.
+- [x] Medicines: download sheet / import (`medicineSheet.js`), plus **Import from DARPAN**. It creates every item of the last DARPAN report as a medicine marked Needs review: pack 1, GST 5% and the DARPAN sale price as placeholders, and the prescription name linked in DARPAN as `medicine_key`. A rerun shows them as no change. Stock is not imported, because DARPAN has no batch or expiry.
+- [x] Vendors: download sheet / import (`vendorSheet.js`), matched on GSTIN, then name.
+- [x] Goods receipts and opening stock: the existing template import now uses the same engine and popup (`receiptImport.js`). Medicines can be found by code or exact name.
+- [x] A medicine keeps its `medicine_key` when edited without a name change, so DARPAN-linked prescription names survive edits.
+- DARPAN stays on (stock source unchanged) until the user decides to switch.
+- Spec PH89 (and PH22 updated).
+
+### P11 — Needed in stock page and reasons (2026-11-18)
+
+- [x] `/pharmacy/needed` (Inventory → Needed in Stock) replaces the card on the DARPAN tab. It covers 7 / 30 / 90 / 365 days and lists every medicine a patient did not take from us, with:
+  - why it was not taken: prescribed while not in stock, asked for at the counter, the medicine-collection reasons (out of stock, not in our pharmacy, buying outside, patient declined, other), or added from a sheet;
+  - the written notes, patients, prescribers, current stock and the order mark;
+  - search, a reason filter with counts, summary tiles and "Download list" (Excel).
+- [x] The source is `medicine_collections` not-given and partial rows (from /medicine-collection and from finalising a bill on the Prescriptions screen), plus `pharmacy_medicine_requests` and the prescribed-but-unstocked lines. A "collect later" request is not double-counted against its collection row. Not-given medicines are listed even when they are in stock, because "buying outside" or "patient declined" matter too.
+- [x] On the Prescriptions screen, choosing **Other** asks for a written reason; any other reason can carry an optional note. The note is saved on the outcome and copied to medicine collection at finalise.
+- [x] Excel import of needed medicines (Medicine name, Reason, Quantity, Date, Note) through the shared import popup. The same medicine, date and reason again is a conflict with Keep / Use the sheet / Add quantities together.
+- [x] Every import popup now has **Download sample**: a filled example of the accepted format, plus a "How to fill" sheet. This covers medicines, vendors, receipts / opening stock and needed medicines.
+- The "need" alert link now opens `/pharmacy/needed`.
+- Specs PH90, PH88 (Other note UI) and PH02 (unchanged behaviour).
+
 ### P7 — Reports & cut-over
 
 - [x] P7.1 `services/pharmacy/reports.js`, `/pharmacy/reports` (PHARMACY_REPORTS): daily sales, collections by mode, GST summary by HSN and rate (IPD GST inside the rate on its own rows), purchase register, Schedule H1 / X register, expiry and write-off loss, stock valuation, credit outstanding. Every report downloads as Excel with a total row. The movement history of a batch stays on the Stock page (History).

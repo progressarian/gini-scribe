@@ -70,6 +70,7 @@ const CIPage = lazyWithRetry(() => import("./pages/CIPage"));
 const FindPage = lazyWithRetry(() => import("./pages/FindPage"));
 const RefillsPage = lazyWithRetry(() => import("./pages/RefillsPage"));
 const PharmacyStockPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyStockPage"));
+const PharmacyNeededPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyNeededPage"));
 const PharmacyVendorsPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyVendorsPage"));
 const PharmacyMedicinesPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyMedicinesPage"));
 const PharmacyPurchasesPage = lazyWithRetry(() => import("./pages/pharmacy/PharmacyPurchasesPage"));
@@ -220,6 +221,7 @@ const router = createBrowserRouter([
               { path: "/find", element: lazyEl(FindPage) },
               { path: "/refills", element: lazyEl(RefillsPage) },
               { path: "/pharmacy/stock", element: lazyEl(PharmacyStockPage) },
+              { path: "/pharmacy/needed", element: lazyEl(PharmacyNeededPage) },
               { path: "/pharmacy/vendors", element: lazyEl(PharmacyVendorsPage) },
               { path: "/pharmacy/medicines", element: lazyEl(PharmacyMedicinesPage) },
               { path: "/pharmacy/departments", element: lazyEl(PharmacyDepartmentsPage) },

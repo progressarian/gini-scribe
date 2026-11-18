@@ -228,7 +228,37 @@ export const RX_NOT_GIVEN_REASON_LABEL = {
   not_available: "Not in our pharmacy",
   buying_outside: "Buying outside",
   patient_declined: "Patient declined",
+  has_at_home: "Already has it at home",
   other: "Other",
 };
 
+const REASON_TEXT = {
+  "out of stock": "out_of_stock",
+  "not available": "not_available",
+  "not availble": "not_available",
+  "not in our pharmacy": "not_available",
+  "buying outside": "buying_outside",
+  "brought from outside": "buying_outside",
+  "bought from outside": "buying_outside",
+  "patient declined": "patient_declined",
+  "already has stock at home": "has_at_home",
+  "already has it at home": "has_at_home",
+  "has stock at home": "has_at_home",
+};
+
+export function notGivenReasonOf(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return { reason: "other", note: null };
+  if (RX_NOT_GIVEN_REASON_LABEL[text]) return { reason: text, note: null };
+  const known = REASON_TEXT[text.toLowerCase().replace(/\s+/g, " ")];
+  return known ? { reason: known, note: null } : { reason: "other", note: text };
+}
+
 export const RX_REQUESTED_REASON = "not_available";
+
+export const NEEDED_REASON_LABEL = {
+  prescribed: "Prescribed, not in stock",
+  requested: "Asked for at the counter",
+  ...RX_NOT_GIVEN_REASON_LABEL,
+  imported: "Added from a sheet",
+};

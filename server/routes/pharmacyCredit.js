@@ -106,7 +106,11 @@ router.post(
   "/pharmacy/credit/bills/:id/payments",
   known("Pharmacy bill"),
   validate(pharmacyCollectDueSchema, pharmacyCreditLabels),
-  route("Collect pharmacy due", (req) => collectDue(req.params.id, req.body, auditContext(req))),
+  route("Collect pharmacy due", async (req) => {
+    const bill = await collectDue(req.params.id, req.body, auditContext(req));
+    signalPharmacy("credit", req.params.id);
+    return bill;
+  }),
 );
 
 export default router;
