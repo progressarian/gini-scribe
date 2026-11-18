@@ -10,7 +10,6 @@ const MAX_SPAN = 31;
 const REP_BACK = 7;
 const REP_AHEAD = 90;
 const LEAD_REACH = 365;
-const TITLE = /^[A-Za-z0-9][A-Za-z0-9 .,'&()/-]*$/;
 const LEAVE_FILTERS = ["pending", "approved", "rejected", "cancelled", "all"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -107,58 +106,6 @@ const listDays = (days) =>
     ? `${days.slice(0, 4).map(shortDay).join(", ")} and ${days.length - 4} more`
     : days.map(shortDay).join(", ");
 
-export async function addHoliday(crmUser, body = {}) {
-  assertLead(crmUser);
-  const title = textOf(body.title);
-  if (!title)
-    fail("Enter the holiday name, like Diwali.", { title: "Enter the holiday name, like Diwali." });
-  if (title.length > 60 || !TITLE.test(title)) {
-    fail("Use letters and numbers only, up to 60, like Diwali.", {
-      title: "Use letters and numbers only, up to 60, like Diwali.",
-    });
-  }
-  const { days } = readRange(body, { back: LEAD_REACH, ahead: LEAD_REACH });
-  return withCrmContext(crmUser, async (sql) => {
-    const hospital = await hospitalOf(sql, crmUser.id);
-    const { rows: taken } = await sql(
-      `SELECT day::text AS day, title FROM crm.days_off
-        WHERE hospital_id = $1 AND kind = 'holiday' AND status = 'approved'
-          AND deleted_at IS NULL AND day = ANY($2::date[])
-        ORDER BY day`,
-      [hospital, days],
-    );
-    if (taken.length) {
-      const message = `${listDays(taken.map((t) => t.day))} ${
-        taken.length === 1 ? "is" : "are"
-      } already a holiday (${taken[0].title}).`;
-      throw new DoctorError(message, 409, { fields: { from: message } });
-    }
-    const requestId = crypto.randomUUID();
-    await sql(
-      `INSERT INTO crm.days_off
-         (hospital_id, kind, day, request_id, title, status, requested_by, decided_by, decided_at)
-       SELECT $1, 'holiday', d, $2, $3, 'approved', $4, $4, now()
-         FROM unnest($5::date[]) d`,
-      [hospital, requestId, title, crmUser.id, days],
-    );
-    return { request_id: requestId, days: days.length };
-  });
-}
-
-export async function removeHoliday(crmUser, requestId) {
-  assertLead(crmUser);
-  assertRequestId(requestId);
-  return withCrmContext(crmUser, async (sql) => {
-    const { rowCount } = await sql(
-      `UPDATE crm.days_off SET deleted_at = now(), decided_by = $2, decided_at = now()
-        WHERE request_id = $1 AND kind = 'holiday' AND deleted_at IS NULL`,
-      [requestId, crmUser.id],
-    );
-    if (!rowCount) throw new DoctorError("This holiday was already removed.", 409);
-    return { removed: rowCount };
-  });
-}
-
 export async function requestLeave(crmUser, body = {}) {
   const lead = isLead(crmUser);
   const forSomeone = lead && body.user_id && body.user_id !== crmUser.id;
@@ -191,10 +138,8 @@ export async function requestLeave(crmUser, body = {}) {
     }
     const hospital = await hospitalOf(sql, userId);
     const { rows: holidays } = await sql(
-      `SELECT day::text AS day FROM crm.days_off
-        WHERE hospital_id = $1 AND kind = 'holiday' AND status = 'approved'
-          AND deleted_at IS NULL AND day = ANY($2::date[])`,
-      [hospital, range.days],
+      `SELECT day::text AS day FROM crm.clinic_holiday_days($1::date, $2::date)`,
+      [range.from, range.to],
     );
     const holidaySet = new Set(holidays.map((h) => h.day));
     const days = range.days.filter((d) => !holidaySet.has(d));
@@ -318,24 +263,32 @@ export async function cancelLeave(crmUser, requestId) {
   });
 }
 
+function holidayRanges(days) {
+  const ranges = [];
+  for (const { day, title } of days) {
+    const last = ranges.at(-1);
+    const next = last && addDays(last.to_day, isSunday(addDays(last.to_day, 1)) ? 2 : 1);
+    if (last && last.title === title && next === day) {
+      last.to_day = day;
+      last.days += 1;
+    } else {
+      ranges.push({ key: day, title, from_day: day, to_day: day, days: 1 });
+    }
+  }
+  return ranges;
+}
+
 export async function listDaysOff(crmUser, query = {}) {
   const lead = isLead(crmUser);
   const status = LEAVE_FILTERS.includes(query.status) ? query.status : lead ? "pending" : "all";
   const person = lead && UUID.test(String(query.user ?? "")) ? String(query.user) : null;
   const today = istDate();
   return withCrmContext(crmUser, async (sql) => {
-    const { rows: holidays } = await sql(
-      `SELECT o.request_id, min(o.title) AS title,
-              min(o.day)::text AS from_day, max(o.day)::text AS to_day,
-              count(*)::int AS days, min(u.full_name) AS added_by_name
-         FROM crm.days_off o
-         LEFT JOIN crm.users u ON u.id = o.requested_by
-        WHERE o.kind = 'holiday' AND o.status = 'approved' AND o.deleted_at IS NULL
-          AND o.day >= $1::date
-        GROUP BY o.request_id
-        ORDER BY min(o.day)`,
-      [addDays(today, -LEAD_REACH)],
+    const { rows: holidayDays } = await sql(
+      `SELECT day::text AS day, title FROM crm.clinic_holiday_days($1::date, $2::date)`,
+      [addDays(today, -LEAD_REACH), addDays(today, LEAD_REACH)],
     );
+    const holidays = holidayRanges(holidayDays);
     const { rows: leave } = await sql(
       `SELECT o.request_id, o.user_id, min(p.full_name) AS full_name, min(o.status) AS status,
               min(o.day)::text AS from_day, max(o.day)::text AS to_day,
@@ -382,11 +335,20 @@ export async function listDaysOff(crmUser, query = {}) {
   });
 }
 
-export const DAYS_OFF_IN_RANGE_SQL = `SELECT o.day::text AS day, o.kind, o.user_id, o.portion, o.title
+export const daysOffSql = (
+  from,
+  to,
+  users,
+) => `SELECT o.day::text AS day, o.kind, o.user_id, o.portion, o.title
        FROM crm.days_off o
-      WHERE o.status = 'approved' AND o.deleted_at IS NULL
-        AND o.day BETWEEN $10::date AND $3::date
-        AND (o.kind = 'holiday' OR o.user_id = ANY($1::uuid[]))`;
+      WHERE o.kind = 'leave' AND o.status = 'approved' AND o.deleted_at IS NULL
+        AND o.day BETWEEN ${from}::date AND ${to}::date
+        AND o.user_id = ANY(${users}::uuid[])
+     UNION ALL
+     SELECT h.day::text, 'holiday', NULL::uuid, 'full', h.title
+       FROM crm.clinic_holiday_days(${from}::date, ${to}::date) h`;
+
+export const DAYS_OFF_IN_RANGE_SQL = daysOffSql("$10", "$3", "$1");
 
 export function offIndex(rows = []) {
   const holidays = new Map();

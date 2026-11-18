@@ -22,7 +22,7 @@ import {
 import { DoctorError, isLead } from "./doctors.js";
 import { doctorRemovalState } from "./removals.js";
 import { syncVisitTasks, visitNextDateChanged, visitsUndone } from "./tasks.js";
-import { offIndex, perWorkingDay, workingDays } from "./daysOff.js";
+import { daysOffSql, offIndex, perWorkingDay, workingDays } from "./daysOff.js";
 
 // Visit logging (brief §5) and the rep home screen (§13).
 //
@@ -343,14 +343,7 @@ export async function repHome(crmUser, { limit = 25, lists = true } = {}) {
            FROM crm.visits WHERE deleted_at IS NULL AND executive_id = $1`,
         [crmUser.id],
       ),
-      sql(
-        `SELECT day::text AS day, kind, user_id, portion, title
-           FROM crm.days_off
-          WHERE status = 'approved' AND deleted_at IS NULL
-            AND day >= date_trunc('month', ${IST_TODAY})::date
-            AND (kind = 'holiday' OR user_id = $1)`,
-        [crmUser.id],
-      ),
+      sql(daysOffSql(`date_trunc('month', ${IST_TODAY})`, IST_TODAY, "ARRAY[$1]"), [crmUser.id]),
     ]);
     const today = istDate();
     const month = workingDays(

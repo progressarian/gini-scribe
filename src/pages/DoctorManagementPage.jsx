@@ -8,6 +8,7 @@ import { toast } from "../stores/uiStore";
 import DeleteDoctorModal from "../components/doctors/DeleteDoctorModal";
 import ScheduleEditor from "../components/doctors/ScheduleEditor";
 import StaffOverview from "../components/doctors/StaffOverview";
+import ClinicHolidays from "../components/doctors/ClinicHolidays";
 import AddStaffModal from "../components/doctors/AddStaffModal";
 import ReassignModal, { enrichAffected } from "../components/doctors/ReassignModal";
 import ConfirmModal from "../components/ui/ConfirmModal";
@@ -535,6 +536,7 @@ export default function DoctorManagementPage() {
   const [slotsPicked, setSlotsOnly] = useState(true);
   const [showRemoved, setShowRemoved] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
+  const [showHolidays, setShowHolidays] = useState(false);
   const [addTimeOff, setAddTimeOff] = useState(0);
   const [editSchedule, setEditSchedule] = useState(0);
   const [refresh, setRefresh] = useState(0);
@@ -612,6 +614,7 @@ export default function DoctorManagementPage() {
   const select = (id) => {
     setShowRemoved(false);
     setShowBulk(false);
+    setShowHolidays(false);
     setQuery({ doctor: id, tab: "overview" });
   };
 
@@ -641,9 +644,22 @@ export default function DoctorManagementPage() {
           <button
             type="button"
             className="docmgmt-secondary"
+            aria-pressed={showHolidays}
+            onClick={() => {
+              setShowRemoved(false);
+              setShowBulk(false);
+              setShowHolidays(true);
+            }}
+          >
+            Clinic holidays
+          </button>
+          <button
+            type="button"
+            className="docmgmt-secondary"
             aria-pressed={showBulk}
             onClick={() => {
               setShowRemoved(false);
+              setShowHolidays(false);
               setShowBulk(true);
             }}
           >
@@ -678,11 +694,12 @@ export default function DoctorManagementPage() {
             setFilter(f);
             setShowRemoved(false);
           }}
-          selectedId={showBulk ? null : doctorId}
+          selectedId={showBulk || showHolidays ? null : doctorId}
           onSelect={select}
           showRemoved={showRemoved}
           onShowRemoved={() => {
             setShowBulk(false);
+            setShowHolidays(false);
             setShowRemoved(true);
           }}
           offToday={offToday}
@@ -695,7 +712,14 @@ export default function DoctorManagementPage() {
         />
 
         <main className="docmgmt-main">
-          {showBulk ? (
+          {showHolidays ? (
+            <section className="docmgmt-panel" aria-labelledby="docmgmt-holidays-title">
+              <h2 className="docmgmt-panel-title" id="docmgmt-holidays-title">
+                Clinic holidays
+              </h2>
+              <ClinicHolidays />
+            </section>
+          ) : showBulk ? (
             <section className="docmgmt-panel" aria-label="Bulk schedule">
               <ScheduleEditor
                 bulk

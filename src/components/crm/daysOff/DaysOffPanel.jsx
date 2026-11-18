@@ -24,7 +24,7 @@ export default function DaysOffPanel({ onPendingChange, onChanged }) {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
   const [reload, setReload] = useState(0);
-  const [dialog, setDialog] = useState(null);
+  const [dialog, setDialog] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -62,10 +62,7 @@ export default function DaysOffPanel({ onPendingChange, onChanged }) {
     const { action, row } = confirm;
     setBusy(true);
     setActionErr(null);
-    const url =
-      action === "remove"
-        ? `/api/crm/holidays/${row.request_id}/remove`
-        : `/api/crm/leave/${row.request_id}/${action}`;
+    const url = `/api/crm/leave/${row.request_id}/${action}`;
     try {
       await api.post(url, { note: note.trim() || undefined });
       setConfirm(null);
@@ -75,7 +72,6 @@ export default function DaysOffPanel({ onPendingChange, onChanged }) {
           approve: `${who} approved.`,
           reject: `${who} rejected.`,
           cancel: `${who} cancelled.`,
-          remove: `${row.title} removed.`,
         }[action],
       );
     } catch (e) {
@@ -103,13 +99,6 @@ export default function DaysOffPanel({ onPendingChange, onChanged }) {
     if (!confirm) return {};
     const { action, row } = confirm;
     const when = datesText(row.from_day, row.to_day);
-    if (action === "remove") {
-      return {
-        title: `Remove the holiday ${row.title}?`,
-        label: "Remove holiday",
-        body: `${when} becomes a working day again for everyone, and averages for those dates change.`,
-      };
-    }
     return {
       approve: {
         title: `Approve ${row.full_name}'s leave?`,
@@ -158,20 +147,11 @@ export default function DaysOffPanel({ onPendingChange, onChanged }) {
               options={data.staff.map((s) => ({ value: s.id, label: s.full_name }))}
             />
           )}
-          {admin && (
-            <button
-              type="button"
-              className="rep__btn rep__btn--sm"
-              onClick={() => setDialog("holiday")}
-            >
-              + Holiday
-            </button>
-          )}
           {data && (
             <button
               type="button"
               className="rep__btn rep__btn--primary rep__btn--sm"
-              onClick={() => setDialog("leave")}
+              onClick={() => setDialog(true)}
             >
               {admin ? "+ Leave" : "Request leave"}
             </button>
@@ -272,13 +252,11 @@ export default function DaysOffPanel({ onPendingChange, onChanged }) {
           <h3 className="lv__h3">Holidays</h3>
           <ul className="rep__list home__list">
             {data && holidays.length === 0 && (
-              <li className="rep__empty">
-                No holidays marked.{admin ? " Use + Holiday to add one, like Diwali." : ""}
-              </li>
+              <li className="rep__empty">No clinic holidays marked.</li>
             )}
             {[...upcoming, ...past].map((h) => (
               <li
-                key={h.request_id}
+                key={h.key}
                 className={`rep__row lv__row ${h.to_day < today ? "lv__row--past" : ""}`}
               >
                 <div className="rep__row-main">
@@ -288,21 +266,11 @@ export default function DaysOffPanel({ onPendingChange, onChanged }) {
                     {h.to_day < today ? " · past" : ""}
                   </span>
                 </div>
-                {admin && (
-                  <div className="rep__row-actions">
-                    <button
-                      type="button"
-                      className="rep__btn rep__btn--sm"
-                      onClick={() => ask("remove", h)}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                )}
               </li>
             ))}
           </ul>
           <p className="lv__foot">
+            Clinic holidays are set by the admin in Settings, Slot settings, and apply to all staff.
             Sundays, holidays and approved leave are left out of “visits per working day”.
           </p>
         </>
@@ -310,20 +278,17 @@ export default function DaysOffPanel({ onPendingChange, onChanged }) {
 
       {data && (
         <DayOffDialog
-          kind={dialog}
+          open={dialog}
           isAdmin={admin}
           staff={data.staff}
           limits={data.limits}
-          onClose={() => setDialog(null)}
+          onClose={() => setDialog(false)}
           onSaved={(result) => {
-            const kind = dialog;
-            setDialog(null);
+            setDialog(false);
             refresh(
-              kind === "holiday"
-                ? "Holiday added."
-                : result.status === "pending"
-                  ? "Leave requested. It counts once your admin approves it."
-                  : "Leave added.",
+              result.status === "pending"
+                ? "Leave requested. It counts once your admin approves it."
+                : "Leave added.",
             );
           }}
         />

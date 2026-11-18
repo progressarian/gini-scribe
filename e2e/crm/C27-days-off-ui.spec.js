@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { seedCrmStaff, seedDoctors, crmApi, loginCrm, resetCrm } from "../helpers/crm.mjs";
 import { gotoReady } from "../helpers/browser.mjs";
-import { one } from "../helpers/db.mjs";
+import { query } from "../helpers/db.mjs";
 import { addDays, istDate } from "../../server/crm/istPeriods.js";
 import { isSunday } from "../../server/crm/daysOff.js";
 
@@ -10,6 +10,8 @@ const weekday = (n) => {
   const d = addDays(today, n);
   return isSunday(d) ? addDays(d, 1) : d;
 };
+
+const HOLIDAY = weekday(12);
 
 test.describe("CRM Holidays & leave tab and working-day average", () => {
   let users;
@@ -27,7 +29,10 @@ test.describe("CRM Holidays & leave tab and working-day average", () => {
     virender = await crmApi(users.virender);
   });
 
-  test.afterAll(resetCrm);
+  test.afterAll(async () => {
+    await query(`DELETE FROM clinic_holidays WHERE holiday_date = $1`, [HOLIDAY]);
+    await resetCrm();
+  });
 
   const openTab = async (page, api) => {
     await loginCrm(page, api);
@@ -56,7 +61,12 @@ test.describe("CRM Holidays & leave tab and working-day average", () => {
     await expect(page.getByText(/Half day · Bank work/)).toBeVisible();
   });
 
-  test("2. The admin sees the count, approves, and adds a holiday", async ({ page }) => {
+  test("2. The admin approves leave and sees clinic holidays read-only", async ({ page }) => {
+    await query(
+      `INSERT INTO clinic_holidays (holiday_date, remarks) VALUES ($1, 'Test Gurpurab')
+       ON CONFLICT (holiday_date) DO UPDATE SET remarks = EXCLUDED.remarks`,
+      [HOLIDAY],
+    );
     await openTab(page, virender);
     await expect(page.getByRole("button", { name: /Holidays & leave\s*1/ })).toBeVisible();
     await expect(page.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0);
@@ -64,18 +74,10 @@ test.describe("CRM Holidays & leave tab and working-day average", () => {
     await page.getByRole("button", { name: "Approve leave" }).click();
     await expect(page.getByText("Rajesh Sharma's leave approved.")).toBeVisible();
 
-    await page.getByRole("button", { name: "+ Holiday" }).click();
-    await page.getByRole("button", { name: "Add holiday" }).click();
-    await expect(page.getByText("Enter the holiday name, like Diwali.")).toBeVisible();
-    await page.getByLabel("Holiday name").fill("Test Gurpurab");
-    await page.getByLabel("First day").fill(weekday(12));
-    await page.getByRole("button", { name: "Add holiday" }).click();
-    await expect(page.getByText("Holiday added.")).toBeVisible();
     await expect(page.getByText("Test Gurpurab")).toBeVisible();
-    const row = await one(
-      `SELECT count(*)::int AS n FROM crm.days_off WHERE kind = 'holiday' AND title = 'Test Gurpurab'`,
-    );
-    expect(row.n).toBe(1);
+    await expect(page.getByRole("button", { name: "+ Holiday" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Remove" })).toHaveCount(0);
+    await expect(page.getByText(/Clinic holidays are set by the admin in Settings/)).toBeVisible();
   });
 
   test("3. Progress shows visits per working day, and home shows it too", async ({ page }) => {

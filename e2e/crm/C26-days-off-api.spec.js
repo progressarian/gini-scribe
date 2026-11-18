@@ -45,42 +45,37 @@ test.describe("CRM holidays and leave: rules, approval and working-day averages"
     virender = await crmApi(users.virender);
   });
 
-  test.afterAll(resetCrm);
+  test.afterAll(async () => {
+    await query(`DELETE FROM clinic_holidays WHERE holiday_date = '2026-09-15'`);
+    await resetCrm();
+  });
 
-  test("1. Only an admin adds holidays; Sundays and repeats are refused", async () => {
-    const byRep = await json(
-      await rajesh.post("/api/crm/holidays", { data: { from: "2026-09-15", title: "Festival" } }),
+  test("1. Holidays come from the clinic calendar; the CRM cannot add or remove them", async () => {
+    await query(
+      `INSERT INTO clinic_holidays (holiday_date, remarks) VALUES ('2026-09-15', 'Test Festival')
+       ON CONFLICT (holiday_date) DO UPDATE SET remarks = EXCLUDED.remarks`,
     );
-    expect(byRep.status).toBe(403);
-
-    const noName = await json(
-      await virender.post("/api/crm/holidays", { data: { from: "2026-09-15" } }),
-    );
-    expect(noName.status).toBe(400);
-    expect(noName.body.fields.title).toMatch(/holiday name/);
-
-    const sunday = await json(
-      await virender.post("/api/crm/holidays", { data: { from: "2026-09-13", title: "Sunday" } }),
-    );
-    expect(sunday.status).toBe(400);
-    expect(sunday.body.error).toMatch(/not a Sunday/);
-
-    const added = await json(
-      await virender.post("/api/crm/holidays", {
-        data: { from: "2026-09-15", to: "2026-09-15", title: "Test Festival" },
-      }),
-    );
-    expect(added.status).toBe(200);
-    expect(added.body.days).toBe(1);
-
-    const again = await json(
-      await virender.post("/api/crm/holidays", { data: { from: "2026-09-15", title: "Again" } }),
-    );
-    expect(again.status).toBe(409);
-    expect(again.body.error).toMatch(/already a holiday \(Test Festival\)/);
+    const add = await virender.post("/api/crm/holidays", {
+      data: { from: "2026-09-18", title: "Festival" },
+    });
+    expect(add.status()).toBe(404);
 
     const list = await json(await rajesh.get("/api/crm/days-off"));
-    expect(list.body.holidays.map((h) => h.title)).toContain("Test Festival");
+    expect(list.body.holidays).toContainEqual({
+      key: "2026-09-15",
+      title: "Test Festival",
+      from_day: "2026-09-15",
+      to_day: "2026-09-15",
+      days: 1,
+    });
+
+    const onHoliday = await json(
+      await virender.post("/api/crm/leave", {
+        data: { from: "2026-09-15", user_id: users.rajesh.crmId },
+      }),
+    );
+    expect(onHoliday.status).toBe(400);
+    expect(onHoliday.body.error).toMatch(/already holidays or Sundays/);
   });
 
   test("2. A rep's leave waits for approval and stays inside the allowed window", async () => {
@@ -223,9 +218,10 @@ test.describe("CRM holidays and leave: rules, approval and working-day averages"
     const team = await json(
       await virender.get(`/api/crm/progress?${new URLSearchParams({ ...SEP, rep: "all" })}`),
     );
-    const teamWorking = 2 * (weekdays - 1) - 1.5;
+    const teamWorking = team.body.staff.length * (weekdays - 1) - 1.5;
     expect(team.body.cards.visits.working_days).toBe(teamWorking);
     expect(team.body.cards.visits.per_working_day).toBe(Math.round((4 / teamWorking) * 10) / 10);
+    expect(team.body.staff.every((s) => s.visits.days_off >= 1)).toBe(true);
     const rajeshRow = team.body.staff.find((s) => s.id === users.rajesh.crmId);
     expect(rajeshRow.visits.working_days).toBe(working);
     expect(team.body.trend.buckets.find((b) => b.start === "2026-09-16").off).toBeNull();
@@ -252,19 +248,10 @@ test.describe("CRM holidays and leave: rules, approval and working-day averages"
     expect(home.body.performance).toHaveProperty("per_working_day_month");
   });
 
-  test("6. Removing a holiday is soft and admin-only", async () => {
+  test("6. Removing the clinic holiday makes it a working day again", async () => {
+    await query(`DELETE FROM clinic_holidays WHERE holiday_date = '2026-09-15'`);
     const list = await json(await virender.get("/api/crm/days-off"));
-    const festival = list.body.holidays.find((h) => h.title === "Test Festival");
-    const byRep = await json(await rajesh.post(`/api/crm/holidays/${festival.request_id}/remove`));
-    expect(byRep.status).toBe(403);
-    const removed = await json(
-      await virender.post(`/api/crm/holidays/${festival.request_id}/remove`),
-    );
-    expect(removed.status).toBe(200);
-    const row = await one(`SELECT deleted_at FROM crm.days_off WHERE request_id = $1`, [
-      festival.request_id,
-    ]);
-    expect(row.deleted_at).not.toBeNull();
+    expect(list.body.holidays.find((h) => h.title === "Test Festival")).toBeUndefined();
     const own = await json(await rajesh.get(`/api/crm/progress?${new URLSearchParams(SEP)}`));
     expect(own.body.cards.visits.working_days).toBe(septemberWeekdays() - 1.5);
   });

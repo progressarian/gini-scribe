@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { holidayTitleError } from "../../shared/clinicHolidays.js";
 import { CATEGORIES, TRIAGE_FILTERS } from "../../shared/giniflowStatus.js";
 import { MED_SLOT_KEYS } from "../../shared/giniflowMedTiming.js";
 import { SPECIALTY_VALUES, URGENCY_VALUES } from "../../shared/giniflowReferrals.js";
@@ -526,6 +527,20 @@ export const unavailabilityCreateSchema = z
     path: ["end_date"],
   })
   .refine(notPastStart, notPastStartOpts);
+
+export const clinicHolidayCreateSchema = z
+  .object({
+    from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be a date"),
+    to: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "must be a date")
+      .optional(),
+    title: z
+      .string()
+      .trim()
+      .refine((v) => !holidayTitleError(v), { error: (issue) => holidayTitleError(issue.input) }),
+  })
+  .strict();
 
 const hhmmTime = z.string().regex(/^\d{2}:\d{2}$/, "time must be HH:MM");
 export const slotTemplateClearSchema = z.object({

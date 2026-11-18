@@ -27,8 +27,12 @@ const addDays = (iso, n) => {
 export function windowDeadline(anchorDate, days, holidays = new Set()) {
   const anchor = clean(anchorDate);
   if (!anchor || !Number.isInteger(days) || days < 1) return "";
-  let day = addDays(anchor, days);
-  while (isClosedDay(day) || holidays.has(day)) day = addDays(day, 1);
+  let day = anchor;
+  let remaining = days;
+  while (remaining > 0) {
+    day = addDays(day, 1);
+    if (!holidays.has(day)) remaining -= 1;
+  }
   return day;
 }
 

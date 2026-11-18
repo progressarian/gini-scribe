@@ -126,13 +126,17 @@ test.describe.serial("P4C-59 follow-up windows are set per consultation item", (
     await query(`DELETE FROM service_items WHERE id = ANY($1)`, [extra]).catch(() => {});
   });
 
-  test("1. windowDeadline moves a closed last day to the next open day", () => {
-    expect(windowDeadline("2026-11-05", 3)).toBe("2026-11-09");
-    expect(windowDeadline("2026-11-02", 7)).toBe("2026-11-09");
+  test("1. windowDeadline counts Sundays and skips clinic holidays", () => {
+    expect(windowDeadline("2026-11-05", 3)).toBe("2026-11-08");
+    expect(windowDeadline("2026-11-01", 7)).toBe("2026-11-08");
     expect(windowDeadline("2026-11-04", 3)).toBe("2026-11-07");
-    expect(windowDeadline("2026-11-07", 7, new Set(["2026-11-14"]))).toBe("2026-11-16");
-    expect(windowDeadline("2026-11-04", 3, new Set(["2026-11-07"]))).toBe("2026-11-09");
-    expect(windowDeadline("2026-11-02", 90)).toBe("2027-02-01");
+    expect(windowDeadline("2026-11-07", 7, new Set(["2026-11-14"]))).toBe("2026-11-15");
+    expect(windowDeadline("2026-11-04", 3, new Set(["2026-11-07"]))).toBe("2026-11-08");
+    expect(windowDeadline("2026-11-04", 3, new Set(["2026-11-05"]))).toBe("2026-11-08");
+    expect(windowDeadline("2026-11-02", 7, new Set(["2026-11-03", "2026-11-04"]))).toBe(
+      "2026-11-11",
+    );
+    expect(windowDeadline("2026-11-02", 90)).toBe("2027-01-31");
     expect(windowDeadline("", 3)).toBe("");
   });
 

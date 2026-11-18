@@ -56,14 +56,7 @@ import {
   requestRemoval,
   restoreDoctor,
 } from "../crm/removals.js";
-import {
-  addHoliday,
-  cancelLeave,
-  decideLeave,
-  listDaysOff,
-  removeHoliday,
-  requestLeave,
-} from "../crm/daysOff.js";
+import { cancelLeave, decideLeave, listDaysOff, requestLeave } from "../crm/daysOff.js";
 import { handleError } from "../utils/errorHandler.js";
 import { listDueDoctors, listMyDoctors, listReferrals } from "../crm/homeLists.js";
 import {
@@ -269,10 +262,6 @@ doctorRoute("post", "/crm/tasks/:id/reopen", "Reopen task", (req) =>
 );
 doctorRoute("get", "/crm/days-off", "Holidays and leave", (req) =>
   listDaysOff(req.crmUser, req.query),
-);
-doctorRoute("post", "/crm/holidays", "Add holiday", (req) => addHoliday(req.crmUser, req.body));
-doctorRoute("post", "/crm/holidays/:id/remove", "Remove holiday", (req) =>
-  removeHoliday(req.crmUser, req.params.id),
 );
 doctorRoute("post", "/crm/leave", "Request leave", (req) => requestLeave(req.crmUser, req.body));
 doctorRoute("post", "/crm/leave/:id/approve", "Approve leave", (req) =>

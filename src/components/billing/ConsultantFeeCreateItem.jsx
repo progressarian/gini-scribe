@@ -123,7 +123,7 @@ export default function ConsultantFeeCreateItem({ doctor, onClose, onCreated }) 
               <Field
                 label="Within how many days of the last visit"
                 className="fset__field--narrow"
-                hint={`Counted from this doctor's last full-fee visit, 1 to ${FOLLOW_UP_WINDOW_MAX_DAYS} days. If the last day is a Sunday or clinic holiday, the next open day still counts.`}
+                hint={`Counted from this doctor's last full-fee visit, 1 to ${FOLLOW_UP_WINDOW_MAX_DAYS} days. Sundays count as normal days. Clinic holidays are not counted, so each one adds a day.`}
               >
                 <input
                   className="jb-assign"
