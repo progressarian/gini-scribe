@@ -95,7 +95,11 @@ import { refundBoard } from "../services/billing/refundBoard.js";
 import * as shifts from "../services/billing/cashShifts.js";
 import { shiftHandover } from "../services/billing/staffDashboard.js";
 import * as requests from "../services/billing/billingRequests.js";
-import { consultationSuggestion, notPricedForVisit } from "../services/billing/visitLines.js";
+import {
+  consultationSuggestion,
+  notPricedForVisit,
+  orderedNotBilledForVisit,
+} from "../services/billing/visitLines.js";
 import { addLabCaseTests, labCaseSuggestion } from "../services/billing/labCaseLines.js";
 import { healthrayBillSuggestion } from "../services/billing/healthrayBillLines.js";
 import { openDeskDraft } from "../services/billing/deskOpen.js";
@@ -334,6 +338,12 @@ router.get(
   `${BASE}/visits/:visitId/not-priced`,
   desk,
   run("Tests without a price", 200, (req) => notPricedForVisit(req.params.visitId)),
+);
+
+router.get(
+  `${BASE}/visits/:visitId/not-billed`,
+  desk,
+  run("Ordered tests not on a bill", 200, (req) => orderedNotBilledForVisit(req.params.visitId)),
 );
 
 router.get(

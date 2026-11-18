@@ -42,6 +42,7 @@ export const billingKeys = {
   importRows: (id, filters) => ["billing", "import-sessions", id ?? "none", "rows", filters ?? {}],
   visitBills: (visitId) => ["billing", "visits", visitId ?? "none", "bills"],
   visitNotPriced: (visitId) => ["billing", "visits", visitId ?? "none", "not-priced"],
+  visitNotBilled: (visitId) => ["billing", "visits", visitId ?? "none", "not-billed"],
   bill: (billId) => ["billing", "bills", billId ?? "none"],
   billPayments: (billId) => ["billing", "bills", billId ?? "none", "payments"],
   dues: (filters) => ["billing", "dues", filters ?? {}],

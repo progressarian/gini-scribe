@@ -179,6 +179,8 @@ export default function BillActions({
             type="button"
             className="st-btn st-btn-grn"
             disabled={!!blockers.length || final.isPending || opening}
+            title={blockers.length ? `Can't finalise yet: ${blockers.join(" ")}` : undefined}
+            aria-describedby={blockers.length ? `bc-blockers-${bill.id}` : undefined}
             onClick={makeFinal}
           >
             Finalise &amp; print
@@ -225,7 +227,11 @@ export default function BillActions({
       </div>
 
       {!!blockers.length && bill.status === "draft" && (
-        <ul className="bc-list" aria-label="Before this bill can be made final">
+        <ul
+          id={`bc-blockers-${bill.id}`}
+          className="bc-list"
+          aria-label="Before this bill can be made final"
+        >
           {blockers.map((line) => (
             <li key={line}>{line}</li>
           ))}

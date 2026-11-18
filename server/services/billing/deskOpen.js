@@ -1,7 +1,7 @@
 import pool from "../../config/db.js";
 import { inTransaction } from "./transaction.js";
 import { clearReceptionLines, openDraft } from "./bills.js";
-import { consultationForDesk, testsForDesk } from "./visitLines.js";
+import { consultationForDesk, settleOrdersOnPaidBills, testsForDesk } from "./visitLines.js";
 import { healthrayLinesForDesk } from "./healthrayBillLines.js";
 import { labCaseTestsForDesk } from "./labCaseLines.js";
 import { autofillIsCurrent, rememberAutofill } from "./autofillKey.js";
@@ -20,6 +20,8 @@ async function draftVersion(client, visitId) {
 export async function openDeskDraft(visitId, ctx, db = pool) {
   const opening = { ...ctx, unsavedDraft: true };
   return inTransaction(async (client) => {
+    if (UUID.test(String(visitId ?? "").trim()))
+      await settleOrdersOnPaidBills(visitId, opening, client);
     if (await autofillIsCurrent(client, visitId)) {
       return openDraft(visitId, { ...opening, skipPriceCatchUp: true }, client);
     }

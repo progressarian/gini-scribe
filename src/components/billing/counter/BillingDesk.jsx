@@ -9,6 +9,7 @@ import {
   useRereadBill,
   useSaveDraft,
   useVisitBills,
+  useVisitNotBilled,
   useVisitNotPriced,
 } from "../../../queries/hooks/useBilling";
 import PatientList, { counterRows } from "./PatientList";
@@ -18,6 +19,7 @@ import AllBillsFinal from "./AllBillsFinal";
 import BillLinesTable from "./BillLinesTable";
 import PaidAtReception from "./PaidAtReception";
 import NotPricedTests from "./NotPricedTests";
+import OrderedNotBilledTests from "./OrderedNotBilledTests";
 import AddItems from "./AddItems";
 import ConsultationSuggestion from "./ConsultationSuggestion";
 import ConsultantChange from "./ConsultantChange";
@@ -301,6 +303,7 @@ export default function BillingDesk({
   const peeked = useRef(null);
   const { data: visitBills } = useVisitBills(visitId);
   const { data: notPriced } = useVisitNotPriced(visitId);
+  const { data: notBilled } = useVisitNotBilled(visitId);
   const { data: schemes } = usePatientSchemeList();
 
   const rows = useMemo(() => counterRows(data), [data]);
@@ -637,6 +640,7 @@ export default function BillingDesk({
                             onBill={setBill}
                           />
                           <NotPricedTests tests={notPriced} />
+                          <OrderedNotBilledTests tests={notBilled} />
                           <PaidAtReception bill={bill} onChanged={refreshBill} />
                         </>
                       )}

@@ -34,6 +34,7 @@ function useVisitMutation(mutationFn, options = {}) {
     onSuccess: (_bill, variables) => {
       queryClient.invalidateQueries({ queryKey: billingKeys.visitBills(variables?.visitId) });
       queryClient.invalidateQueries({ queryKey: billingKeys.visitNotPriced(variables?.visitId) });
+      queryClient.invalidateQueries({ queryKey: billingKeys.visitNotBilled(variables?.visitId) });
       queryClient.invalidateQueries({ queryKey: COUNTER_PATIENTS });
     },
   });
@@ -66,6 +67,15 @@ export function useVisitNotPriced(visitId) {
     queryKey: billingKeys.visitNotPriced(visitId),
     queryFn: () => read(`${DESK}/visits/${visitId}/not-priced`),
     enabled: !!visitId,
+  });
+}
+
+export function useVisitNotBilled(visitId) {
+  return useQuery({
+    queryKey: billingKeys.visitNotBilled(visitId),
+    queryFn: () => read(`${DESK}/visits/${visitId}/not-billed`),
+    enabled: !!visitId,
+    refetchInterval: 15 * 1000,
   });
 }
 

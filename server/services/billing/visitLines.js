@@ -13,8 +13,8 @@ import {
   swapAutoConsultationIn,
 } from "./bills.js";
 import { addsConsultation, getSettings } from "./billingSettings.js";
-import { linkLine, SETTLED_AT_RECEPTION } from "./orderLinks.js";
-import { UNCOVERED_SQL } from "./payments.js";
+import { linkLine, lockVisitOrders, SETTLED_AT_RECEPTION } from "./orderLinks.js";
+import { settleTestOrders, UNCOVERED_SQL } from "./payments.js";
 import { priceBill } from "./priceBill.js";
 import { removedDoctor } from "./removedDoctors.js";
 import { catalogTestsFor, TEST_MATCHES_SQL } from "./testMatch.js";
@@ -418,6 +418,31 @@ async function adoptUnlinkedLine(client, bill, itemId, labOrderId, ctx) {
   return linkLine(client, bill, found[0], labOrderId, ctx);
 }
 
+async function adoptPaidFinalLine(client, visitId, itemId, labOrderId, ctx) {
+  if (!labOrderId) return null;
+  const { rows: found } = await client.query(
+    `SELECT l.id, l.source, b.id AS bill_id, b.bill_no, b.visit_id, b.status
+       FROM bill_lines l JOIN bills b ON b.id = l.bill_id
+      WHERE b.visit_id = $1 AND b.bill_type = 'invoice' AND b.status = 'final'
+        AND b.paid_amount >= b.patient_payable
+        AND l.service_item_id = $2 AND l.is_live AND l.lab_order_id IS NULL
+        AND l.source IN ('lab_case', 'added')
+        AND NOT EXISTS (SELECT 1 FROM bill_lines x WHERE x.credited_line_id = l.id)
+      ORDER BY b.finalised_at, l.line_no
+      LIMIT 1 FOR UPDATE OF l, b`,
+    [visitId, itemId],
+  );
+  if (!found.length) return null;
+  const [line] = found;
+  const bill = {
+    id: line.bill_id,
+    bill_no: line.bill_no,
+    visit_id: line.visit_id,
+    status: line.status,
+  };
+  return (await linkLine(client, bill, line, labOrderId, ctx)) ? bill : null;
+}
+
 async function orderIsForToday(client, labOrderId) {
   const { rows } = await client.query(
     `SELECT urgency FROM giniflow_lab_orders WHERE id::text = $1::text`,
@@ -440,6 +465,7 @@ export async function linesForOrder(visitId, { labOrderId, testNames = [] } = {}
       const notPriced = [];
       const skipped = [];
       let billId = null;
+      const paidBills = new Map();
       for (const name of wanted) {
         const item = items.get(name);
         if (!item) {
@@ -448,6 +474,8 @@ export async function linesForOrder(visitId, { labOrderId, testNames = [] } = {}
         }
         try {
           await inTransaction(async (client) => {
+            const paid = await adoptPaidFinalLine(client, visitId, item.id, labOrderId, ctx);
+            if (paid) return paidBills.set(paid.id, paid);
             const bill = await openDraftIn(client, visitId, ctx);
             billId = bill.id;
             if (await adoptUnlinkedLine(client, bill, item.id, labOrderId, ctx)) return;
@@ -464,8 +492,13 @@ export async function linesForOrder(visitId, { labOrderId, testNames = [] } = {}
           skipped.push({ test: name, message: error.message });
         }
       }
+      for (const bill of paidBills.values()) await settleTestOrders(outer, bill, ctx);
       if (notPriced.length) {
         console.warn(`[billing] not priced on visit ${visitId}: ${notPriced.join(", ")}`);
+      }
+      if (skipped.length) {
+        const why = skipped.map((entry) => `${entry.test} (${entry.message})`).join("; ");
+        console.warn(`[billing] ordered tests not billed on visit ${visitId}: ${why}`);
       }
       return { ok: true, bill_id: billId, added, not_priced: notPriced, skipped };
     }, db);
@@ -473,6 +506,81 @@ export async function linesForOrder(visitId, { labOrderId, testNames = [] } = {}
     if (error.code === "40P01") throw error;
     return report(`no bill lines for the tests ordered on visit ${visitId}`, error);
   }
+}
+
+const PENDING_ORDER_TESTS_SQL = `
+  SELECT o.id AS order_id, array_agg(t.test_name ORDER BY t.test_name) AS tests
+    FROM giniflow_lab_orders o
+    JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
+   WHERE o.visit_id = $1 AND o.urgency = 'today' AND t.status <> 'cancelled'
+     AND NOT ${SETTLED_AT_RECEPTION}
+     AND EXISTS (SELECT 1 FROM bills b
+                  WHERE b.visit_id = o.visit_id AND b.bill_type = 'invoice' AND b.status = 'final'
+                    AND b.paid_amount >= b.patient_payable)
+   GROUP BY o.id
+   ORDER BY o.id`;
+
+export async function settleOrdersOnPaidBills(visitId, ctx, db = pool) {
+  try {
+    return await inTransaction(async (client) => {
+      const id = cleanUuid(visitId, "visit");
+      await lockVisitOrders(client, id);
+      const { rows: orders } = await client.query(PENDING_ORDER_TESTS_SQL, [id]);
+      if (!orders.length) return { ok: true, linked: [] };
+      const items = await itemsForTests(client, [...new Set(orders.flatMap((o) => o.tests))]);
+      const paidBills = new Map();
+      const linked = [];
+      for (const order of orders) {
+        for (const name of order.tests) {
+          const item = items.get(name);
+          if (!item) continue;
+          const paid = await adoptPaidFinalLine(client, id, item.id, order.order_id, ctx);
+          if (!paid) continue;
+          paidBills.set(paid.id, paid);
+          linked.push({ order_id: order.order_id, test: name, bill_no: paid.bill_no });
+        }
+      }
+      for (const bill of paidBills.values()) await settleTestOrders(client, bill, ctx);
+      return { ok: true, linked };
+    }, db);
+  } catch (error) {
+    if (error.code === "40P01") throw error;
+    return report(`no paid-bill check for the orders on visit ${visitId}`, error);
+  }
+}
+
+export async function orderedNotBilledForVisit(visitId, db = pool) {
+  const { rows } = await db.query(
+    `WITH ordered AS (
+       SELECT DISTINCT t.test_name
+         FROM giniflow_lab_orders o
+         JOIN giniflow_lab_order_tests t ON t.lab_order_id = o.id
+        WHERE o.visit_id = $1 AND o.urgency = 'today' AND t.status <> 'cancelled'
+          AND NOT ${SETTLED_AT_RECEPTION})
+     SELECT DISTINCT ON (d.test_name) d.test_name, fb.bill_no, fb.due
+       FROM ordered d
+       JOIN (${TEST_MATCHES_SQL("ARRAY(SELECT test_name FROM ordered)")}) m
+         ON m.test_name = d.test_name
+       JOIN service_items i ON i.test_catalog_id = m.catalog_id AND i.is_active
+       LEFT JOIN LATERAL (
+         SELECT b.bill_no, GREATEST(b.patient_payable - b.paid_amount, 0) AS due
+           FROM bill_lines l JOIN bills b ON b.id = l.bill_id
+          WHERE l.visit_id = $1 AND l.service_item_id = i.id AND l.is_live
+            AND b.status = 'final' AND b.bill_type = 'invoice'
+          ORDER BY b.finalised_at
+          LIMIT 1
+       ) fb ON TRUE
+      WHERE NOT EXISTS (SELECT 1 FROM bill_lines l JOIN bills b ON b.id = l.bill_id
+                         WHERE l.visit_id = $1 AND l.service_item_id = i.id AND l.is_live
+                           AND b.status = 'draft')
+      ORDER BY d.test_name, fb.bill_no NULLS LAST`,
+    [cleanUuid(visitId, "visit")],
+  );
+  return rows.map((row) => ({
+    test: row.test_name,
+    bill_no: row.bill_no ?? null,
+    due: row.due === null || row.due === undefined ? null : Number(row.due),
+  }));
 }
 
 const onVisitBillOrRemovedSql = () => `
