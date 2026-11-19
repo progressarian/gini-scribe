@@ -39,6 +39,9 @@ import {
 
 export const HEALTHRAY_REVIEW_SUBGROUP = "HR-REVIEW";
 
+export const takesPatientPrice = (item) =>
+  !item.no_charge && (item.price_per_patient || Number(item.base_price) === 0);
+
 const COLUMNS = [
   "id",
   "code",
@@ -57,6 +60,7 @@ const COLUMNS = [
   "test_catalog_id",
   "price_per_patient",
   "is_outsourced",
+  "no_charge",
   "is_active",
   "created_at",
   "updated_at",
@@ -145,6 +149,7 @@ const CLEANERS = {
   test_catalog_id: cleanUuid,
   price_per_patient: (v) => cleanFlag(v, "Price decided per patient"),
   is_outsourced: (v) => cleanFlag(v, "Outsourced"),
+  no_charge: (v) => cleanFlag(v, "No charge"),
 };
 
 const CREATE_DEFAULTS = {
@@ -159,6 +164,7 @@ const CREATE_DEFAULTS = {
   test_catalog_id: null,
   price_per_patient: false,
   is_outsourced: false,
+  no_charge: false,
 };
 
 function cleanInput(input, { partial }) {
@@ -209,6 +215,12 @@ function checkShape(item) {
   }
   if (item.is_outsourced && item.kind !== "test") {
     throw httpError(400, "Only tests can be marked as outsourced");
+  }
+  if (item.no_charge && Number(item.base_price) !== 0) {
+    throw httpError(400, "A no-charge item must have a base price of ₹0");
+  }
+  if (item.no_charge && item.price_per_patient) {
+    throw httpError(400, "A no-charge item can't also be priced per patient");
   }
   if (item.price_per_patient && ["test", "consultation"].includes(item.kind)) {
     throw httpError(
@@ -519,7 +531,7 @@ export async function searchDeskItems(filters = {}, db = pool) {
   const { rows } = await db.query(
     `WITH found AS (
        SELECT i.id, i.code, i.name, i.kind, i.unit, i.allow_quantity, i.max_quantity,
-              i.doctor_id, i.visit_type, i.follow_up_within_days, i.price_per_patient, i.is_outsourced,
+              i.doctor_id, i.visit_type, i.follow_up_within_days, i.price_per_patient, i.is_outsourced, i.no_charge,
               s.name AS subgroup_name, g.name AS group_name,
               ($2::text IS NULL OR i.kind <> 'consultation'
                OR (i.follow_up_within_days IS NULL AND i.visit_type = $2::text)

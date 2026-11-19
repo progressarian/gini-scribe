@@ -240,7 +240,7 @@ export default function AddItems({ bill, onBill, form }) {
             <ul className="bc-results bc-results--scroll" aria-label="Item search results">
               {listed.map((item) => {
                 const stop = billed[item.id];
-                const needsPrice = item.price_per_patient || !item.rate;
+                const needsPrice = !item.no_charge && (item.price_per_patient || !item.rate);
                 return (
                   <li key={item.id} className={`bc-result${stop ? " bc-result--billed" : ""}`}>
                     <span className="bc-result__name" title={item.name}>
@@ -258,10 +258,14 @@ export default function AddItems({ bill, onBill, form }) {
                       <span
                         className="bc-result__rate"
                         title={
-                          item.rate_source === "base" ? "List price" : "Rate for this category"
+                          item.no_charge
+                            ? "This item is never charged"
+                            : item.rate_source === "base"
+                              ? "List price"
+                              : "Rate for this category"
                         }
                       >
-                        {rupees(item.rate)}
+                        {item.no_charge ? "No charge" : rupees(item.rate)}
                       </span>
                     )}
                     {stop ? (

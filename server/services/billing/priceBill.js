@@ -242,6 +242,7 @@ function billRuleMiss(rule, line) {
   if (targets.length && !targets.some((key) => rule[key].includes(line[LINE_TARGETS[key]]))) {
     return "items";
   }
+  if (rule.excludes_outsourced && line.is_outsourced) return "items";
   if (rule.doctor_ids && (!rule.doctor_ids.includes(line.doctor_id) || line.doctor_removed)) {
     return "doctor";
   }

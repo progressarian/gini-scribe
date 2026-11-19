@@ -1,0 +1,3 @@
+SET LOCAL lock_timeout = '5s';
+
+ALTER TABLE service_items ADD COLUMN IF NOT EXISTS no_charge BOOLEAN NOT NULL DEFAULT FALSE;

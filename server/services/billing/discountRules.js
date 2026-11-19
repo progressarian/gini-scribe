@@ -57,6 +57,7 @@ const COLUMNS = [
   "priority",
   "stackable",
   "applies_on_scheme_rate",
+  "excludes_outsourced",
   "requires_all_items",
   "allowed_roles",
   "is_active",
@@ -188,6 +189,8 @@ const CLEANERS = {
   stackable: (v) => (v === undefined || v === null ? false : cleanFlag(v, "Stackable")),
   applies_on_scheme_rate: (v) =>
     v === undefined || v === null ? false : cleanFlag(v, "Also on payment-rule lines"),
+  excludes_outsourced: (v) =>
+    v === undefined || v === null ? false : cleanFlag(v, "Not on outsourced tests"),
   requires_all_items: (v) => (v === undefined || v === null ? false : cleanFlag(v, "Package")),
   allowed_roles: cleanRoles,
 };
@@ -757,6 +760,7 @@ function cleanLine(line) {
     group_id: cleanId(line.group_id, "Group"),
     doctor_id: cleanId(line.doctor_id, "Doctor"),
     visit_type: visitType,
+    is_outsourced: line.is_outsourced === true,
   };
 }
 
@@ -832,6 +836,7 @@ function ruleMiss(rule, { line, category, patient }) {
   if (targets.length && !targets.some((key) => rule[key].includes(line[LINE_TARGETS[key]]))) {
     return "items";
   }
+  if (rule.excludes_outsourced && line.is_outsourced) return "items";
   if (rule.doctor_ids && (!rule.doctor_ids.includes(line.doctor_id) || line.removed_doctor)) {
     return "doctor";
   }

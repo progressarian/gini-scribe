@@ -43,6 +43,7 @@ const formOf = (item, subgroupId, prefill = {}) => ({
   test_catalog_id: text(item?.test_catalog_id),
   price_per_patient: item?.price_per_patient ?? false,
   is_outsourced: item?.is_outsourced ?? false,
+  no_charge: item?.no_charge ?? false,
   ...Object.fromEntries(Object.entries(prefill).map(([key, value]) => [key, text(value)])),
 });
 
@@ -56,7 +57,7 @@ const payloadOf = (form) => {
     name: form.name.trim(),
     subgroup_id: Number(form.subgroup_id) || null,
     kind: form.kind,
-    base_price: form.base_price.trim(),
+    base_price: form.no_charge ? "0" : form.base_price.trim(),
     unit: form.unit.trim() || "each",
     allow_quantity: form.allow_quantity,
     max_quantity: form.allow_quantity ? form.max_quantity.trim() || null : null,
@@ -69,8 +70,10 @@ const payloadOf = (form) => {
         ? Number(form.follow_up_within_days)
         : null,
     test_catalog_id: form.kind === "test" ? form.test_catalog_id || null : null,
-    price_per_patient: FIXED_PRICE_KINDS.includes(form.kind) ? false : form.price_per_patient,
+    price_per_patient:
+      FIXED_PRICE_KINDS.includes(form.kind) || form.no_charge ? false : form.price_per_patient,
     is_outsourced: form.kind === "test" ? form.is_outsourced : false,
+    no_charge: form.no_charge,
   };
 };
 
@@ -118,6 +121,13 @@ export default function ItemDialog({
           : TYPED[key]
             ? TYPED[key](e.target.value)
             : e.target.value,
+    });
+
+  const setNoCharge = (e) =>
+    setForm({
+      ...form,
+      no_charge: e.target.checked,
+      ...(e.target.checked ? { base_price: "0", price_per_patient: false } : {}),
     });
 
   const before = editing ? payloadOf(formOf(item)) : null;
@@ -254,6 +264,7 @@ export default function ItemDialog({
                 placeholder="e.g. 450"
                 value={form.base_price}
                 onChange={set("base_price")}
+                disabled={form.no_charge}
                 required
               />
             </Field>
@@ -323,7 +334,11 @@ export default function ItemDialog({
                 Price includes tax
               </label>
             ) : null}
-            {FIXED_PRICE_KINDS.includes(form.kind) ? null : (
+            <label className="fset__check">
+              <input type="checkbox" checked={form.no_charge} onChange={setNoCharge} />
+              No charge (always billed at ₹0; a HealthRay bill price is never copied)
+            </label>
+            {FIXED_PRICE_KINDS.includes(form.kind) || form.no_charge ? null : (
               <label className="fset__check">
                 <input
                   type="checkbox"

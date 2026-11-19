@@ -547,11 +547,14 @@ async function insertNote(client, bill, plan, number, day, ctx) {
   return rows[0];
 }
 
-async function ordersToRelease(client, bill, plan) {
+async function ordersToRelease(client, bill, plan, { releaseDoneTests = false } = {}) {
   const candidates = [
     ...new Set(
       plan.lines
-        .filter((entry) => entry.frees && entry.line.order && !entry.line.order.done)
+        .filter(
+          (entry) =>
+            entry.frees && entry.line.order && (releaseDoneTests || !entry.line.order.done),
+        )
         .map((entry) => entry.line.order.id),
     ),
   ];
@@ -615,7 +618,9 @@ export async function creditNoteIn(client, input, ctx) {
     client,
     updated[0],
     ctx,
-    await ordersToRelease(client, bill, plan),
+    await ordersToRelease(client, bill, plan, {
+      releaseDoneTests: input?.releaseDoneTests === true,
+    }),
   );
   await writeAudit(client, {
     entity: SPEC.table,

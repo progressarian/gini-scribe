@@ -905,6 +905,7 @@ async function approveRefund(client, before, input, note, ctx) {
       lines: before.refund_lines,
       adminReason: note,
       requestId: before.id,
+      releaseDoneTests: input?.release_done_tests === true,
     },
     ctx,
   );

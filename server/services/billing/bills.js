@@ -33,7 +33,12 @@ import {
 } from "./payments.js";
 import { allocate, priceBill } from "./priceBill.js";
 import { priceChangeText, priceChanges, takenAboveText } from "./priceDrift.js";
-import { followUpWindowItem, visitConsultationType, windowCovers } from "./serviceItems.js";
+import {
+  followUpWindowItem,
+  takesPatientPrice,
+  visitConsultationType,
+  windowCovers,
+} from "./serviceItems.js";
 import { refuseRemoved, removedDoctor } from "./removedDoctors.js";
 import { httpError, inTransaction } from "./transaction.js";
 import {
@@ -65,7 +70,7 @@ const BILL_COLUMNS = `id, bill_no, series, fy, bill_type, original_bill_id, pati
   adjustment_amount, round_off, paid_amount, claim_status, version,
   finalised_by, finalised_at, cancelled_by, cancelled_at, cancel_reason, created_at, saved_at,
   manual_discount_kind, manual_discount_value, manual_discount_reason,
-  manual_discount_by, manual_discount_at, consultant_id`;
+  manual_discount_by, manual_discount_at, consultant_id, replaced_by_bill_id`;
 
 const SPEC = { table: "bills", noun: "bill", columns: BILL_COLUMNS };
 
@@ -109,7 +114,7 @@ function cleanItemId(value) {
   return id;
 }
 
-function cleanReason(value, message) {
+export function cleanReason(value, message) {
   const text = typeof value === "string" ? value.trim() : "";
   if (!text) throw httpError(400, message);
   if (text.length > TEXT_MAX)
@@ -206,6 +211,7 @@ function shapeLine(row) {
     removed_doctor: row.removed_doctor ?? null,
     price_per_patient: row.price_per_patient ?? false,
     is_outsourced: row.is_outsourced ?? false,
+    no_charge: row.no_charge ?? false,
     agreed_rate:
       row.agreed_rate === null || row.agreed_rate === undefined ? null : paise(row.agreed_rate),
     agreed_by: row.agreed_by ?? null,
@@ -269,6 +275,7 @@ function shapeBill(row, lines = [], extra = {}) {
     finalised_at: row.finalised_at,
     cancelled_at: row.cancelled_at,
     cancel_reason: row.cancel_reason,
+    replaced_by_bill_id: row.replaced_by_bill_id ?? null,
     lines: lines.map(shapeLine),
     manual_discount: shapeManual(row),
     ...extra,
@@ -364,6 +371,7 @@ async function liveLines(client, billId, { all = false } = {}) {
             COALESCE(i.allow_quantity, FALSE) AS allow_quantity, i.max_quantity,
             COALESCE(i.price_per_patient, FALSE) AS price_per_patient,
             COALESCE(i.is_outsourced, FALSE) AS is_outsourced,
+            COALESCE(i.no_charge, FALSE) AS no_charge,
             CASE WHEN i.kind = 'consultation' AND rd.is_active IS FALSE
                  THEN json_build_object('id', rd.id, 'name', rd.name) END AS removed_doctor,
             setter.name AS agreed_by_name, adder.name AS created_by_name,
@@ -904,7 +912,7 @@ export async function listVisitBills(visitId, db = pool) {
 async function itemRow(client, itemId) {
   const { rows } = await client.query(
     `SELECT id, name, kind, visit_type, follow_up_within_days, is_active, allow_quantity,
-            max_quantity, price_per_patient, test_catalog_id, base_price
+            max_quantity, price_per_patient, no_charge, test_catalog_id, base_price
        FROM service_items WHERE id = $1`,
     [itemId],
   );
@@ -1065,7 +1073,7 @@ async function insertLineIn(client, bill, input, ctx, { locked = false, lineNo =
   }
   const item = usableItem(found);
   const agreedRate = cleanAgreedRate(input?.agreed_rate);
-  if (agreedRate !== null && !item.price_per_patient && Number(item.base_price) > 0) {
+  if (agreedRate !== null && !takesPatientPrice(item)) {
     throw httpError(
       400,
       `${item.name} has a fixed price; it can't be given a price for this patient`,
@@ -1714,7 +1722,7 @@ export async function setLinePrice(billId, lineId, input, ctx, db = pool) {
     const bill = assertDraft(await lockBill(client, billId));
     const before = await lineOf(client, bill, lineId);
     const item = await itemFor(client, before.service_item_id);
-    if (!item.price_per_patient && Number(item.base_price) > 0) {
+    if (!takesPatientPrice(item)) {
       throw httpError(
         400,
         `${item.name} has a fixed price; it can't be given a price for this patient`,

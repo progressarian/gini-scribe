@@ -58,6 +58,7 @@ const formOf = (rule) => ({
   priority: text(rule?.priority),
   stackable: rule?.stackable ?? false,
   applies_on_scheme_rate: rule?.applies_on_scheme_rate ?? false,
+  excludes_outsourced: rule?.excludes_outsourced ?? false,
   requires_all_items: rule?.requires_all_items ?? false,
   allowed_roles: rule?.allowed_roles ?? [],
 });
@@ -90,6 +91,7 @@ const payloadOf = (form) => {
     priority: form.priority.trim(),
     stackable: form.stackable,
     applies_on_scheme_rate: form.applies_on_scheme_rate,
+    excludes_outsourced: form.excludes_outsourced,
     requires_all_items: form.requires_all_items,
     allowed_roles: byCode
       ? listOrNull(BILLING_ROLES.filter((r) => form.allowed_roles.includes(r)))
@@ -587,6 +589,14 @@ export default function DiscountForm({ rule, onClose }) {
                   onChange={set("applies_on_scheme_rate")}
                 />
                 Also on payment-rule lines (lowers what the patient pays; the claim stays)
+              </label>
+              <label className="fset__check">
+                <input
+                  type="checkbox"
+                  checked={form.excludes_outsourced}
+                  onChange={set("excludes_outsourced")}
+                />
+                Not on outsourced tests (outsourced tests keep their full price)
               </label>
             </div>
             {byCode ? (

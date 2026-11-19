@@ -93,7 +93,7 @@ const ITEM_SQL = (
 ) => `SELECT i.id, i.code, i.name, i.kind, i.subgroup_id, sg.group_id, sg.code AS subgroup_code,
             g.code AS group_code, i.doctor_id, i.visit_type,
             i.unit, i.allow_quantity, i.max_quantity, i.base_price, i.price_includes_tax,
-            i.price_per_patient,
+            i.price_per_patient, i.is_outsourced,
             i.is_active, dr.name AS doctor_name, dr.is_active IS FALSE AS doctor_removed,
             t.id AS tax_id, t.code AS tax_code, t.sac_hsn AS tax_sac_hsn,
             t.rate_pct AS tax_rate_pct, t.is_active AS tax_active,
@@ -188,6 +188,7 @@ export async function lineActual(
     group_code: row.group_code,
     subgroup_id: row.subgroup_id,
     subgroup_code: row.subgroup_code,
+    is_outsourced: row.is_outsourced === true,
     doctor_id: row.doctor_id,
     visit_type: row.visit_type,
     unit: row.unit,
@@ -269,6 +270,7 @@ async function lineDiscountRules(line, context, codes, payment, db) {
     group_id: line.group_id,
     doctor_id: line.doctor_id,
     visit_type: line.visit_type,
+    is_outsourced: line.is_outsourced,
   };
   const fullPay = payment.patient_pays === "full";
   const fits = (rule) => fullPay || rule.applies_on_scheme_rate;

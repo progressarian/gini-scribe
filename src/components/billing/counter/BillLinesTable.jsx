@@ -70,6 +70,7 @@ function QuantityCell({ bill, line, locked, onBill, onError }) {
 }
 
 function priceNoteText(line) {
+  if (line.no_charge) return "No charge";
   if (line.agreed_rate === null) {
     return line.rate > 0 ? "Category rate for this patient" : "Needs this patient's price";
   }
@@ -194,7 +195,7 @@ function ManualDiscountCell({ bill, line, pending, save, onBill, onError }) {
 }
 
 function PriceNote({ line }) {
-  if (!line.price_per_patient && line.agreed_rate === null) return null;
+  if (!line.no_charge && !line.price_per_patient && line.agreed_rate === null) return null;
   return <div className="bc-hint bc-line-price">{priceNoteText(line)}</div>;
 }
 

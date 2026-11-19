@@ -4,7 +4,7 @@ import { FLAT } from "../giniflow/labCatalog.js";
 import { TEST_MATCHES_SQL, WORD_KEY } from "./testMatch.js";
 import { heldCatalogs, paidAtReception } from "./receptionOrders.js";
 import { createGroup, createSubgroup } from "./serviceGroups.js";
-import { createItem, HEALTHRAY_REVIEW_SUBGROUP } from "./serviceItems.js";
+import { createItem, HEALTHRAY_REVIEW_SUBGROUP, takesPatientPrice } from "./serviceItems.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { addLineIn, addLinesToDraftIn, openDraftIn } from "./bills.js";
 import { REMOVED_BY_DESK_SQL, suggestionPrice } from "./visitLines.js";
@@ -134,7 +134,7 @@ export async function matchLines(db, bill, allLines) {
   );
   const ids = [...new Set([...matched.values()].filter(Boolean))];
   const { rows: items } = await db.query(
-    `SELECT i.id, i.code, i.name, i.kind, i.price_per_patient, i.test_catalog_id, i.base_price,
+    `SELECT i.id, i.code, i.name, i.kind, i.price_per_patient, i.no_charge, i.test_catalog_id, i.base_price,
             EXISTS (SELECT 1 FROM bill_lines l JOIN bills b ON b.id = l.bill_id
                      WHERE l.visit_id = $2 AND l.service_item_id = i.id AND l.is_live
                        AND b.status <> 'cancelled') AS on_visit,
@@ -223,8 +223,6 @@ const reviewCode = (name) =>
     .replace(/^-|-$/g, "")
     .slice(0, 48)}`;
 
-const needsHealthrayPrice = (item) => item.price_per_patient || Number(item.base_price) === 0;
-
 async function reviewSubgroup(client, ctx) {
   const { rows: found } = await client.query(
     `SELECT s.id FROM service_subgroups s JOIN service_groups g ON g.id = s.group_id
@@ -296,7 +294,7 @@ export async function namesPaidAtReception(client, visitId) {
 const billableDue = (found) =>
   (found?.due ?? [])
     .filter(({ item }) => !item.removed)
-    .map(({ line, item }) => ({ line, item, priced: needsHealthrayPrice(item) }))
+    .map(({ line, item }) => ({ line, item, priced: takesPatientPrice(item) }))
     .filter(({ line, priced }) => !priced || Number(line.amount) > 0);
 
 export async function healthrayQuoteLines(db, visitId, visit) {

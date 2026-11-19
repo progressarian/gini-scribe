@@ -33,14 +33,37 @@ function Credits({ bill }) {
   );
 }
 
+function ReplacedBy({ bill, bills }) {
+  if (!bill.replaced_by_bill_id) return null;
+  const by = bills.find((b) => b.id === bill.replaced_by_bill_id);
+  return <div className="bc-head__meta">Replaced by {by?.bill_no ?? "a corrected bill"}</div>;
+}
+
 export default function PreviousBills({ bills, onOpen }) {
   const [refunding, setRefunding] = useState(null);
-  const shown = bills.filter((b) => b.bill_type !== "credit_note");
-  if (!shown.length) return null;
+  const [showReplaced, setShowReplaced] = useState(false);
+  const invoices = bills.filter((b) => b.bill_type !== "credit_note");
+  const replaced = invoices.filter((b) => b.replaced_by_bill_id).length;
+  const shown = showReplaced ? invoices : invoices.filter((b) => !b.replaced_by_bill_id);
+  if (!invoices.length) return null;
 
   return (
     <section className="bc-card" aria-label="Earlier bills on this visit">
-      <h3 className="bc-card__title">Earlier bills on this visit</h3>
+      <h3 className="bc-card__title">
+        Earlier bills on this visit
+        {replaced > 0 && (
+          <button
+            type="button"
+            className="bc-linkbtn"
+            aria-expanded={showReplaced}
+            onClick={() => setShowReplaced((was) => !was)}
+          >
+            {showReplaced
+              ? `Hide ${replaced} replaced bill${replaced === 1 ? "" : "s"}`
+              : `Show ${replaced} replaced bill${replaced === 1 ? "" : "s"}`}
+          </button>
+        )}
+      </h3>
       <div className="ltablewrap bc-stack">
         <table className="ltable" aria-label="Earlier bills">
           <thead>
@@ -62,6 +85,7 @@ export default function PreviousBills({ bills, onOpen }) {
                   {(b.finalised_at || b.cancelled_at) && (
                     <div className="bc-head__meta">{when(b.finalised_at || b.cancelled_at)}</div>
                   )}
+                  <ReplacedBy bill={b} bills={bills} />
                   <Credits bill={b} />
                 </td>
                 <td data-label="Status">{billStatusText(b.status)}</td>

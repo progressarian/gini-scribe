@@ -82,7 +82,7 @@ function ItemRow({ item, showPath, onEdit, onHistory, onBlocked }) {
         ) : null}
       </td>
       <td>{item.kind}</td>
-      <td>{rupees(item.base_price)}</td>
+      <td>{item.no_charge ? "No charge" : rupees(item.base_price)}</td>
       <td>
         {item.unit}
         {item.allow_quantity ? ` · up to ${item.max_quantity ?? "any"}` : ""}
