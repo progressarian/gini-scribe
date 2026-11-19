@@ -956,7 +956,9 @@ async function isLabOnlyVisit(db, visitId) {
 async function assertLabBillingCleared(db, visitId, before = "the sample") {
   if (!visitId) {
     throw Object.assign(
-      new Error(`Lab payment is not cleared — reception must clear Lab Billing before ${before}`),
+      new Error(
+        `Lab payment is not cleared — reception must collect it on the Bill tab before ${before}`,
+      ),
       { status: 409 },
     );
   }
@@ -974,7 +976,7 @@ async function assertLabBillingCleared(db, visitId, before = "the sample") {
   if (billing_status !== "done") {
     throw Object.assign(
       new Error(
-        `${name}'s lab payment is not cleared — reception must clear Lab Billing before ${before}`,
+        `${name}'s lab payment is not cleared — reception must collect it on the Bill tab before ${before}`,
       ),
       { status: 409 },
     );

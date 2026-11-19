@@ -103,7 +103,7 @@ export default function StaffTiles({ data }) {
         {cleared ? (
           <span
             className="bdash-tile__change"
-            title="Test payments cleared on the Payments tab and consultant fee changes settled. The money was taken in HealthRay, so it is not in Collected or any drawer."
+            title="Test payments cleared at reception and consultant fee changes settled. The money was taken in HealthRay, so it is not in Collected or any drawer."
           >
             Also cleared in HealthRay: {money(cleared)} ({count(total.cleared_count)})
           </span>

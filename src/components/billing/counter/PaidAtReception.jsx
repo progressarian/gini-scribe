@@ -76,7 +76,7 @@ export default function PaidAtReception({ bill, onChanged }) {
                   <span className="bc-paid__tests">{order.tests.join(", ")}</span>
                   <span className="bc-paid__how">
                     {[
-                      order.paid > 0 && `${fromPaise(order.paid)} · Cleared on Payments tab`,
+                      order.paid > 0 && `${fromPaise(order.paid)} · Cleared at reception`,
                       order.claim && claimText(order.claim, fromPaise),
                       clock(order.paid_at),
                       order.cleared_by && `by ${order.cleared_by}`,
@@ -103,7 +103,7 @@ export default function PaidAtReception({ bill, onChanged }) {
             ))}
           </ul>
           <p className="bc-paid__note">
-            {totalText(data)} on the Payments tab — not part of this bill
+            {totalText(data)} at reception — not part of this bill
             {data.still_due > 0 && ` · ${fromPaise(data.still_due)} still due at reception`}
           </p>
         </>

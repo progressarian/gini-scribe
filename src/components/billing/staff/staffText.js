@@ -43,7 +43,7 @@ export const nonCash = (shift) =>
   );
 
 export const SOURCE_LABEL = {
-  payments_tab: "Payments tab (taken in HealthRay)",
+  payments_tab: "Cleared at reception (taken in HealthRay)",
   fee_settle: "Fee change settled (taken in HealthRay)",
 };
 

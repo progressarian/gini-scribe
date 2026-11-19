@@ -76,7 +76,7 @@ const refusal = async (promise) => {
 
 const LAB_BILLING_FIRST = {
   status: 409,
-  message: "Lab Billing comes first — clear the test payment on the Payments tab",
+  message: "Lab Billing comes first — collect the test payment on the Bill tab",
 };
 
 test.describe.serial("G131 no test stop is done in Scribe before Lab Billing", () => {

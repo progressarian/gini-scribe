@@ -271,8 +271,8 @@ export default function JourneyBuilder({
             <div className="jb-tests">
               <span className="jb-test-total">
                 {step.tests?.length
-                  ? `From the HealthRay bill: ${step.tests.join(", ")} — raises a payment card on the Payments tab`
-                  : "From the HealthRay bill — clears when payment is marked on the Payments tab"}
+                  ? `From the HealthRay bill: ${step.tests.join(", ")} — collect the payment on the Bill tab`
+                  : "From the HealthRay bill — clears when the bill is paid on the Bill tab"}
               </span>
             </div>
           ) : step.catalogId === "blood_sample" ? (

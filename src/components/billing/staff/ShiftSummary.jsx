@@ -65,7 +65,7 @@ export function OtherMoney({ shift, cleared }) {
       "Pharmacy card / UPI / NEFT",
       (shift.pharmacy?.collected ?? 0) - (shift.pharmacy?.cash_collected ?? 0),
     ],
-    ["Cleared on Payments tab / fee changes (taken in HealthRay)", clearedTotal],
+    ["Cleared at reception / fee changes (taken in HealthRay)", clearedTotal],
   ].filter(([, value]) => value);
   if (!rows.length)
     return <p className="bdash-muted">No card, UPI or HealthRay money in this shift.</p>;

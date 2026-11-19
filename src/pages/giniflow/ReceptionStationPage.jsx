@@ -207,7 +207,7 @@ const billNote = (bill, loading) => {
     const parts = [];
     if (bill.labTests.length) parts.push(`${bill.labTests.length} lab test(s)`);
     if (bill.machines.length) parts.push(bill.machines.join(", "));
-    return `✓ Added from the HealthRay bill: ${parts.join(" + ")} — tests not on the bill were left out; mark the payment on the Payments tab before the lab can start`;
+    return `✓ Added from the HealthRay bill: ${parts.join(" + ")} — tests not on the bill were left out; collect the payment on the Bill tab before the lab can start`;
   }
   if (bill.status === "procedures_only")
     return `✓ From the HealthRay bill: ${bill.procedure.name} — a procedure, no lab or machine tests; test steps were left out of the journey`;

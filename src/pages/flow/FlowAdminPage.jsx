@@ -171,8 +171,8 @@ export default function FlowAdminPage() {
           </div>
           <div className="fset__cardsub">
             Patients booked for lab samples alone, no consultation. Lab Collection, Lab Processing
-            and the Payments tab always show them. This switch hides them from the coordinator board
-            and the other station screens.
+            and the Bill tab always show them. This switch hides them from the coordinator board and
+            the other station screens.
           </div>
           <label
             className="fset__toggle"

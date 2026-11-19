@@ -107,7 +107,7 @@ export default function StaffTable({ data, onPick, picked }) {
                 <th
                   scope="col"
                   className="brep-num"
-                  title="Cleared on the Payments tab or as a fee change. Taken in HealthRay — not in Collected or any drawer."
+                  title="Cleared at reception or as a fee change. Taken in HealthRay — not in Collected or any drawer."
                 >
                   Cleared in HealthRay
                 </th>

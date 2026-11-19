@@ -1629,7 +1629,7 @@ export async function setStepStatus(stepId, status, db = pool) {
     );
     if (unpaid.length) {
       throw Object.assign(
-        new Error("Lab Billing comes first — clear the test payment on the Payments tab"),
+        new Error("Lab Billing comes first — collect the test payment on the Bill tab"),
         { status: 409 },
       );
     }

@@ -1,7 +1,7 @@
 import { paise } from "../../../shared/labPayment.js";
 
 export const CLEARED_SOURCES = [
-  { key: "payments_tab", label: "Cleared on Payments tab (taken in HealthRay)" },
+  { key: "payments_tab", label: "Cleared at reception (taken in HealthRay)" },
   { key: "fee_settle", label: "Fee change settled (taken in HealthRay)" },
 ];
 
