@@ -28,6 +28,7 @@ import {
   releaseTestOrders,
   clearInHealthray,
   settleTestOrders,
+  syncLabSteps,
   takePayments,
 } from "./payments.js";
 import { allocate, priceBill } from "./priceBill.js";
@@ -2257,6 +2258,7 @@ export async function finaliseBill(billId, input, ctx, db = pool) {
       ],
     );
     await settleTestOrders(client, rows[0], ctx);
+    await syncLabSteps(client, rows[0].visit_id);
     await writeAudit(client, {
       entity: SPEC.table,
       entityId: bill.id,

@@ -31,6 +31,7 @@ import {
 } from "./labOnlyVisits.js";
 import { labStepsAreManual } from "../../../shared/manualFloor.js";
 import { genVisitToken } from "../flow/journey.js";
+import { MONEY_COLUMNS, moneyFrom } from "../billing/payments.js";
 import { LAB_RUNGS, stageIndexOf, UNDRAWN_SAMPLE_STATUSES } from "../../../shared/labStages.js";
 import {
   machineFor,
@@ -1393,7 +1394,7 @@ export async function addLabStepsForArrivedLabCase(
     await client.query(`SELECT id FROM giniflow_visits WHERE id = $1 FOR UPDATE`, [rows[0].id]);
     const result = (await billHasNoLab(client, rows[0].id))
       ? { added: [] }
-      : await insertLabStepsForOrder(client, rows[0].id);
+      : await insertLabStepsForCase(client, rows[0].id);
     await client.query("COMMIT");
     return result;
   } catch (e) {
@@ -1456,7 +1457,28 @@ export async function insertLabStepsIfHealthrayCase(client, visitId) {
     [visitId],
   );
   if (!(rows[0]?.hr_cases > 0) || (await billHasNoLab(client, visitId))) return { added: [] };
-  return insertLabStepsForOrder(client, visitId);
+  return insertLabStepsForCase(client, visitId);
+}
+
+async function insertLabStepsForCase(client, visitId) {
+  const result = await insertLabStepsForOrder(client, visitId);
+  if (result.added?.length) await syncLabStepsFromLab(client, visitId);
+  return result;
+}
+
+async function labPaidOnBill(db, visitId) {
+  const { rows } = await db.query(
+    `SELECT ${MONEY_COLUMNS}
+       FROM bills b
+      WHERE b.visit_id = $1 AND b.status = 'final' AND b.bill_type = 'invoice'
+        AND EXISTS (SELECT 1 FROM bill_lines l
+                      LEFT JOIN service_items i ON i.id = l.service_item_id
+                     WHERE l.bill_id = b.id AND l.is_live
+                       AND (l.source = 'lab_case' OR i.kind = 'test'))`,
+    [visitId],
+  );
+  const live = rows.map(moneyFrom).filter((m) => m.credited === 0 || m.credited < m.payable);
+  return live.length > 0 && live.every((m) => m.balance === 0);
 }
 
 export async function syncLabStepsFromLab(db, visitId) {
@@ -1493,7 +1515,8 @@ export async function syncLabStepsFromLab(db, visitId) {
   if (!e) return { billed: false, drawn: false };
 
   const drawn = e.orders > 0 ? e.drawn === e.orders : !!e.hr_collected;
-  const billed = e.test_orders > 0 && e.unsettled === 0;
+  const billed =
+    e.test_orders > 0 ? e.unsettled === 0 : e.hr_cases > 0 && (await labPaidOnBill(db, visitId));
   const reported = e.orders > 0 ? e.reported === e.orders : !!e.hr_reported;
   const results = e.orders > 0 ? e.results === e.orders : !!e.hr_results;
 

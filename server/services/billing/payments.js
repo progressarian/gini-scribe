@@ -222,7 +222,7 @@ async function tickBillingStep(client, bill) {
   await tickBillingIfConsultPaid(client, bill.id, bill.visit_id);
 }
 
-async function syncLabSteps(client, visitId) {
+export async function syncLabSteps(client, visitId) {
   if (!visitId) return;
   const { syncLabStepsFromLab } = await import("../giniflow/journey.js");
   await syncLabStepsFromLab(client, visitId);
@@ -712,7 +712,10 @@ async function collectOnBill(billId, version, plan, ctx, db) {
     const opened = await settleTestOrders(client, after, ctx);
     if (after.status === "draft") await markDraftSaved(client, after.id, ctx);
     const money = await moneyOn(client, after.id);
-    if (!money.balance) await tickBillingStep(client, after);
+    if (!money.balance) {
+      await tickBillingStep(client, after);
+      await syncLabSteps(client, after.visit_id);
+    }
     return {
       bill_id: after.id,
       bill_no: after.bill_no,
