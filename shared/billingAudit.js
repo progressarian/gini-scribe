@@ -69,11 +69,15 @@ export const AUDIT_LINE_SOURCES = [
   { value: "added", label: "Added at desk" },
 ];
 
+export const AUDIT_BILL_SORT_DEFAULT = "bill_no_desc";
+
 export const AUDIT_BILL_SORTS = [
   { value: "newest", label: "Newest first" },
   { value: "oldest", label: "Oldest first" },
   { value: "payable", label: "Largest payable first" },
   { value: "due", label: "Largest due first" },
+  { value: "bill_no", label: "Bill number (low to high)" },
+  { value: "bill_no_desc", label: "Bill number (high to low)" },
 ];
 
 export const AUDIT_ITEM_SORTS = [

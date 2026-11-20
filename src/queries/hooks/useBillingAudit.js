@@ -1,4 +1,4 @@
-import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import api, { API_URL } from "../../services/api";
 import { billingKeys, fileNameOf, readBlobError } from "./useBillingMaster";
 
@@ -27,7 +27,8 @@ export function useBillingAudit(view, filters, enabled = true) {
   return useQuery({
     queryKey: billingAuditKeys.list(view, params),
     queryFn: async () => (await api.get(PATH[view], { params })).data,
-    placeholderData: keepPreviousData,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey.at(-2) === view ? previous : undefined,
     retry: retryUnlessRefused,
     enabled,
   });

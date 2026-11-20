@@ -3,6 +3,7 @@ import pool from "../../config/db.js";
 import { paise, rupeesFromPaise } from "../../../shared/labPayment.js";
 import {
   AUDIT_BILL_KINDS,
+  AUDIT_BILL_SORT_DEFAULT,
   AUDIT_BILL_SORTS,
   AUDIT_CLAIM_STATUSES,
   AUDIT_DOCUMENTS,
@@ -25,6 +26,7 @@ import { indiaToday } from "./categoryResolver.js";
 import { cleanDate, cleanMoney, likePattern, wholeNumber } from "./common.js";
 import { DUE_MONEY, DUE_OUTSTANDING } from "./dues.js";
 import { generateBillPdf } from "./billPdf.js";
+import { MONEY_COLUMN, MONEY_COLUMNS } from "./dashboard.js";
 import { httpError } from "./transaction.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -115,7 +117,7 @@ export function cleanAuditBillFilters(input = {}) {
     claim: cleanChoice(raw.claim, AUDIT_CLAIM_STATUSES, "Claim status"),
     mode: cleanChoice(raw.mode, AUDIT_PAYMENT_MODES, "Payment mode"),
     bill_no: cleanText(raw.bill_no, "Bill number", 60),
-    sort: cleanChoice(raw.sort, AUDIT_BILL_SORTS, "Sort") ?? "newest",
+    sort: cleanChoice(raw.sort, AUDIT_BILL_SORTS, "Sort") ?? AUDIT_BILL_SORT_DEFAULT,
   };
 }
 
@@ -188,6 +190,10 @@ const PAYMENT_STATE_SQL = `CASE
   WHEN b.paid_amount - m.refunded > 0 THEN 'partial'
   ELSE 'unpaid' END`;
 
+const EMPTY_DRAFT = `(b.status = 'draft' AND b.patient_payable = 0 AND k.kinds IS NULL)`;
+
+const NET = (col) => `SUM(CASE WHEN bill_type = 'credit_note' THEN -${col} ELSE ${col} END)`;
+
 const SCRIBE_SQL = (range) => `
   SELECT b.id, b.bill_no, b.bill_date::text AS bill_day, ${IST_DAY_TEXT(BILL_AT)} AS bill_at,
          b.patient_id AS pid, b.bill_date AS bday,
@@ -233,7 +239,7 @@ const SCRIBE_SQL = (range) => `
       SELECT array_agg(DISTINCT x.mode) AS modes FROM payments x
        WHERE x.bill_id = b.id AND x.voided_at IS NULL
     ) pm ON TRUE
-   WHERE ${range.join(" AND ")}`;
+   WHERE ${range.join(" AND ")} AND NOT ${EMPTY_DRAFT}`;
 
 const KIND_OF = (kinds) => `CASE WHEN COALESCE(cardinality(${kinds}), 0) = 0 THEN 'none'
   WHEN cardinality(${kinds}) = 1 THEN (${kinds})[1] ELSE 'mixed' END`;
@@ -269,11 +275,16 @@ const SCRIBE_DAY_SQL = `
          ${NAMES_OF("updated_by_name")} AS updated_by_name, ${NAMES_OF("cancelled_by_name")} AS cancelled_by_name,
          ${NAMES_OF("cancel_reason")} AS cancel_reason, MAX(cancelled_at) AS cancelled_at,
          ${NAMES_OF("manual_discount_reason")} AS manual_discount_reason,
-         SUM(actual_amount) AS actual_amount, SUM(discount_amount) AS discount_amount,
-         SUM(tax_amount) AS tax_amount, SUM(round_off) AS round_off,
-         SUM(patient_payable) AS patient_payable, SUM(paid_amount) AS paid_amount,
-         SUM(claim_amount) AS claim_amount, SUM(credited) AS credited, SUM(refunded) AS refunded,
+         ${NET("actual_amount")} AS actual_amount, ${NET("discount_amount")} AS discount_amount,
+         ${NET("tax_amount")} AS tax_amount, ${NET("round_off")} AS round_off,
+         ${NET("patient_payable")} AS patient_payable, ${NET("paid_amount")} AS paid_amount,
+         ${NET("claim_amount")} AS claim_amount, SUM(credited) AS credited, SUM(refunded) AS refunded,
          SUM(due) AS due,
+         SUM(CASE WHEN bill_type = 'invoice' AND status = 'draft' THEN patient_payable ELSE 0 END) AS draft_payable,
+         COUNT(*) FILTER (WHERE bill_type = 'invoice' AND status = 'draft') AS draft_count,
+         SUM(CASE WHEN bill_type = 'invoice' AND status = 'final' THEN patient_payable ELSE 0 END) AS billed_payable,
+         COUNT(*) FILTER (WHERE bill_type = 'invoice' AND status = 'final') AS billed_count,
+         COUNT(*) FILTER (WHERE bill_type = 'credit_note' AND status = 'final') AS credit_note_count,
          SUM(CASE WHEN bill_type = 'invoice' AND status <> 'cancelled' THEN patient_payable ELSE 0 END) AS day_payable,
          ${DAY_PAYMENT_STATE} AS scribe_payment_state
     FROM sb GROUP BY pid, bday`;
@@ -337,11 +348,17 @@ function billFilterSql(f, bind) {
   return where.join(" AND ");
 }
 
+const ROW_BILL_NO = (pick) => `COALESCE(
+    (SELECT ${pick}(j->>'bill_no') FROM json_array_elements(bill_list) j WHERE j->>'document' = 'invoice'),
+    (SELECT ${pick}(j->>'bill_no') FROM json_array_elements(bill_list) j))`;
+
 const BILL_SORT = {
   newest: "sort_at DESC, row_key",
   oldest: "sort_first, row_key",
   payable: "primary_amount DESC NULLS LAST, sort_at DESC, row_key",
   due: "due DESC NULLS LAST, sort_at DESC, row_key",
+  bill_no: `${ROW_BILL_NO("MIN")} NULLS LAST, sort_first, row_key`,
+  bill_no_desc: `${ROW_BILL_NO("MAX")} DESC NULLS LAST, sort_at DESC, row_key`,
 };
 
 function billQuery(f) {
@@ -434,7 +451,10 @@ const BILL_TOTALS_SQL = `COUNT(*) AS bills,
   COALESCE(SUM(actual_amount), 0) AS basic, COALESCE(SUM(discount_amount), 0) AS discount,
   COALESCE(SUM(tax_amount), 0) AS tax, COALESCE(SUM(patient_payable), 0) AS payable,
   COALESCE(SUM(paid_amount), 0) AS paid, COALESCE(SUM(credited), 0) AS credited,
-  COALESCE(SUM(refunded), 0) AS refunded, COALESCE(SUM(due), 0) AS due`;
+  COALESCE(SUM(refunded), 0) AS refunded, COALESCE(SUM(due), 0) AS due,
+  COALESCE(SUM(draft_payable), 0) AS draft, COALESCE(SUM(draft_count), 0) AS drafts,
+  COALESCE(SUM(billed_payable), 0) AS billed, COALESCE(SUM(billed_count), 0) AS billed_bills,
+  COALESCE(SUM(credit_note_count), 0) AS credit_notes`;
 
 const shapeBillTotals = (row) => ({
   bills: Number(row.bills),
@@ -448,15 +468,50 @@ const shapeBillTotals = (row) => ({
   credited: money(row.credited),
   refunded: money(row.refunded),
   due: money(row.due),
+  draft: money(row.draft),
+  drafts: Number(row.drafts),
+  billed: money(row.billed),
+  billed_bills: Number(row.billed_bills),
+  credit_notes: Number(row.credit_notes),
 });
+
+const MODES_SQL = (billIds) => `
+  SELECT ${MONEY_COLUMN} AS mode,
+         COUNT(*) FILTER (WHERE m.direction = 'in') AS payments,
+         COUNT(*) FILTER (WHERE m.direction = 'out') AS refunds,
+         COALESCE(SUM(m.amount) FILTER (WHERE m.direction = 'in'), 0) AS collected,
+         COALESCE(SUM(m.amount) FILTER (WHERE m.direction = 'out'), 0) AS refunded
+    FROM payments m
+   WHERE m.voided_at IS NULL AND m.bill_id IN (${billIds})
+   GROUP BY 1`;
+
+const MODES_ORDER = "collected DESC, refunded DESC, mode";
+
+const MODE_LABEL = Object.fromEntries(MONEY_COLUMNS.map((column) => [column.key, column.label]));
+
+const shapeModes = (rows) =>
+  (rows ?? []).map((row) => ({
+    mode: row.mode,
+    label: MODE_LABEL[row.mode] ?? labelOf(AUDIT_PAYMENT_MODES, row.mode),
+    payments: Number(row.payments),
+    refunds: Number(row.refunds),
+    collected: money(row.collected),
+    refunded: money(row.refunded),
+  }));
+
+const AUDIT_BILL_IDS = `SELECT (j->>'id')::uuid FROM audit CROSS JOIN LATERAL json_array_elements(audit.bill_list) j`;
 
 async function billPage(db, q, sort, { limit, offset = 0 }) {
   const sql = `WITH audit AS MATERIALIZED (${q.base}),
     page AS (SELECT * FROM audit ORDER BY ${sort} LIMIT ${q.bind(limit)} OFFSET ${q.bind(offset)})
     SELECT (SELECT row_to_json(t) FROM (SELECT ${BILL_TOTALS_SQL} FROM audit) t) AS totals,
+           (SELECT json_agg(m ORDER BY ${MODES_ORDER}) FROM (${MODES_SQL(AUDIT_BILL_IDS)}) m) AS modes,
            COALESCE((SELECT json_agg(page ORDER BY ${sort}) FROM page), '[]'::json) AS rows`;
   const { rows } = await db.query(sql, q.params);
-  return { totals: shapeBillTotals(rows[0].totals), rows: rows[0].rows };
+  return {
+    totals: { ...shapeBillTotals(rows[0].totals), modes: shapeModes(rows[0].modes) },
+    rows: rows[0].rows,
+  };
 }
 
 const OPTIONS_TTL_MS = 60 * 1000;
@@ -638,12 +693,44 @@ const shapeItemTotals = (row) => ({
   claim: money(row.claim),
 });
 
+const GROUPS_SQL = (base) => `
+  SELECT lower(group_code) AS code, MIN(COALESCE(group_name, group_code)) AS name,
+         COUNT(*) AS items, COALESCE(SUM(quantity), 0) AS quantity, COUNT(DISTINCT bill_id) AS bills,
+         COALESCE(SUM(actual_amount), 0) AS gross, COALESCE(SUM(discount), 0) AS discount,
+         COALESCE(SUM(patient_payable), 0) AS payable
+    FROM (${base}) t
+   GROUP BY 1
+   ORDER BY payable DESC, gross DESC, name`;
+
+const shapeGroups = (rows) =>
+  rows.map((row) => ({
+    code: row.code,
+    name: row.name,
+    items: Number(row.items),
+    quantity: Number(row.quantity),
+    bills: Number(row.bills),
+    gross: money(row.gross),
+    discount: money(row.discount),
+    payable: money(row.payable),
+  }));
+
 export async function listAuditItems(input = {}, db = pool) {
   const filters = cleanAuditItemFilters(input);
   const { page, size } = cleanPaging(input);
   const q = itemQuery(filters);
-  const totalsRow = await db.query(`SELECT ${ITEM_TOTALS_SQL} FROM (${q.base}) t`, q.params);
-  const totals = shapeItemTotals(totalsRow.rows[0]);
+  const [totalsRow, modesRow, groupsRow] = await Promise.all([
+    db.query(`SELECT ${ITEM_TOTALS_SQL} FROM (${q.base}) t`, q.params),
+    db.query(
+      `${MODES_SQL(`SELECT DISTINCT bill_id FROM (${q.base}) t`)} ORDER BY ${MODES_ORDER}`,
+      q.params,
+    ),
+    db.query(GROUPS_SQL(q.base), q.params),
+  ]);
+  const totals = {
+    ...shapeItemTotals(totalsRow.rows[0]),
+    modes: shapeModes(modesRow.rows),
+    groups: shapeGroups(groupsRow.rows),
+  };
   const limit = q.bind(size);
   const offset = q.bind((page - 1) * size);
   const { rows } = await db.query(
@@ -695,7 +782,7 @@ const BILL_COLUMNS = [
   { header: "Tax (₹)", key: "tax", width: 12, style: MONEY_FMT },
   { header: "Payable (₹)", key: "payable", width: 13, style: MONEY_FMT },
   { header: "Claim (₹)", key: "claim", width: 12, style: MONEY_FMT },
-  { header: "Paid (₹)", key: "paid", width: 12, style: MONEY_FMT },
+  { header: "Net paid (₹)", key: "paid", width: 12, style: MONEY_FMT },
   { header: "Credited (₹)", key: "credited", width: 13, style: MONEY_FMT },
   { header: "Refunded (₹)", key: "refunded", width: 13, style: MONEY_FMT },
   { header: "Due (₹)", key: "due", width: 12, style: MONEY_FMT },

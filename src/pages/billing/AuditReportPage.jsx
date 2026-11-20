@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { Download, FileText, RotateCcw } from "lucide-react";
 import {
   AUDIT_BILL_KINDS,
+  AUDIT_BILL_SORT_DEFAULT,
   AUDIT_BILL_SORTS,
   AUDIT_CLAIM_STATUSES,
   AUDIT_DOCUMENTS,
@@ -19,6 +20,7 @@ import {
   auditRangeProblem,
   labelOf,
 } from "../../../shared/billingAudit";
+import { DEPOSIT_MODE, HEALTHRAY_MODE } from "../../../shared/billingVocab";
 import {
   auditBillPdfHref,
   useBillingAudit,
@@ -68,7 +70,7 @@ const BILL_FILTERS = {
   bill_no: "",
   min: "",
   max: "",
-  sort: "newest",
+  sort: AUDIT_BILL_SORT_DEFAULT,
 };
 
 const ITEM_FILTERS = {
@@ -258,7 +260,7 @@ function MoreFilters({ view, filters, options, onChange }) {
   );
   const blank = FILTERS_OF[view];
   const active = Object.keys(blank).filter(
-    (key) => key !== "sort" && filters[key] !== blank[key],
+    (key) => key !== "sort" && key !== "status" && filters[key] !== blank[key],
   ).length;
   const cleared = !active && filters.sort === blank.sort;
   const money = (key, label) => (
@@ -291,7 +293,11 @@ function MoreFilters({ view, filters, options, onChange }) {
     </div>
   );
   return (
-    <FilterPopover active={active} cleared={cleared} onClear={() => onChange({ ...blank })}>
+    <FilterPopover
+      active={active}
+      cleared={cleared}
+      onClear={() => onChange({ ...blank, status: filters.status })}
+    >
       {view === "items" && text("item", "Item", "Item name or code")}
       <SelectField
         label={view === "bills" ? "Bill type" : "Item type"}
@@ -322,13 +328,6 @@ function MoreFilters({ view, filters, options, onChange }) {
         onChange={set("document")}
         options={AUDIT_DOCUMENTS}
         anyLabel="Invoices and credit notes"
-      />
-      <SelectField
-        label="Bill status"
-        value={filters.status}
-        onChange={set("status")}
-        options={AUDIT_STATUSES}
-        anyLabel="All statuses"
       />
       {view === "bills" && (
         <SelectField
@@ -414,6 +413,119 @@ function MoreFilters({ view, filters, options, onChange }) {
   );
 }
 
+function ModeCollections({ view, modes }) {
+  const received = modes
+    .filter((m) => m.collected > 0)
+    .map((m) => (m.mode === DEPOSIT_MODE ? { ...m, label: "Paid from patient deposit" } : m));
+  return (
+    <section className="audit-modes" aria-labelledby="audit-modes-title" data-testid="audit-modes">
+      <div className="audit-modes__head">
+        <h2 id="audit-modes-title" className="audit-modes__title">
+          Collected by payment mode
+        </h2>
+        <p className="flow-muted">
+          {view === "items"
+            ? "Payments on the bills that contain these items"
+            : "Payments on the bills in this report"}
+        </p>
+      </div>
+      {received.length ? (
+        <dl className="audit-totals">
+          {received.map((m) => (
+            <div key={m.mode} className="audit-totals__cell">
+              <dt>{m.label}</dt>
+              <dd>{fromPaise(m.collected)}</dd>
+              <dd className="audit-modes__meta">
+                {m.payments} payment{m.payments === 1 ? "" : "s"}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="flow-muted">No payments recorded on these bills.</p>
+      )}
+    </section>
+  );
+}
+
+const REFUND_LABEL = {
+  [DEPOSIT_MODE]: "Kept as patient deposit",
+  [HEALTHRAY_MODE]: "Refunded in HealthRay (mode not recorded)",
+};
+
+function RefundsByMode({ modes, creditNotes }) {
+  const refunds = modes
+    .filter((m) => m.refunded > 0)
+    .sort((a, b) => b.refunded - a.refunded)
+    .map((m) => ({ ...m, label: REFUND_LABEL[m.mode] ?? m.label }));
+  if (!refunds.length) return null;
+  const total = refunds.reduce((sum, m) => sum + m.refunded, 0);
+  const paidBack = refunds
+    .filter((m) => m.mode !== DEPOSIT_MODE)
+    .reduce((sum, m) => sum + m.refunded, 0);
+  return (
+    <section
+      className="audit-modes"
+      aria-labelledby="audit-refunds-title"
+      data-testid="audit-refunds"
+    >
+      <div className="audit-modes__head">
+        <h2 id="audit-refunds-title" className="audit-modes__title">
+          Refunds
+        </h2>
+        <p className="flow-muted">
+          <strong>{fromPaise(total)}</strong> refunded
+          {creditNotes > 0 ? ` on ${creditNotes} credit note${creditNotes === 1 ? "" : "s"}` : ""}
+          {paidBack !== total ? ` · ${fromPaise(paidBack)} paid back to patients` : ""}
+        </p>
+      </div>
+      <dl className="audit-totals">
+        {refunds.map((m) => (
+          <div key={m.mode} className="audit-totals__cell">
+            <dt>{m.label}</dt>
+            <dd>{fromPaise(m.refunded)}</dd>
+            <dd className="audit-modes__meta">
+              {m.refunds} refund{m.refunds === 1 ? "" : "s"}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function GroupTotals({ groups, totals }) {
+  if (!groups.length) return null;
+  return (
+    <section
+      className="audit-modes"
+      aria-labelledby="audit-groups-title"
+      data-testid="audit-groups"
+    >
+      <div className="audit-modes__head">
+        <h2 id="audit-groups-title" className="audit-modes__title">
+          Amount by department
+        </h2>
+        <p className="flow-muted">
+          Total <strong>{fromPaise(totals.payable)}</strong> payable · {totals.items} item
+          {totals.items === 1 ? "" : "s"} on {totals.bills} bill{totals.bills === 1 ? "" : "s"}
+        </p>
+      </div>
+      <dl className="audit-totals">
+        {groups.map((g) => (
+          <div key={g.code ?? "none"} className="audit-totals__cell">
+            <dt>{g.name ?? "No department"}</dt>
+            <dd>{fromPaise(g.payable)}</dd>
+            <dd className="audit-modes__meta">
+              {g.items} item{g.items === 1 ? "" : "s"} · {g.bills} bill{g.bills === 1 ? "" : "s"}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
 const percentOf = (discount, total) =>
   discount > 0 && total > 0 ? `${Number(((discount * 100) / total).toFixed(1))}%` : null;
 
@@ -421,8 +533,24 @@ const MONEY_PARTS = [
   { key: "total", label: "Total amount", field: "basic" },
   { key: "discount", label: "Discount", field: "discount", percentOf: "basic" },
   { key: "payable", label: "Payable", field: "payable" },
-  { key: "paid", label: "Paid", field: "paid" },
+  {
+    key: "billed",
+    label: "Billed in Scribe",
+    field: "billed",
+    count: "billed_bills",
+    noun: "final bill",
+    totalsOnly: true,
+  },
+  { key: "paid", label: "Net paid", field: "paid", lessRefunds: true },
   { key: "due", label: "Due", field: "due" },
+  {
+    key: "draft",
+    label: "In draft (not billed)",
+    field: "draft",
+    count: "drafts",
+    noun: "draft bill",
+    totalsOnly: true,
+  },
   { key: "refunded", label: "Refunded", field: "refunded" },
 ];
 
@@ -474,6 +602,15 @@ function Totals({ view, totals }) {
               {fromPaise(totals[part.field])}
               {percent ? <span className="audit-pct"> {percent} off</span> : null}
             </p>
+            {part.lessRefunds ? (
+              <NetOfRefunds net={totals[part.field]} refunded={totals.refunded} />
+            ) : null}
+            {part.count ? (
+              <p className="flow-muted">
+                {totals[part.count]} {part.noun}
+                {totals[part.count] === 1 ? "" : "s"}
+              </p>
+            ) : null}
           </div>
         );
       })}
@@ -531,9 +668,7 @@ function DayBillsDialog({ row, onClose }) {
             </button>
           </div>
           <p className="flow-muted audit-day-bills__meta">
-            {[row.patient.file_no, row.patient.health_id, row.bill_date]
-              .filter(Boolean)
-              .join(" · ")}
+            {[row.patient.file_no, row.bill_date].filter(Boolean).join(" · ")}
           </p>
           <div className="fset__scroll">
             <table className="flow-table" aria-label={`Bills of ${row.patient.name}`}>
@@ -607,6 +742,15 @@ const dash = (value) => (value === null || value === undefined || value === "" ?
 const ageSex = (p) => [p.age ? `${p.age}y` : null, p.sex].filter(Boolean).join(" / ");
 const rupeeOrDash = (value) => (value === null || value === undefined ? "—" : fromPaise(value));
 
+function NetOfRefunds({ net, refunded }) {
+  if (!(refunded > 0)) return null;
+  return (
+    <p className="flow-muted audit-net">
+      {fromPaise(net + refunded)} received − {fromPaise(refunded)} refunded
+    </p>
+  );
+}
+
 function MoneyCell({ row, part }) {
   const amount = row.amounts[part.field];
   const percent = part.percentOf ? percentOf(amount, row.amounts[part.percentOf]) : null;
@@ -616,6 +760,7 @@ function MoneyCell({ row, part }) {
       <strong>{fromPaise(amount)}</strong>
       {percent ? <div className="audit-pct">{percent} off</div> : null}
       {tax ? <div className="flow-muted">Incl. {fromPaise(tax)} tax</div> : null}
+      {part.lessRefunds ? <NetOfRefunds net={amount} refunded={row.amounts.refunded} /> : null}
     </>
   );
 }
@@ -648,10 +793,7 @@ const BILL_COLUMNS = [
     cell: (row) => (
       <>
         <strong>{row.patient.name}</strong>
-        <div className="flow-muted">
-          {dash(row.patient.file_no)}
-          {row.patient.health_id ? ` · ${row.patient.health_id}` : ""}
-        </div>
+        <div className="flow-muted">{dash(row.patient.file_no)}</div>
         <div className="flow-muted">
           {[ageSex(row.patient), row.patient.phone].filter(Boolean).join(" · ") || "—"}
         </div>
@@ -663,7 +805,7 @@ const BILL_COLUMNS = [
       </>
     ),
   },
-  ...MONEY_PARTS.map((part) => ({
+  ...MONEY_PARTS.filter((part) => !part.totalsOnly).map((part) => ({
     key: part.key,
     header: part.label,
     className: NUM,
@@ -951,6 +1093,12 @@ export default function AuditReportPage() {
     });
   };
 
+  const pristine =
+    !q &&
+    !billNo &&
+    writeState(state).toString() ===
+      writeState({ ...readState(new URLSearchParams(), today), view: state.view }).toString();
+
   const changeView = (view) => {
     setQ("");
     setBillNo("");
@@ -1038,12 +1186,28 @@ export default function AuditReportPage() {
                 />
               </>
             ) : null}
+            <div className="audit-select audit-status">
+              <Dropdown
+                value={state.filters.status}
+                options={[{ value: "", label: "All statuses" }, ...AUDIT_STATUSES]}
+                onChange={(status) => update({ filters: { ...state.filters, status } })}
+                ariaLabel="Bill status"
+              />
+            </div>
             <MoreFilters
               view={state.view}
               filters={state.filters}
               options={data?.options}
               onChange={(filters) => update({ filters })}
             />
+            <button
+              type="button"
+              className="flow-btn flow-btn-ghost flow-btn-mini"
+              disabled={pristine}
+              onClick={clearAll}
+            >
+              <RotateCcw size={13} aria-hidden="true" /> Reset
+            </button>
           </div>
           {problem ? (
             <p className="audit-error" role="alert">
@@ -1068,6 +1232,16 @@ export default function AuditReportPage() {
         ) : (
           <>
             <Totals view={state.view} totals={data.totals} />
+            <ModeCollections view={state.view} modes={data.totals.modes ?? []} />
+            {state.view === "items" ? (
+              <GroupTotals groups={data.totals.groups ?? []} totals={data.totals} />
+            ) : null}
+            {state.view === "bills" ? (
+              <RefundsByMode
+                modes={data.totals.modes ?? []}
+                creditNotes={data.totals.credit_notes}
+              />
+            ) : null}
             {!rows.length ? (
               <div className="audit-state">
                 <p>
