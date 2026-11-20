@@ -41,6 +41,7 @@ import {
 } from "./serviceItems.js";
 import { refuseRemoved, removedDoctor } from "./removedDoctors.js";
 import { httpError, inTransaction } from "./transaction.js";
+import { cleanPaidMode } from "./paymentMode.js";
 import {
   auditFields,
   hasField,
@@ -2299,12 +2300,25 @@ export async function payAndFinalise(billId, input, ctx, db = pool) {
 
 export async function clearHealthrayAndFinalise(billId, input, ctx, db = pool) {
   return inTransaction(async (client) => {
-    const paid = await clearInHealthray(billId, { version: input?.version }, ctx, client);
+    const paid = await clearInHealthray(
+      billId,
+      { version: input?.version, paid: input?.paid },
+      ctx,
+      client,
+    );
     if (paid.status !== "draft") return paid;
     const { rows } = await client.query(`SELECT version FROM bills WHERE id = $1`, [paid.bill_id]);
     await finaliseBill(paid.bill_id, { version: rows[0].version }, ctx, client);
     return paid;
   }, db);
+}
+
+export function clearHealthrayAtDesk(billId, input, ctx, db = pool) {
+  const paid = cleanPaidMode(
+    { mode: input?.paid_via, reference: input?.reference, upi_app: input?.upi_app },
+    "Choose how the patient paid in HealthRay",
+  );
+  return clearHealthrayAndFinalise(billId, { version: input?.version, paid }, ctx, db);
 }
 
 export async function cancelBill(billId, input, ctx, db = pool) {

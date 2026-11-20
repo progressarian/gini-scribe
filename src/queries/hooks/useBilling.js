@@ -546,8 +546,13 @@ export function useTakePayments() {
 export function useClearInHealthray() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ billId, version }) => {
-      await api.post(`${DESK}/bills/${billId}/clear-healthray`, { version });
+    mutationFn: async ({ billId, version, mode, reference, upiApp }) => {
+      await api.post(`${DESK}/bills/${billId}/clear-healthray`, {
+        version,
+        paid_via: mode,
+        reference,
+        upi_app: upiApp,
+      });
       try {
         return await read(`${DESK}/bills/${billId}`);
       } catch (e) {
@@ -644,6 +649,12 @@ function useShiftMutation(mutationFn) {
 
 export function useOpenShift() {
   return useShiftMutation(async (body) => (await api.post(`${DESK}/shifts/open`, body ?? {})).data);
+}
+
+export function useSkipShiftClose() {
+  return useShiftMutation(
+    async () => (await api.post(`${DESK}/shifts/current/skip-close`, {})).data,
+  );
 }
 
 export function useCloseShift() {

@@ -155,7 +155,7 @@ test.describe.serial("P4C-54 a paid draft reads Paid · not final until it is fi
     await expect(banner.getByRole("button", { name: "Finalise this bill" })).toBeFocused();
   });
 
-  test("7. when Paid in HealthRay covers the bill, the banner appears with its button ready", async ({
+  test("7. when Paid in HealthRay covers the bill, it is made final and no banner is needed", async ({
     page,
   }) => {
     const made = await draftWith(ids, "PnfOffer", [{ item: ids.hba1c }]);
@@ -167,11 +167,15 @@ test.describe.serial("P4C-54 a paid draft reads Paid · not final until it is fi
     await pad.getByRole("button", { name: "Paid in HealthRay" }).click();
     await page
       .getByRole("dialog")
+      .getByLabel("How did the patient pay in HealthRay?")
+      .selectOption("cash");
+    await page
+      .getByRole("dialog")
       .getByRole("button", { name: /^Mark ₹[\d,]+ paid$/ })
       .click();
-    const banner = page.getByRole("group", { name: "Paid, not final" });
-    await expect(banner.getByRole("button", { name: "Finalise this bill" })).toBeFocused();
+    await expect(pad).toContainText("made final");
+    await expect(page.getByRole("group", { name: "Paid, not final" })).toHaveCount(0);
     const status = await query(`SELECT status FROM bills WHERE id = $1`, [made.bill.id]);
-    expect(status.rows[0].status).toBe("draft");
+    expect(status.rows[0].status).toBe("final");
   });
 });

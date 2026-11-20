@@ -52,6 +52,16 @@ async function billToCorrect(client, billId) {
   return bill;
 }
 
+async function healthrayModeOf(client, billId) {
+  const { rows } = await client.query(
+    `SELECT DISTINCT paid_via, upi_app, reference FROM payments
+      WHERE bill_id = $1 AND direction = 'in' AND mode = $2 AND voided_at IS NULL`,
+    [billId, HEALTHRAY_MODE],
+  );
+  if (rows.length !== 1 || !rows[0].paid_via) return null;
+  return { mode: rows[0].paid_via, upi_app: rows[0].upi_app, reference: rows[0].reference };
+}
+
 async function linesToKeep(client, bill, dropped) {
   const { rows } = await client.query(
     `SELECT l.id, l.service_item_id, l.lab_order_id, l.agreed_rate, l.agreed_by,
@@ -142,7 +152,12 @@ export async function rebillFinalBill(billId, input, ctx, db = pool) {
     }
     for (const line of kept) await addLine(draft.id, lineInput(line), ctx, client);
     const ready = await readBill(draft.id, client);
-    await clearHealthrayAndFinalise(draft.id, { version: ready.version }, ctx, client);
+    await clearHealthrayAndFinalise(
+      draft.id,
+      { version: ready.version, paid: await healthrayModeOf(client, bill.id) },
+      ctx,
+      client,
+    );
     await markReplaced(client, bill, draft.id, reason, ctx);
     return {
       credit_note_id: note.id,

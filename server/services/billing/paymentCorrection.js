@@ -1,16 +1,14 @@
 import pool from "../../config/db.js";
 import { CAPABILITIES, hasAnyCapability } from "../../../shared/permissions.js";
-import { HEALTHRAY_MODE, NEFT_LABEL, NEFT_MODE } from "../../../shared/billingVocab.js";
+import { HEALTHRAY_MODE } from "../../../shared/billingVocab.js";
 import { paise } from "../../../shared/labPayment.js";
 import { writeAudit } from "./audit.js";
 import { DRAWER_MODE, refreshClosedDrawer, TAKE_MODES } from "./cashShifts.js";
 import { auditFields } from "./common.js";
-import { REFERENCE_MAX } from "./payments.js";
+import { cleanPaidMode } from "./paymentMode.js";
 import { httpError, inTransaction } from "./transaction.js";
-import { cleanUpiApp } from "./upiApp.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MODE_LABEL = { cash: "Cash", card: "Card", upi: "UPI", [NEFT_MODE]: NEFT_LABEL };
 const REASON_MAX = 300;
 
 const PAYMENT_SQL = `
@@ -39,24 +37,13 @@ export function mayCorrect(row, ctx) {
 }
 
 function cleanCorrection(input) {
-  const mode = typeof input?.mode === "string" ? input.mode.trim().toLowerCase() : "";
-  if (!TAKE_MODES.includes(mode)) {
-    throw httpError(400, `Choose the mode it was really paid by: ${TAKE_MODES.join(", ")}`);
-  }
-  const upiApp = cleanUpiApp(mode, input?.upi_app);
-  const typed = typeof input?.reference === "string" ? input.reference.trim() : "";
-  if (mode !== DRAWER_MODE && !typed) {
-    throw httpError(400, `A ${MODE_LABEL[mode]} payment needs its reference number`);
-  }
-  if (typed.length > REFERENCE_MAX) {
-    throw httpError(400, `The reference is too long — keep it under ${REFERENCE_MAX} letters`);
-  }
+  const paid = cleanPaidMode(input, "Choose the mode it was really paid by");
   const reason = typeof input?.reason === "string" ? input.reason.trim() : "";
   if (reason.length < 5) throw httpError(400, "Say why the mode is being corrected");
   if (reason.length > REASON_MAX) {
     throw httpError(400, `The reason is too long — keep it under ${REASON_MAX} letters`);
   }
-  return { mode, reference: mode === DRAWER_MODE ? null : typed, upi_app: upiApp, reason };
+  return { ...paid, reason };
 }
 
 const unchanged = (mode, before, wanted) =>

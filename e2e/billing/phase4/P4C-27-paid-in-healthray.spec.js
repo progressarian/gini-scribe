@@ -46,6 +46,7 @@ const actions = (page) => page.getByRole("region", { name: "Bill actions" });
 const refunds = (page) => page.getByRole("region", { name: "Refunds" });
 const dialog = (page) => page.getByRole("dialog");
 const clearButton = (page) => pad(page).getByRole("button", { name: "Paid in HealthRay" });
+const paidBy = (page) => dialog(page).getByLabel("How did the patient pay in HealthRay?");
 
 const openBillTab = (page, visitId) =>
   gotoReady(page, `${RECEPTION}?tab=bill&visit=${visitId}`, () => pad(page));
@@ -162,14 +163,23 @@ test.describe.serial("P4C-27 Paid in HealthRay clears the bill in one click", ()
     expect(await paymentsOf(main.bill)).toEqual([]);
 
     await clearButton(page).click();
-    await dialog(page).getByRole("button", { name: "Mark ₹2,150 paid" }).click();
+    const mark = dialog(page).getByRole("button", { name: "Mark ₹2,150 paid" });
+    await expect(mark).toBeDisabled();
+    await expect(dialog(page)).toContainText("Choose how the patient paid");
+    await paidBy(page).selectOption("card");
+    await expect(mark).toBeDisabled();
+    await dialog(page).getByLabel("Reference").fill("4242");
+    await expect(mark).toBeEnabled();
+    await mark.click();
     await expect(dialog(page)).toHaveCount(0);
     const done = pad(page).getByRole("button", { name: "✓ Paid in HealthRay — ₹2,150" });
     await expect(done).toBeVisible();
     await expect(done).toBeDisabled();
     await expect(pad(page).getByRole("button", { name: /^Take payment/ })).toHaveCount(0);
     await expect(pad(page).getByLabel("Amount Received")).toHaveCount(0);
-    await expect(actions(page).getByRole("button", { name: "Finalise & print" })).toBeEnabled();
+    await expect(pad(page)).toContainText("Marked ₹2,150 as paid in HealthRay by Card.");
+    await expect(pad(page)).toContainText("made final");
+    await expect(actions(page).getByRole("button", { name: "Finalise & print" })).toHaveCount(0);
 
     await page.reload();
     await expect(
@@ -177,19 +187,19 @@ test.describe.serial("P4C-27 Paid in HealthRay clears the bill in one click", ()
     ).toBeDisabled();
   });
 
-  test("2. one HealthRay payment covers the draft with no shift; its orders are paid and the patient is billed", async () => {
+  test("2. one HealthRay payment covers the draft with no shift and makes it final; its orders are paid and the patient is billed", async () => {
     const rows = await paymentsOf(main.bill);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       direction: "in",
       mode: "healthray",
       amount: 2150,
-      reference: null,
+      reference: "4242",
       shift_id: null,
     });
     expect(rows[0].receipt_no).toBeTruthy();
     const bill = await bills.readBill(main.bill, db);
-    expect(bill.status).toBe("draft");
+    expect(bill.status).toBe("final");
     expect(bill.totals.paid).toBe(215000);
     expect(await orderRow(main.order)).toMatchObject({ payment_status: "paid", amount_paid: 650 });
     expect(
@@ -197,7 +207,7 @@ test.describe.serial("P4C-27 Paid in HealthRay clears the bill in one click", ()
     ).toBe(false);
     const { group, row } = await groupOf("C26Main");
     expect(group).toBe("billed");
-    expect(row.bill.state).toBe("paid_draft");
+    expect(row.bill.state).toBe("paid");
     expect(row.hints).toMatchObject({ tests: 0, due: 0 });
     const audit = await one(
       `SELECT COUNT(*)::int AS n FROM billing_audit
@@ -261,7 +271,7 @@ test.describe.serial("P4C-27 Paid in HealthRay clears the bill in one click", ()
 
     const api = await apiAs("reception");
     const response = await api.post(`/api/billing/bills/${later.id}/clear-healthray`, {
-      data: { version: later.version },
+      data: { version: later.version, paid_via: "upi", upi_app: "bharatpe", reference: "UTR-C26" },
     });
     const body = await response.json();
     await api.dispose();
@@ -269,6 +279,16 @@ test.describe.serial("P4C-27 Paid in HealthRay clears the bill in one click", ()
     expect(body).toMatchObject({ status: "final", totals: { outstanding: 0 } });
     expect(body.payments).toHaveLength(1);
     expect(body.payments[0]).toMatchObject({ mode: "healthray", amount: 80000 });
+    const saved = await one(
+      `SELECT paid_via, upi_app, reference, shift_id FROM payments WHERE bill_id = $1`,
+      [later.id],
+    );
+    expect(saved).toEqual({
+      paid_via: "upi",
+      upi_app: "bharatpe",
+      reference: "UTR-C26",
+      shift_id: null,
+    });
     const duesAfter = await payments.listDues({ patientId: later.patient_id }, db);
     expect(duesAfter.map((due) => due.bill_id)).not.toContain(later.id);
     expect((await groupOf("C26Later")).row.bill.state).toBe("paid");
@@ -312,6 +332,19 @@ test.describe.serial("P4C-27 Paid in HealthRay clears the bill in one click", ()
       data: {},
     });
     expect(missing.status()).toBe(400);
+    const fresh = await bills.readBill(stale.bill.id, db);
+    for (const [data, message] of [
+      [{ version: fresh.version }, /Choose how the patient paid in HealthRay/],
+      [{ version: fresh.version, paid_via: "card" }, /needs its reference number/],
+      [{ version: fresh.version, paid_via: "upi", reference: "U1" }, /Choose the UPI app/],
+    ]) {
+      const response = await api.post(`/api/billing/bills/${stale.bill.id}/clear-healthray`, {
+        data,
+      });
+      expect(response.status(), JSON.stringify(data)).toBe(400);
+      expect((await response.json()).error, JSON.stringify(data)).toMatch(message);
+    }
+    expect(await paymentsOf(stale.bill.id)).toEqual([]);
     await api.dispose();
   });
 
@@ -390,7 +423,7 @@ test.describe.serial("P4C-27 Paid in HealthRay clears the bill in one click", ()
     const draft = await draftWith(ids, "C26Role", [{ item: ids.dressing }]);
     const api = await apiAs("lab");
     const response = await api.post(`/api/billing/bills/${draft.bill.id}/clear-healthray`, {
-      data: { version: draft.bill.version },
+      data: { version: draft.bill.version, paid_via: "cash" },
     });
     await api.dispose();
     expect(response.status()).toBe(403);
@@ -409,6 +442,7 @@ test.describe.serial("P4C-27 Paid in HealthRay clears the bill in one click", ()
     expect(button.x).toBeGreaterThanOrEqual(0);
     expect(button.x + button.width).toBeLessThanOrEqual(390);
     await clearButton(page).click();
+    await paidBy(page).selectOption("cash");
     const confirm = dialog(page).getByRole("button", { name: "Mark ₹500 paid" });
     await expect(confirm).toBeVisible();
     const box = await confirm.boundingBox();

@@ -22,6 +22,8 @@ export default function ConfirmModal({
   confirmDisabled = false,
   busy = false,
   error = null,
+  secondaryLabel,
+  onSecondary,
 }) {
   useEffect(() => {
     if (!open) return;
@@ -115,29 +117,51 @@ export default function ConfirmModal({
           >
             {cancelLabel}
           </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={confirmDisabled || busy}
-            onMouseEnter={(e) => {
-              if (!confirmDisabled && !busy) e.currentTarget.style.background = confirmHoverBg;
-            }}
-            onMouseLeave={(e) => (e.currentTarget.style.background = confirmBg)}
-            style={{
-              padding: "8px 14px",
-              background: confirmBg,
-              color: "#fff",
-              border: 0,
-              borderRadius: 6,
-              fontSize: 13,
-              fontWeight: 700,
-              cursor: confirmDisabled || busy ? "not-allowed" : "pointer",
-              opacity: confirmDisabled || busy ? 0.55 : 1,
-              fontFamily: "inherit",
-            }}
-          >
-            {confirmLabel}
-          </button>
+          {onSecondary ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onSecondary}
+              style={{
+                padding: "8px 14px",
+                background: "#fff",
+                color: "#334155",
+                border: "1px solid #cbd5e1",
+                borderRadius: 6,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              {secondaryLabel}
+            </button>
+          ) : null}
+          {onConfirm ? (
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={confirmDisabled || busy}
+              onMouseEnter={(e) => {
+                if (!confirmDisabled && !busy) e.currentTarget.style.background = confirmHoverBg;
+              }}
+              onMouseLeave={(e) => (e.currentTarget.style.background = confirmBg)}
+              style={{
+                padding: "8px 14px",
+                background: confirmBg,
+                color: "#fff",
+                border: 0,
+                borderRadius: 6,
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: confirmDisabled || busy ? "not-allowed" : "pointer",
+                opacity: confirmDisabled || busy ? 0.55 : 1,
+                fontFamily: "inherit",
+              }}
+            >
+              {confirmLabel}
+            </button>
+          ) : null}
         </div>
       </div>
     </div>,

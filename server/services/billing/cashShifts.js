@@ -305,12 +305,54 @@ export async function getShift(id, db = pool) {
   return readShift(db, cleanUuid(id, "shift"));
 }
 
+const IST_TODAY = `(NOW() AT TIME ZONE 'Asia/Kolkata')::date`;
+
+async function closeSkippedToday(db, shiftId) {
+  const { rows } = await db.query(
+    `SELECT EXISTS (
+       SELECT 1 FROM billing_audit
+        WHERE entity = 'cash_shifts' AND entity_id = $1
+          AND after->>'close_skipped_on' = ${IST_TODAY}::text) AS skipped`,
+    [shiftId],
+  );
+  return rows[0].skipped;
+}
+
 export async function currentShift(ctx, db = pool) {
   const userId = actorOf(ctx, "see your shift");
   const { rows } = await db.query(`${SHIFT_SQL} WHERE s.user_id = $1 AND s.closed_at IS NULL`, [
     userId,
   ]);
-  return rows.length ? shape(rows[0]) : null;
+  if (!rows.length) return null;
+  const shift = shape(rows[0]);
+  return { ...shift, close_skipped_today: await closeSkippedToday(db, shift.id) };
+}
+
+export async function skipEarlierClose(ctx, db = pool) {
+  const userId = actorOf(ctx, "carry on without closing your shift");
+  return inTransaction(async (client) => {
+    const { rows } = await client.query(
+      `SELECT id, opened_at, ${IST_TODAY}::text AS today,
+              (opened_at AT TIME ZONE 'Asia/Kolkata')::date < ${IST_TODAY} AS earlier
+         FROM cash_shifts WHERE user_id = $1 AND closed_at IS NULL FOR UPDATE`,
+      [userId],
+    );
+    if (!rows.length) throw httpError(409, "No shift is open for this desk");
+    const open = rows[0];
+    if (!open.earlier) {
+      throw httpError(409, "Your shift was opened today, so there is no earlier shift to close");
+    }
+    if (!(await closeSkippedToday(client, open.id))) {
+      await writeAudit(client, {
+        entity: "cash_shifts",
+        entityId: open.id,
+        action: "update",
+        after: { close_skipped_on: open.today, opened_at: open.opened_at },
+        ...auditFields(ctx),
+      });
+    }
+    return currentShift(ctx, client);
+  }, db);
 }
 
 export async function listShifts(filters = {}, db = pool) {

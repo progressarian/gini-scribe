@@ -1384,6 +1384,77 @@ body > [role="dialog"][aria-modal="true"] .bc-field__in:focus {
   outline: 2px solid #2563eb33;
   border-color: #2563eb;
 }
+body > [role="dialog"][aria-modal="true"] .bc-shiftask {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 65vh;
+  overflow-y: auto;
+}
+body > [role="dialog"][aria-modal="true"] .bc-shiftask p {
+  margin: 0;
+}
+body > [role="dialog"][aria-modal="true"] .bc-shiftask .bc-head__row {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+body > [role="dialog"][aria-modal="true"] .bc-shiftask .bc-field {
+  flex: 1 1 140px;
+}
+body > [role="dialog"][aria-modal="true"] .bc-shiftask .bc-hint {
+  font-size: 12px;
+  color: #475569;
+}
+body > [role="dialog"][aria-modal="true"] .bc-shiftask .bc-err {
+  font-size: 12px;
+  color: #b91c1c;
+}
+body > [role="dialog"][aria-modal="true"] .bc-shiftask .bc-warn {
+  color: #b45309;
+  font-weight: 600;
+}
+body > [role="dialog"][aria-modal="true"] .bc-shiftask .bc-notes > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #334155;
+}
+body > [role="dialog"][aria-modal="true"] .bc-shiftask .bc-notes__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+body > [role="dialog"][aria-modal="true"] .bc-shiftask .bc-linkbtn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #2563eb;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+body > [role="dialog"][aria-modal="true"] .bc-shiftask .st-btn {
+  padding: 8px 14px;
+  border: 1px solid #15803d;
+  border-radius: 6px;
+  background: #15803d;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+body > [role="dialog"][aria-modal="true"] .bc-shiftask .st-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+body > [role="dialog"][aria-modal="true"] .bc-shiftask .st-btn:focus-visible,
+body > [role="dialog"][aria-modal="true"] .bc-shiftask .bc-linkbtn:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
 body > [role="dialog"][aria-modal="true"] .bc-refund {
   display: flex;
   flex-direction: column;
@@ -2237,6 +2308,24 @@ body > [role="dialog"][aria-modal="true"] .bc-err {
   color: #0f172a;
   overflow-wrap: anywhere;
 }
+.bc-hr-confirm__mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 0 0 8px;
+}
+
+.bc-hr-confirm__mode .bc-field {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.bc-hr-confirm .bc-hr-confirm__need {
+  margin: 0 0 8px;
+  color: var(--ui-muted, #64748b);
+  font-size: 12.5px;
+}
+
 .bc-hr-confirm p {
   margin: 0;
 }

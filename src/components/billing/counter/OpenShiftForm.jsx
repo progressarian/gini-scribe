@@ -6,7 +6,7 @@ import { cashTyped } from "../staff/staffText";
 import { SHIFT_FORM, shiftFormKey } from "./counterForm";
 import { useSavedForm } from "./useSavedForm";
 
-export default function OpenShiftForm({ form, onOpening }) {
+export default function OpenShiftForm({ form, onOpening, onOpened }) {
   const openShift = useOpenShift();
   const [error, setError] = useState(null);
   const { opening } = form.value;
@@ -17,6 +17,7 @@ export default function OpenShiftForm({ form, onOpening }) {
     try {
       await openShift.mutateAsync(opening.trim() ? { opening_cash: opening.trim() } : {});
       form.clear();
+      onOpened?.();
     } catch (e) {
       setError(errorOf(e, "That shift could not be opened"));
     }
