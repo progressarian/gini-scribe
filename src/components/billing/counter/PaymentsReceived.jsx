@@ -2,15 +2,8 @@ import { useState } from "react";
 import { useCorrectPaymentMode } from "../../../queries/hooks/useBilling";
 import { errorOf, fromPaise } from "../format";
 import { HEALTHRAY_MODE } from "../../../../shared/billingVocab";
-import { needsUpiApp, paymentModeText, TAKE_MODE_LABEL, takenModeText } from "./lineText";
-import UpiAppField from "./UpiAppField";
-
-const MODES = Object.keys(TAKE_MODE_LABEL);
-
-const REFERENCE_HINT = {
-  upi: "UPI transaction ID",
-  neft: "UTR or cheque no.",
-};
+import { needsUpiApp, paymentModeText, takenModeText } from "./lineText";
+import PaidModeFields, { PAID_MODES, paidModeBody, paidModeProblem } from "./PaidModeFields";
 
 const isHealthray = (payment) => payment.mode === HEALTHRAY_MODE;
 
@@ -39,12 +32,14 @@ const timeOf = (iso) =>
 function CorrectForm({ bill, payment, onDone, onCancel }) {
   const correct = useCorrectPaymentMode();
   const healthray = isHealthray(payment);
-  const [mode, setMode] = useState(MODES.find((m) => m !== currentMode(payment)) || "cash");
-  const [reference, setReference] = useState("");
-  const [upiApp, setUpiApp] = useState("");
+  const [paid, setPaid] = useState({
+    mode: PAID_MODES.find((m) => m !== currentMode(payment)) || "cash",
+    upiApp: "",
+    reference: "",
+  });
   const [reason, setReason] = useState("");
   const [error, setError] = useState(null);
-  const needsReference = mode !== "cash";
+  const { mode, upiApp } = paid;
   const needsApp = needsUpiApp(mode);
 
   const save = async (e) => {
@@ -55,9 +50,7 @@ function CorrectForm({ bill, payment, onDone, onCancel }) {
         paymentId: payment.id,
         billId: bill.id,
         visitId: bill.visit_id,
-        mode,
-        reference: needsReference ? reference.trim() : null,
-        upiApp: needsApp ? upiApp : null,
+        ...paidModeBody(paid),
         reason: reason.trim(),
       });
       onDone();
@@ -68,33 +61,14 @@ function CorrectForm({ bill, payment, onDone, onCancel }) {
 
   return (
     <form className="bc-head__row" onSubmit={save} aria-label="Correct how it was paid">
-      <label className="bc-field">
-        <span className="bc-field__lbl">
-          {healthray ? "Paid in HealthRay by" : "Really paid by"}
-        </span>
-        <select className="bc-field__in" value={mode} onChange={(e) => setMode(e.target.value)}>
-          {MODES.filter(
-            (m) => m !== currentMode(payment) || payment.reference || needsUpiApp(m),
-          ).map((m) => (
-            <option key={m} value={m}>
-              {TAKE_MODE_LABEL[m]}
-            </option>
-          ))}
-        </select>
-      </label>
-      {needsApp && <UpiAppField value={upiApp} onChange={setUpiApp} />}
-      {needsReference && (
-        <label className="bc-field">
-          <span className="bc-field__lbl">Reference</span>
-          <input
-            className="bc-field__in"
-            value={reference}
-            maxLength={60}
-            placeholder={REFERENCE_HINT[mode] ?? "Last 4 digits or slip no."}
-            onChange={(e) => setReference(e.target.value)}
-          />
-        </label>
-      )}
+      <PaidModeFields
+        label={healthray ? "Paid in HealthRay by" : "Really paid by"}
+        value={paid}
+        onChange={setPaid}
+        modes={PAID_MODES.filter(
+          (m) => m !== currentMode(payment) || payment.reference || needsUpiApp(m),
+        )}
+      />
       <label className="bc-field">
         <span className="bc-field__lbl">Reason</span>
         <input
@@ -118,12 +92,7 @@ function CorrectForm({ bill, payment, onDone, onCancel }) {
       <button
         type="submit"
         className="st-btn st-btn-grn"
-        disabled={
-          correct.isPending ||
-          reason.trim().length < 5 ||
-          (needsReference && !reference.trim()) ||
-          (needsApp && !upiApp)
-        }
+        disabled={correct.isPending || reason.trim().length < 5 || !!paidModeProblem(paid)}
       >
         {correct.isPending ? "Saving…" : "Save correction"}
       </button>

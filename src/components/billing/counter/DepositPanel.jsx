@@ -16,6 +16,7 @@ import { PdfButton } from "./PdfViewer";
 import DepositMoves, { AmountField } from "./DepositMoves";
 import VoidDepositDialog from "./VoidDepositDialog";
 import { DEPOSIT_MAX } from "../../../../shared/billingVocab.js";
+import { useEarlierShiftCheck } from "./useEarlierShiftCheck";
 
 const KIND_LABEL = {
   received: "Deposit taken",
@@ -78,6 +79,7 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
   const { data, isLoading, isError, refetch } = useDeposit(patientId);
   const { data: shift } = useCurrentShift();
   const receive = useReceiveDeposit();
+  const shiftCheck = useEarlierShiftCheck();
   const [form, setForm] = useState(blankForm);
   const [error, setError] = useState(null);
   const [note, setNote] = useState(null);
@@ -203,7 +205,14 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
           )}
 
           <div className="bc-field__lbl">Take a deposit</div>
-          <form className="bc-deposit__form" onSubmit={submit} aria-label="Take a deposit">
+          <form
+            className="bc-deposit__form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              shiftCheck.guard(submit)(event);
+            }}
+            aria-label="Take a deposit"
+          >
             <label className="bc-field">
               <span className="bc-field__lbl">Mode</span>
               <select
@@ -423,6 +432,7 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
           }}
         />
       )}
+      {shiftCheck.dialog}
     </section>
   );
 }

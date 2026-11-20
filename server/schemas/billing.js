@@ -1183,7 +1183,12 @@ export const billingDepositVoidSchema = z.strictObject(
 );
 
 export const billingClearHealthraySchema = deskObject(
-  { version: whole },
+  {
+    version: whole,
+    paid_via: z.string().trim().max(10).optional(),
+    reference: z.union([z.string().trim().max(60), z.null()]).optional(),
+    upi_app: z.enum(UPI_APPS).nullish(),
+  },
   objectOnly("Send the bill's version as an object"),
 );
 
@@ -1270,6 +1275,11 @@ export const billingReceiptQuerySchema = z
     (query) => !(query.payment_id && query.receipt_no),
     "ask for the payment or the receipt number, not both",
   );
+
+export const billingShiftSkipCloseSchema = deskObject(
+  {},
+  objectOnly("Send the request as an object"),
+);
 
 export const billingShiftOpenSchema = deskObject({
   opening_cash: z.union([money, z.null(), blank]).optional(),

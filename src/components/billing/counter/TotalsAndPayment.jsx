@@ -12,7 +12,7 @@ import {
 } from "../../../queries/hooks/useBilling";
 import { DEPOSIT_MODE, HEALTHRAY_MODE } from "../../../../shared/billingVocab.js";
 import { errorOf, fromPaise, moneyTyped } from "../format";
-import { HEALTHRAY_LABEL, needsUpiApp, TAKE_MODE_LABEL } from "./lineText";
+import { HEALTHRAY_LABEL, needsUpiApp, TAKE_MODE_LABEL, takenModeText } from "./lineText";
 import { balanceOf, finaliseBlockers, payLaterAllowed } from "./finaliseChecks";
 import { emptyPaymentRow } from "./counterForm";
 import { shiftReminder } from "./shiftReminder";
@@ -22,6 +22,8 @@ import { announcePaid } from "./paidSignal";
 import { useMakeFinal } from "./useMakeFinal";
 import { SavedOpenShiftForm } from "./OpenShiftForm";
 import PdfViewer from "./PdfViewer";
+import PaidModeFields, { paidModeBody, paidModeProblem } from "./PaidModeFields";
+import { useEarlierShiftCheck } from "./useEarlierShiftCheck";
 import { longDay } from "./CounterDate";
 
 const IST_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" });
@@ -32,6 +34,8 @@ const paiseOf = (typed) => Math.round(Number(typed || 0) * 100);
 const NO_REFERENCE = ["cash", DEPOSIT_MODE];
 
 const toRupees = (paise) => (Math.max(0, paise) / 100).toFixed(2).replace(/\.00$/, "");
+
+const NO_PAID_MODE = { mode: "", upiApp: "", reference: "" };
 
 const REFERENCE_HINT = {
   card: "e.g. last 4 digits or slip no.",
@@ -65,10 +69,13 @@ export default function TotalsAndPayment({
   const depositAvailable = deposit?.available ?? 0;
   const take = useTakePayments();
   const clear = useClearInHealthray();
+  const shiftCheck = useEarlierShiftCheck();
   const reread = useRereadBill();
   const final = useMakeFinal({ onBill, onPricesChanged, form });
   const [confirming, setConfirming] = useState(false);
   const [clearError, setClearError] = useState(null);
+  const [hrPaid, setHrPaid] = useState(NO_PAID_MODE);
+  const hrProblem = paidModeProblem(hrPaid);
   const rows = form.value.rows;
   const setRows = (next) => form.set("rows", next);
   const [error, setError] = useState(null);
@@ -231,15 +238,17 @@ export default function TotalsAndPayment({
         billId: bill.id,
         visitId: bill.visit_id,
         version: bill.version,
+        ...paidModeBody(hrPaid),
       });
       onBill(cleared);
       form.drop("rows", "payLater");
       setCapped(null);
       setConfirming(false);
+      const paidBy = takenModeText(hrPaid.mode, hrPaid.upiApp);
       setNote(
         cleared.status === "final" && bill.status === "draft"
-          ? `Marked ${fromPaise(balance)} as paid in HealthRay. Bill ${cleared.bill_no} made final.`
-          : `Marked ${fromPaise(balance)} as paid in HealthRay.`,
+          ? `Marked ${fromPaise(balance)} as paid in HealthRay by ${paidBy}. Bill ${cleared.bill_no} made final.`
+          : `Marked ${fromPaise(balance)} as paid in HealthRay by ${paidBy}.`,
       );
       announcePaid(bill.id);
     } catch (e) {
@@ -527,7 +536,7 @@ export default function TotalsAndPayment({
                 opening ||
                 busy
               }
-              onClick={pay}
+              onClick={shiftCheck.guard(pay)}
             >
               <CreditCard size={18} aria-hidden="true" />
               {take.isPending
@@ -560,10 +569,11 @@ export default function TotalsAndPayment({
               type="button"
               className="bc-pay__hr"
               disabled={busy || clear.isPending || opening}
-              onClick={() => {
+              onClick={shiftCheck.guard(() => {
                 setClearError(null);
+                setHrPaid(NO_PAID_MODE);
                 setConfirming(true);
-              }}
+              })}
             >
               {HEALTHRAY_LABEL}
             </button>
@@ -593,6 +603,8 @@ export default function TotalsAndPayment({
 
       <PdfViewer pdf={final.printing} onClose={final.closePrinting} />
 
+      {shiftCheck.dialog}
+
       <ConfirmModal
         open={confirming}
         title="Mark as paid in HealthRay?"
@@ -600,6 +612,7 @@ export default function TotalsAndPayment({
         confirmLabel={clear.isPending ? "Marking…" : `Mark ${fromPaise(balance)} paid`}
         cancelLabel="Cancel"
         busy={clear.isPending}
+        confirmDisabled={!!hrProblem}
         error={clearError}
         message={
           <div className="bc-hr-confirm">
@@ -620,6 +633,19 @@ export default function TotalsAndPayment({
                 <dd>{fromPaise(balance)}</dd>
               </div>
             </dl>
+            <div className="bc-hr-confirm__mode">
+              <PaidModeFields
+                label="How did the patient pay in HealthRay?"
+                placeholder="Choose mode"
+                value={hrPaid}
+                onChange={setHrPaid}
+              />
+            </div>
+            {hrProblem ? (
+              <p className="bc-hr-confirm__need" role="status">
+                {hrProblem}
+              </p>
+            ) : null}
             <p>
               This clears the bill in Scribe. No money is taken here and it is not added to the cash
               drawer.{bill.status === "draft" ? " The bill is also made final." : ""}

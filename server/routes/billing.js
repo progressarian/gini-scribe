@@ -64,6 +64,7 @@ import {
   billingShiftCloseSchema,
   billingShiftListQuerySchema,
   billingShiftOpenSchema,
+  billingShiftSkipCloseSchema,
   giniflowArrivalsQuerySchema,
 } from "../schemas/index.js";
 import { billingRoute, sendFailure } from "./billingHttp.js";
@@ -543,7 +544,7 @@ router.post(
   desk,
   validate(billingClearHealthraySchema, BILLING_DESK_LABELS),
   run("Mark paid in HealthRay", 201, (req) =>
-    bills.clearHealthrayAndFinalise(req.params.billId, req.body, ctx(req)),
+    bills.clearHealthrayAtDesk(req.params.billId, req.body, ctx(req)),
   ),
 );
 
@@ -790,6 +791,13 @@ router.post(
   desk,
   validate(billingShiftOpenSchema, BILLING_DESK_LABELS),
   run("Open shift", 201, (req) => shifts.openShift(req.body, ctx(req))),
+);
+
+router.post(
+  `${BASE}/shifts/current/skip-close`,
+  desk,
+  validate(billingShiftSkipCloseSchema, BILLING_DESK_LABELS),
+  run("Carry on without closing the shift", 200, (req) => shifts.skipEarlierClose(ctx(req))),
 );
 
 router.get(

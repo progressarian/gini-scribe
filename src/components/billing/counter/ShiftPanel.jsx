@@ -1,15 +1,13 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import ConfirmModal from "../../ui/ConfirmModal";
-import { useCloseShift, useCurrentShift, useMyShifts } from "../../../queries/hooks/useBilling";
+import { useCurrentShift, useMyShifts } from "../../../queries/hooks/useBilling";
 import { errorOf, rupees } from "../format";
 import { PAYMENT_MODE_LABEL, shiftStateText, TAKE_MODE_LABEL } from "./lineText";
-import useAuthStore from "../../../stores/authStore";
-import { NOTES, noteCountTotal, noteCountUsed, SHIFT_FORM, shiftFormKey } from "./counterForm";
-import { useSavedForm } from "./useSavedForm";
 import { shiftReminder } from "./shiftReminder";
 import OpenShiftForm from "./OpenShiftForm";
-import { cashTyped, countedProblem, countedWarning } from "../staff/staffText";
+import CountCashFields from "./CountCashFields";
+import { useCloseShiftForm } from "./useCloseShiftForm";
 
 const clock = (iso) =>
   iso
@@ -25,48 +23,21 @@ const clock = (iso) =>
 export default function ShiftPanel() {
   const { data: shift, isLoading } = useCurrentShift();
   const { data: mine } = useMyShifts();
-  const closeShift = useCloseShift();
-  const userId = useAuthStore((s) => s.currentDoctor?.id);
-  const form = useSavedForm(shiftFormKey(userId), SHIFT_FORM);
-  const { counted, note } = form.value;
-  const notes = form.value.notes ?? {};
-  const byNotes = noteCountUsed(notes);
-  const setNotes = (patch) => form.set("notes", { ...notes, ...patch });
-  const setCounted = (next) => form.set("counted", next);
-  const setNote = (next) => form.set("note", next);
+  const count = useCloseShiftForm(shift);
+  const { form, expected, countedAmount, countWarning, difference } = count;
   const [closing, setClosing] = useState(false);
   const [error, setError] = useState(null);
   const [done, setDone] = useState(null);
   const [closedId, setClosedId] = useState(null);
 
-  const expected = Number(shift?.expected_cash ?? 0);
-  const countedAmount = byNotes ? noteCountTotal(notes) / 100 : Number(counted || 0);
   const reminder = shiftReminder(shift);
-  const countedError = byNotes ? null : countedProblem(counted);
-  const countWarning = countedError
-    ? null
-    : countedWarning(Math.round(countedAmount * 100), Math.round(expected * 100));
-  const difference = Number((countedAmount - expected).toFixed(2));
   const earlier = (mine || []).filter((row) => !row.is_open);
 
   const close = async () => {
     setError(null);
     try {
-      const closed = await closeShift.mutateAsync({
-        ...(byNotes
-          ? {
-              counted_cash: countedAmount.toFixed(2),
-              denominations: Object.fromEntries(
-                Object.entries(notes)
-                  .filter(([, value]) => Number(value) > 0)
-                  .map(([key, value]) => [key, key === "coins" ? value : Number(value)]),
-              ),
-            }
-          : { counted_cash: counted.trim() }),
-        ...(note.trim() ? { note: note.trim() } : {}),
-      });
+      const closed = await count.close();
       setClosing(false);
-      form.clear();
       setClosedId(closed.id);
       setDone(
         `Shift closed. Expected ${rupees(closed.expected_cash)}, counted ${rupees(
@@ -183,92 +154,23 @@ export default function ShiftPanel() {
             </div>
 
             <div className="bc-shiftgrid__close">
-              <div className="bc-head__row">
-                <label className="bc-field">
-                  <span className="bc-field__lbl">Counted cash</span>
-                  <input
-                    className="bc-field__in"
-                    inputMode="decimal"
-                    value={byNotes ? countedAmount.toFixed(2) : counted}
-                    readOnly={byNotes}
-                    aria-describedby={byNotes ? "bc-shift-bynotes" : "bc-shift-countmsg"}
-                    aria-invalid={countedError && counted ? true : undefined}
-                    onChange={(e) => setCounted(cashTyped(e.target.value))}
-                  />
-                </label>
-                <label className="bc-field">
-                  <span className="bc-field__lbl">Note</span>
-                  <input
-                    className="bc-field__in"
-                    maxLength={280}
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                  />
-                </label>
-                <span className="bc-hint" aria-label="Difference">
-                  Difference {rupees(difference)}
-                </span>
-                {!byNotes && counted && countedError ? (
-                  <span className="bc-err" id="bc-shift-countmsg" role="alert">
-                    {countedError}
-                  </span>
-                ) : countWarning ? (
-                  <span className="bc-hint bc-warn" id="bc-shift-countmsg" role="status">
-                    {countWarning}
-                  </span>
-                ) : null}
-                <button
-                  type="button"
-                  className="st-btn st-btn-red"
-                  disabled={(!byNotes && Boolean(countedError)) || closeShift.isPending}
-                  onClick={() => {
-                    setError(null);
-                    setDone(null);
-                    setClosing(true);
-                  }}
-                >
-                  Close shift
-                </button>
-              </div>
-              <details className="bc-notes" open={byNotes || undefined}>
-                <summary>Count by notes (optional)</summary>
-                <div className="bc-notes__grid" role="group" aria-label="Note count">
-                  {NOTES.map((value) => (
-                    <label key={value} className="bc-field">
-                      <span className="bc-field__lbl">₹{value} notes</span>
-                      <input
-                        className="bc-field__in"
-                        inputMode="numeric"
-                        value={notes[value] ?? ""}
-                        onChange={(e) =>
-                          setNotes({ [value]: e.target.value.replace(/\D/g, "").slice(0, 6) })
-                        }
-                      />
-                    </label>
-                  ))}
-                  <label className="bc-field">
-                    <span className="bc-field__lbl">Coins (₹)</span>
-                    <input
-                      className="bc-field__in"
-                      inputMode="decimal"
-                      value={notes.coins ?? ""}
-                      onChange={(e) => setNotes({ coins: cashTyped(e.target.value) })}
-                    />
-                  </label>
-                </div>
-                {byNotes && (
-                  <div className="bc-hint" id="bc-shift-bynotes">
-                    The counted cash is the note count: {rupees(countedAmount)}.{" "}
-                    <button
-                      type="button"
-                      className="bc-linkbtn"
-                      onClick={() => form.set("notes", {})}
-                    >
-                      Clear the note count
-                    </button>
-                  </div>
-                )}
-              </details>
+              <CountCashFields
+                count={count}
+                action={
+                  <button
+                    type="button"
+                    className="st-btn st-btn-red"
+                    disabled={!count.canClose}
+                    onClick={() => {
+                      setError(null);
+                      setDone(null);
+                      setClosing(true);
+                    }}
+                  >
+                    Close shift
+                  </button>
+                }
+              />
             </div>
           </div>
         </>
@@ -337,7 +239,7 @@ export default function ShiftPanel() {
         title="Close this shift?"
         confirmLabel="Close the shift"
         cancelLabel="Keep it open"
-        busy={closeShift.isPending}
+        busy={count.pending}
         error={error}
         message={
           <>

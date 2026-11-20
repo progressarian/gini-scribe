@@ -610,7 +610,15 @@ export async function clearInHealthray(billId, input, ctx, db = pool) {
   return collectOnBill(
     billId,
     version,
-    (outstanding) => [{ mode: HEALTHRAY_MODE, amount: outstanding, reference: null }],
+    (outstanding) => [
+      {
+        mode: HEALTHRAY_MODE,
+        amount: outstanding,
+        reference: input?.paid?.reference ?? null,
+        upi_app: input?.paid?.upi_app ?? null,
+        paid_via: input?.paid?.mode ?? null,
+      },
+    ],
     ctx,
     db,
   );
@@ -680,8 +688,8 @@ async function collectOnBill(billId, version, plan, ctx, db) {
       const receipt = await nextNumber(client, seriesFor("receipt"), null, ctx);
       const { rows } = await client.query(
         `INSERT INTO payments (bill_id, mode, amount, reference, receipt_no, shift_id,
-                               received_by, created_by, updated_by, upi_app)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $7, $8)
+                               received_by, created_by, updated_by, upi_app, paid_via)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $7, $8, $9)
          RETURNING ${PAYMENT_COLUMNS}`,
         [
           bill.id,
@@ -692,6 +700,7 @@ async function collectOnBill(billId, version, plan, ctx, db) {
           shiftFor(payment.mode, shiftId),
           ctx?.actorId ?? null,
           payment.upi_app ?? null,
+          payment.paid_via ?? null,
         ],
       );
       taken.push(shapePayment(rows[0]));
