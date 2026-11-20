@@ -17,6 +17,7 @@ import {
   revertStart,
 } from "./stationLock.js";
 import { publish } from "./eventHub.js";
+import { CHECKED_IN_SQL, assertCheckedIn } from "./stepSql.js";
 import { outsourcedTestNames } from "../billing/testMatch.js";
 import { t as clipText } from "../../utils/helpers.js";
 import { promoteLabReport, promoteQuietly } from "./promote.js";
@@ -209,6 +210,7 @@ async function awaitingRegistration(visitDate, search, db) {
       WHERE v.visit_date = $1::date
         AND NOT COALESCE(p.is_blocked, FALSE)
         AND v.current_status NOT IN ('no_show', 'cancelled')
+        AND ${CHECKED_IN_SQL("v")}
         AND ${labOnlyPredicate("v", "$3")}
         AND NOT EXISTS (SELECT 1 FROM giniflow_lab_orders o WHERE o.visit_id = v.id)
         AND NOT EXISTS (
@@ -350,6 +352,7 @@ export async function getLabQueue(
         AND ${NOT_OUTSIDE_REMOVED_SQL("order", "o.id::text")}
         -- No sample to take from a patient who never arrived or has gone home.
         AND v.current_status NOT IN ('no_show', 'cancelled')
+        AND ${CHECKED_IN_SQL("v")}
         AND (
           $2::text IS NULL
           OR p.name ILIKE '%' || $2 || '%'
@@ -767,6 +770,7 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
        LEFT JOIN giniflow_visits v ON v.patient_id = c.pid AND v.visit_date = $1::date
       WHERE NOT COALESCE(p.is_blocked, FALSE)
         AND NOT ($4::boolean AND v.id IS NULL)
+        AND ${CHECKED_IN_SQL("v")}
       GROUP BY c.grp, c.pid, p.id, p.name, p.file_no, p.age, p.sex, v.current_status,
                v.results_status, v.id
       ORDER BY (count(*) FILTER (WHERE NOT c.results_synced)) DESC, min(c.fetched_at)`,
@@ -1124,6 +1128,7 @@ export async function advanceSample(
     }
 
     if (to === "drawing") {
+      if (visitId) await assertCheckedIn(client, visitId);
       await assertPatientIsFree(client, visitId, "start the collection");
       await assertStationFree(client, visitId, LAB_STATION, "start the collection");
       if (visitId) await resumeVisitTx(client, visitId, { actorId, actorRole: "lab" });
@@ -1307,14 +1312,15 @@ export async function uploadReport(
   }
 
   const { rows } = await db.query(
-    `SELECT o.id, o.payment_status, o.sample_status, o.report_file_url, o.uploaded_at, o.kind,
-            v.patient_id
+    `SELECT o.id, o.visit_id, o.payment_status, o.sample_status, o.report_file_url, o.uploaded_at,
+            o.kind, v.patient_id
        FROM giniflow_lab_orders o
        JOIN giniflow_visits v ON v.id = o.visit_id
       WHERE o.id = $1`,
     [orderId],
   );
   if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
+  await assertCheckedIn(db, rows[0].visit_id);
   if (!opensLabGate(rows[0].payment_status)) {
     throw Object.assign(new Error("Payment is not cleared for this order"), { status: 409 });
   }
@@ -1381,12 +1387,14 @@ async function replaceOrderReport(order, { base64, fileName, mediaType, actorId 
 
 export async function uploadOutsideReport(orderId, { replace = false, ...input }, db = pool) {
   const { rows } = await db.query(
-    `SELECT o.id, o.is_outsourced, o.sample_status, o.kind, o.report_file_url, v.patient_id
+    `SELECT o.id, o.visit_id, o.is_outsourced, o.sample_status, o.kind, o.report_file_url,
+            v.patient_id
        FROM giniflow_lab_orders o JOIN giniflow_visits v ON v.id = o.visit_id
       WHERE o.id = $1`,
     [orderId],
   );
   if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
+  await assertCheckedIn(db, rows[0].visit_id);
   if (!rows[0].is_outsourced) {
     throw Object.assign(new Error("Only an outsourced test's report can be uploaded here"), {
       status: 403,
@@ -1761,6 +1769,7 @@ export async function markLabCaseAction(
   const resolvedVisitId = await resolveVisitForCase(db, caseNo);
   const visit = await homeVisit(db, resolvedVisitId);
   refuseSiteForNonHome(site, visit);
+  if (!undo) await assertCheckedIn(db, resolvedVisitId);
 
   if (action === "report_uploaded" && !undo && (await caseCollectedAtHome(db, caseNo))) {
     await assertHomePaymentCleared(db, resolvedVisitId);
@@ -2057,6 +2066,7 @@ export async function uploadLabCaseReport(
     throw Object.assign(new Error("This case is not linked to a patient yet"), { status: 409 });
   }
   const visitId = await resolveVisitForCase(db, caseNo);
+  await assertCheckedIn(db, visitId);
   if (await isLabOnlyVisit(db, visitId)) {
     await assertLabBillingCleared(db, visitId, "the report");
   }

@@ -3,6 +3,7 @@ import pool from "../../config/db.js";
 import { LAB_ONLY_DOCTOR } from "../../../shared/labOnly.js";
 import { labOnlyPredicate } from "./labOnlyVisits.js";
 import { NURSE_RAPID_TESTS } from "../../../shared/nurseTests.js";
+import { CASE_ACTION_VERBS } from "../../../shared/labStages.js";
 
 export const DOCTOR_LEG_STATUSES = [
   "vitals_done",
@@ -103,8 +104,19 @@ const visitArrival = (v) =>
   `COALESCE((SELECT min(fe.occurred_at) FROM giniflow_visit_events fe
               WHERE fe.visit_id = ${v}.id), NOW())`;
 
+const SAMPLED_CASE_ACTIONS = CASE_ACTION_VERBS.slice(CASE_ACTION_VERBS.indexOf("sample_taken"));
+
+const caseActionAt = (actions) =>
+  `(SELECT min(COALESCE(ca.collected_at, ca.created_at)) FROM giniflow_lab_case_actions ca
+     WHERE ca.case_no = lc.case_no
+       AND ca.action IN (${actions.map((a) => `'${a}'`).join(", ")}))`;
+
+export const CASE_REPORTED_IN_SCRIBE_SQL = `EXISTS (
+  SELECT 1 FROM giniflow_lab_case_actions ra
+   WHERE ra.case_no = lc.case_no AND ra.action = 'report_uploaded')`;
+
 export const caseReportedBeforeVisit = (v) =>
-  `COALESCE(${caseTime("reported_on")} < ${visitArrival(v)}, FALSE)`;
+  `COALESCE(${caseActionAt(["report_uploaded"])} < ${visitArrival(v)}, FALSE)`;
 
 const visitCheckedInAt = (v) =>
   `COALESCE((SELECT min(ce.occurred_at) FROM giniflow_visit_events ce
@@ -119,8 +131,7 @@ export const caseFromEarlierLabOnlyVisit = (v) =>
     AND COALESCE(${caseTime("registered_at")} < ${visitCheckedInAt(v)}, FALSE))`;
 
 export const caseSampledBeforeVisit = (v) =>
-  `COALESCE(LEAST(${caseTime("collected_on")}, ${caseTime("received_on")}, ${caseTime("reported_on")})
-            < ${visitArrival(v)}, FALSE)`;
+  `COALESCE(${caseActionAt(SAMPLED_CASE_ACTIONS)} < ${visitArrival(v)}, FALSE)`;
 
 const caseWorkedAsOrder = (v) =>
   `EXISTS (SELECT 1 FROM giniflow_lab_orders lo
