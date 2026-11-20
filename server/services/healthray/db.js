@@ -426,6 +426,11 @@ const normName = (s) =>
 
 const joinedName = (s) => normName(s).replace(/ /g, "");
 
+export const isSameNamedPerson = (existing, incomingName, incomingSex) =>
+  !(existing.sex && incomingSex && existing.sex !== incomingSex) &&
+  !!joinedName(existing.name) &&
+  joinedName(existing.name) === joinedName(incomingName);
+
 function personLooksSame(existing, incomingName, incomingSex) {
   if (existing.sex && incomingSex && existing.sex !== incomingSex) return false;
   const a = normName(existing.name);

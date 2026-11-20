@@ -1,7 +1,7 @@
 import pool from "../../config/db.js";
 import { createLogger } from "../logger.js";
 import { fetchPatientList } from "./client.js";
-import { upsertPatient } from "./db.js";
+import { isSameNamedPerson, upsertPatient } from "./db.js";
 import { buildPatientData } from "../cron/healthraySync.js";
 
 const { log, error } = createLogger("HealthRay Patients");
@@ -67,20 +67,31 @@ export async function classifyHealthrayRows(rows) {
   const healthIds = [...new Set(rows.map(healthrayIdOf).filter(Boolean))];
   const uhids = [...new Set(rows.map(uhidOf).filter(Boolean))];
   const { rows: found } = await pool.query(
-    `SELECT health_id, file_no FROM patients
+    `SELECT health_id, file_no, name, sex FROM patients
       WHERE health_id = ANY($1::text[]) OR file_no = ANY($2::text[])`,
     [healthIds, uhids],
   );
   const knownHealthIds = new Set(found.map((r) => r.health_id).filter(Boolean));
   const legacyUhids = new Set(found.filter((r) => !r.health_id).map((r) => r.file_no));
-  const anyUhids = new Set(found.map((r) => r.file_no).filter(Boolean));
+  const holdersByUhid = new Map(found.filter((r) => r.file_no).map((r) => [r.file_no, r]));
+
+  const heldBySamePerson = (row, uhid) => {
+    const holder = holdersByUhid.get(uhid);
+    if (!holder) return false;
+    const { name, sex } = buildPatientData(asAppointmentShape(row));
+    return isSameNamedPerson(holder, name, sex);
+  };
 
   const result = { present: [], missing: [], unusable: [] };
   for (const row of rows) {
     const healthId = healthrayIdOf(row);
     const uhid = uhidOf(row);
     if (!healthId && !uhid) result.unusable.push(row);
-    else if (healthId ? knownHealthIds.has(healthId) || legacyUhids.has(uhid) : anyUhids.has(uhid))
+    else if (
+      healthId
+        ? knownHealthIds.has(healthId) || legacyUhids.has(uhid) || heldBySamePerson(row, uhid)
+        : holdersByUhid.has(uhid)
+    )
       result.present.push(row);
     else result.missing.push(row);
   }

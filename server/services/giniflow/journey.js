@@ -51,6 +51,7 @@ import {
   LIVE_LAB_CASE_SQL,
   caseFromEarlierLabOnlyVisit,
   caseSampledBeforeVisit,
+  CASE_REPORTED_IN_SCRIBE_SQL,
 } from "./testsHold.js";
 import { billSuppressor } from "./testCancel.js";
 import {
@@ -276,7 +277,7 @@ export async function labCaseAlreadyReported(db, visitId) {
                OR (lc.patient_id IS NULL
                    AND lc.raw_list_json->'patient'->>'healthray_uid' = p.file_no))
           AND ${LIVE_LAB_CASE_SQL("lc")}
-          AND COALESCE(lc.raw_detail_json, lc.raw_list_json)->>'reported_on' IS NOT NULL
+          AND ${CASE_REPORTED_IN_SCRIBE_SQL}
      ) AS reported
        FROM giniflow_visits v JOIN patients p ON p.id = v.patient_id
       WHERE v.id = $1`,
@@ -776,6 +777,7 @@ export async function arriveForAppointmentIn(
     keepPlannedTotal: true,
   });
   await syncLabStepsFromLab(client, visitId);
+  await tickBillingFromPaidBills(client, visitId);
   return { raised, added: steps.length };
 }
 
@@ -968,6 +970,7 @@ export async function checkInIn(
     keepPlannedTotal: alreadyPlanned,
   });
   await syncLabStepsFromLab(client, visitId);
+  await tickBillingFromPaidBills(client, visitId);
   return { alreadyHere, alreadyPlanned, raised };
 }
 
@@ -1589,6 +1592,20 @@ export async function syncMachineSteps(db, visitId) {
         row.step === "done" ? ["pending", "in_progress", "skipped"] : ["pending", "skipped"],
       ],
     );
+  }
+}
+
+async function tickBillingFromPaidBills(db, visitId) {
+  const { rows } = await db.query(
+    `SELECT b.id AS bill_id, ${MONEY_COLUMNS}
+       FROM bills b
+      WHERE b.visit_id = $1 AND b.status = 'final' AND b.bill_type = 'invoice'`,
+    [visitId],
+  );
+  for (const row of rows) {
+    const money = moneyFrom(row);
+    const refunded = money.credited > 0 && money.credited >= money.payable;
+    if (money.balance === 0 && !refunded) await tickBillingIfConsultPaid(db, row.bill_id, visitId);
   }
 }
 

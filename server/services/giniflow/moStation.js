@@ -31,6 +31,7 @@ import { machineForTest } from "../../../shared/machineStages.js";
 import { ALLERGY_NOT_ASKED } from "../../../shared/giniflowAllergy.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { TESTS_HOLD_SQL, chiefWaitClock } from "./testsHold.js";
+import { CHECKED_IN_SQL } from "./stepSql.js";
 
 export const CLOSEABLE_CATEGORY = "in_control";
 
@@ -157,6 +158,7 @@ const QUEUE_SQL = `
     LEFT JOIN LATERAL (${TESTS_HOLD_SQL("v", "p")}) hold ON TRUE
    WHERE v.visit_date = $1::date
      AND v.current_status = ANY($2)
+     AND ${CHECKED_IN_SQL("v")}
      AND NOT COALESCE(p.is_blocked, FALSE)
      -- Samples-only patients belong to the lab track, not the MO's queue. See
      -- the same clause in doctorStation.js.

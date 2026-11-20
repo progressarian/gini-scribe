@@ -1,5 +1,5 @@
 import { skipsChiefStop } from "./journey.js";
-import { AUTO_LAB_BILLING_SQL } from "./stepSql.js";
+import { AUTO_LAB_BILLING_SQL, CHECKED_IN_SQL } from "./stepSql.js";
 import pool from "../../config/db.js";
 import { advanceStatus, returnToQueue, budgetColour, IST_TODAY } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup } from "./board.js";
@@ -89,6 +89,7 @@ const QUEUE_SQL = `
     ) bio ON TRUE
    WHERE v.visit_date = $1::date
      AND v.current_status = ANY($2)
+     AND ${CHECKED_IN_SQL("v")}
      AND NOT COALESCE(p.is_blocked, FALSE)
      -- A samples-only patient checks in like anyone else, so this queue used to
      -- offer them to the station — and calling one in was the only way they ever
@@ -161,6 +162,7 @@ const DONE_SQL = `
     ) done_ev ON TRUE
    WHERE v.visit_date = $1::date
      AND (gv.id IS NOT NULL OR v.current_status = ANY($2))
+     AND ${CHECKED_IN_SQL("v")}
      AND NOT ${labOnlyPredicate("v", "$4")}
      AND (
        $3::text IS NULL

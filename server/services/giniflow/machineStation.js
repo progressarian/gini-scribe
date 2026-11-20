@@ -49,6 +49,7 @@ import {
   revertStart,
 } from "./stationLock.js";
 import { publish } from "./eventHub.js";
+import { CHECKED_IN_SQL, assertCheckedIn } from "./stepSql.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { hasExtraReports } from "./extraReports.js";
 import { reopenForTests } from "./lateTests.js";
@@ -296,6 +297,7 @@ async function loadDayMachineOrders(visitDate, search, db) {
         AND NOT COALESCE(p.is_blocked, FALSE)
         AND o.urgency = 'today'
         AND v.current_status NOT IN ('no_show', 'cancelled')
+        AND ${CHECKED_IN_SQL("v")}
         AND (
           $2::text IS NULL
           OR p.name ILIKE '%' || $2 || '%'
@@ -801,6 +803,7 @@ export async function advanceMachineTest(
 
     const rung = machineRungFor(toStage);
     if (rung?.needsPatient) {
+      await assertCheckedIn(client, row.visit_id);
       await assertPatientIsFree(client, row.visit_id, rung.actionNoun);
     }
     const catalogue = await getMachines(client);

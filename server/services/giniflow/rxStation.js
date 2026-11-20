@@ -23,6 +23,7 @@ import {
 } from "./rxFollowups.js";
 import { holdsForVisits } from "./coordinatorHold.js";
 import { TESTS_HOLD_SQL, chiefWaitClock } from "./testsHold.js";
+import { CHECKED_IN_SQL } from "./stepSql.js";
 
 const QUEUE_STATUSES = ["doctor_done", "rx_pending", "with_rx"];
 const DONE_STATUSES = ["pharmacy_pending", "dispensed", "exited"];
@@ -79,6 +80,7 @@ const QUEUE_SQL = `
     ) meds ON TRUE
    WHERE v.visit_date = $1::date
      AND v.current_status = ANY($2)
+     AND ${CHECKED_IN_SQL("v")}
      AND NOT COALESCE(p.is_blocked, FALSE)
      AND NOT ${labOnlyPredicate("v", "$3")}
      AND (
@@ -342,6 +344,7 @@ const ECHO_HANDOVER_SQL = `
      AND v.echo_referral
      AND v.echo_handed_over_at IS NULL
      AND v.current_status NOT IN ('cancelled', 'no_show', 'dispensed', 'exited')
+     AND ${CHECKED_IN_SQL("v")}
      AND ($2::text IS NULL OR p.name ILIKE '%' || $2 || '%' OR p.file_no ILIKE '%' || $2 || '%')
    GROUP BY v.id, p.name, p.file_no, doc.short_name, doc.name
    ORDER BY p.name`;

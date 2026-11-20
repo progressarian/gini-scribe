@@ -15,6 +15,7 @@ import { OPEN_LAB_CASES_SQL } from "./labStation.js";
 import { nonTestPredicate } from "../../utils/nonTests.js";
 import { skipSunday } from "../../../shared/followUp.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
+import { CHECKED_IN_SQL } from "./stepSql.js";
 
 const QUEUE_STATUSES = [
   "checked_in",
@@ -144,6 +145,7 @@ const QUEUE_SQL = `
     ) last_ev ON TRUE
    WHERE v.visit_date = $1::date
      AND v.current_status = ANY($2)
+     AND ${CHECKED_IN_SQL("v")}
      AND NOT COALESCE(p.is_blocked, FALSE)
      -- Samples-only patients are not this consultant's queue, and the manager
      -- board has always kept them out of the consultation columns. This query
@@ -191,7 +193,8 @@ const SECOND_CONSULT_SQL = `
      AND NOT EXISTS (SELECT 1 FROM giniflow_visits v WHERE v.appointment_id = a.id)
      AND EXISTS (SELECT 1 FROM giniflow_visits v
                   WHERE v.patient_id = a.patient_id AND v.visit_date = a.appointment_date
-                    AND v.assigned_doctor_id IS DISTINCT FROM d.id)
+                    AND v.assigned_doctor_id IS DISTINCT FROM d.id
+                    AND ${CHECKED_IN_SQL("v")})
      AND NOT EXISTS (SELECT 1 FROM patients bp WHERE bp.id = a.patient_id AND bp.is_blocked)
    ORDER BY a.time_slot NULLS LAST, a.id`;
 

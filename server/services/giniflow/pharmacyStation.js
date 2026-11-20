@@ -24,6 +24,7 @@ import {
 } from "../../../shared/giniflowStatus.js";
 import { LAB_ONLY_DOCTOR, labOnlyHiddenPredicate } from "./labOnlyVisits.js";
 import { hideLabOnlyPatients } from "./floorSettings.js";
+import { CHECKED_IN_SQL } from "./stepSql.js";
 
 const COLUMN_NAME = Object.fromEntries(BOARD_COLUMNS.map((c) => [c.key, c.name]));
 
@@ -143,6 +144,7 @@ const QUEUE_SQL = `
     ) col ON TRUE
    WHERE v.visit_date = $1::date
      AND v.current_status = ANY($2)
+     AND ${CHECKED_IN_SQL("v")}
      AND NOT COALESCE(p.is_blocked, FALSE)
      -- Samples-only patients don't show on any station screen while the
      -- floor has that toggled on (settings/flow) — see awaitingRegistration()
@@ -283,6 +285,7 @@ async function getPendingHandover(visitDate, db = pool, search = null) {
         -- awaitingRegistration() in labStation.js for where this started.
         AND NOT ${labOnlyHiddenPredicate("v", "$2", "$3")}
         AND v.current_status <> ALL($5::text[])
+        AND ${CHECKED_IN_SQL("v")}
         AND NOT EXISTS (
           SELECT 1 FROM medicine_collections c
            WHERE c.medication_id = m.id AND c.collected_date = $1::date
