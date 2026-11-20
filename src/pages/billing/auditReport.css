@@ -73,6 +73,10 @@
   flex-wrap: wrap;
 }
 
+.fset.bill-ui.audit-page .audit-searchbar .audit-status {
+  flex: 0 0 160px;
+}
+
 .fset.bill-ui.audit-page .audit-searchbar .dues-search {
   flex: 1 1 280px;
   min-width: 0;
@@ -125,7 +129,43 @@
 }
 
 .fset.bill-ui.audit-page .audit-totals--split {
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+}
+
+.fset.bill-ui.audit-page .audit-modes {
+  margin: 0 0 12px;
+}
+
+.fset.bill-ui.audit-page .audit-modes__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin: 0 0 6px;
+}
+
+.fset.bill-ui.audit-page .audit-modes__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ui-ink);
+}
+
+.fset.bill-ui.audit-page .audit-modes__head .flow-muted {
+  margin: 0;
+  font-size: 12px;
+}
+
+.fset.bill-ui.audit-page .audit-totals dd.audit-modes__meta {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ui-muted);
+}
+
+.fset.bill-ui.audit-page .audit-net {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 500;
 }
 
 .fset.bill-ui.audit-page .audit-pct {

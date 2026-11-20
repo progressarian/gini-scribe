@@ -536,7 +536,7 @@ test.describe.serial("AU-02 billing audit report", () => {
     const headers = table.locator("thead th");
     const texts = await headers.allInnerTexts();
     expect(texts.join("|")).not.toMatch(/HealthRay|Scribe|Match/);
-    for (const name of ["Total amount", "Discount", "Payable", "Paid", "Due", "Refunded"]) {
+    for (const name of ["Total amount", "Discount", "Payable", "Net paid", "Due", "Refunded"]) {
       expect(texts.join("|")).toContain(name);
     }
     const cRow = table.locator("tbody tr", { hasText: made.C.bill_no });
