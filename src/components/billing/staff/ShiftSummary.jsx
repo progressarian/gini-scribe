@@ -21,6 +21,14 @@ export function Handover({ shift }) {
             {shift.refunded.cash ? `−${money(shift.refunded.cash)}` : money(0)}
           </td>
         </tr>
+        {shift.healthray?.cash_collected ? (
+          <tr>
+            <th scope="row">+ Paid in HealthRay by cash</th>
+            <td className="brep-num">
+              {money(shift.healthray.cash_collected - (shift.healthray.cash_refunded ?? 0))}
+            </td>
+          </tr>
+        ) : null}
         <tr className="bdash-bridge__total">
           <th scope="row">= Expected in drawer</th>
           <td className="brep-num">{money(shift.expected_cash)}</td>
@@ -55,7 +63,12 @@ export function OtherMoney({ shift, cleared }) {
     ["UPI", net("upi")],
     [NEFT_LABEL, net("neft")],
     ["Deposits taken (in the modes above)", shift.deposits.received],
-    ["Paid in HealthRay (marked here)", shift.healthray.collected - shift.healthray.refunded],
+    [
+      "Paid in HealthRay, not cash (marked here)",
+      shift.healthray.collected -
+        shift.healthray.refunded -
+        ((shift.healthray.cash_collected ?? 0) - (shift.healthray.cash_refunded ?? 0)),
+    ],
     ["Paid earlier / online", shift.prepaid.collected],
     [
       "Pharmacy cash (counted in the expected drawer)",

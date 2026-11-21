@@ -69,9 +69,85 @@
 }
 .slip-sign {
   display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
   justify-content: space-between;
+  gap: 16px;
   margin-top: 40px;
   color: #3d4f63;
+}
+.slip-sign__boxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px 40px;
+}
+.slip-sign__boxes > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+  font-size: 13px;
+}
+.slip-sign__line {
+  display: block;
+  height: 32px;
+  border-bottom: 1px solid #1a2332;
+}
+.slip-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px 16px;
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+.slip-meta > div {
+  min-width: 0;
+}
+.slip-meta dt {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #5b6b7d;
+}
+.slip-meta dd {
+  margin: 2px 0 0;
+  color: #1a2332;
+  overflow-wrap: anywhere;
+}
+.slip-note {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  color: #5b6b7d;
+}
+.slip-table th {
+  padding-right: 12px;
+}
+.slip-table td {
+  white-space: nowrap;
+}
+@media (max-width: 600px) {
+  .slip {
+    margin: 0;
+    padding: 16px;
+    font-size: 13.5px;
+  }
+  .slip-body .slip-head :is(h1, h2, h3) {
+    font-size: 18px;
+  }
+  .slip-table {
+    max-width: none;
+  }
+  .slip-sign {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .slip-sign__boxes > div {
+    flex: 1 1 100%;
+  }
 }
 @media print {
   .slip {
@@ -82,8 +158,13 @@
   .slip-actions {
     display: none;
   }
-  .slip-table tr {
+  .slip-table tr,
+  .slip-meta,
+  .slip-sign {
     break-inside: avoid;
+  }
+  .slip-meta {
+    background: none;
   }
 }
 .slip-head .slip-hospital {

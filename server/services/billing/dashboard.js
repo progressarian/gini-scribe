@@ -1,6 +1,11 @@
 import pool from "../../config/db.js";
 import { paise } from "../../../shared/labPayment.js";
-import { DEPOSIT_MODE, HEALTHRAY_MODE, PREPAID_MODE } from "../../../shared/billingVocab.js";
+import {
+  DEPOSIT_MODE,
+  HEALTHRAY_MODE,
+  PREPAID_MODE,
+  UPI_MONEY_COLUMNS,
+} from "../../../shared/billingVocab.js";
 import { indiaToday } from "./categoryResolver.js";
 import { unsettledOf } from "../../../shared/billingDashboardText.js";
 import { bucketsOf, cleanDashboardFilters, previousRange } from "./dashboardPeriods.js";
@@ -30,9 +35,7 @@ import { discountsFor } from "./dashboardDiscounts.js";
 export const MONEY_COLUMNS = [
   { key: "cash", label: "Cash" },
   { key: "card", label: "Swipe" },
-  { key: "upi_bharatpe", label: "BharatPe (QR Code)" },
-  { key: "upi_paytm", label: "Paytm" },
-  { key: "upi_other", label: "Other UPI" },
+  ...UPI_MONEY_COLUMNS,
   { key: "upi_unknown", label: "UPI (app not recorded)" },
   { key: "neft", label: "NEFT / CHEQUE" },
   { key: HEALTHRAY_MODE, label: "Paid in HealthRay (mode not recorded)" },

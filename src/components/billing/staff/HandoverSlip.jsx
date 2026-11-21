@@ -26,6 +26,24 @@ function byModeAndApp(payments) {
   return [...sums.entries()];
 }
 
+function differenceText(difference, status) {
+  if (difference === null)
+    return status.key === "open" || status.key === "left_open" ? "Not counted yet" : "Not counted";
+  if (difference < 0) return `Short by ${money(-difference)}`;
+  if (difference > 0) return `Extra ${money(difference)}`;
+  return "₹0 · Matches";
+}
+
+function resultText(status, difference) {
+  if (status.key === "matches") return "Cash matches";
+  if (status.key === "short") return `Cash short by ${money(-difference)}`;
+  if (status.key === "over") return `Cash extra by ${money(difference)}`;
+  if (status.key === "not_counted") return "Cash not counted";
+  return "Shift still open";
+}
+
+const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
+
 export default function HandoverSlip({ data, level = 1 }) {
   const Title = `h${level}`;
   const Section = `h${level + 1}`;
@@ -33,6 +51,9 @@ export default function HandoverSlip({ data, level = 1 }) {
   const snap = shift.handover;
   const paidBack = snap?.refunded.cash ?? shift.refunded.cash;
   const pharmacy = snap?.pharmacy ?? shift.pharmacy;
+  const healthrayFlow = snap?.healthray ?? shift.healthray;
+  const healthrayCash = (healthrayFlow.cash_collected ?? 0) - (healthrayFlow.cash_refunded ?? 0);
+  const healthrayOther = shift.healthray.collected - (shift.healthray.cash_collected ?? 0);
   const pharmacyCash = pharmacy ? pharmacy.cash_collected - pharmacy.cash_refunded : 0;
   const expected = snap?.expected_cash ?? shift.expected_cash;
   const counted = snap ? snap.counted_cash : shift.counted_cash;
@@ -47,60 +68,81 @@ export default function HandoverSlip({ data, level = 1 }) {
       <header className="slip-head">
         {data.hospital ? <p className="slip-hospital">{data.hospital}</p> : null}
         <Title>Cash handover — {shift.is_open ? "shift still open" : "shift closed"}</Title>
-        <p>
-          <strong>{shift.user.name}</strong> · opened {clock(shift.opened_at)}
-          {shift.closed_at ? ` · closed ${clock(shift.closed_at)}` : ""} ({hoursOpen(shift)})
-        </p>
-        <p>
-          Status: <strong>{status.label}</strong>
-          {snap && !snap.closed_by_owner ? " · closed by an admin" : ""}
-          {shift.note ? ` · Note: “${shift.note}”` : ""}
-        </p>
+        <dl className="slip-meta">
+          <div>
+            <dt>Staff</dt>
+            <dd>{shift.user.name}</dd>
+          </div>
+          <div>
+            <dt>Shift started</dt>
+            <dd>{clock(shift.opened_at)}</dd>
+          </div>
+          <div>
+            <dt>Shift closed</dt>
+            <dd>
+              {shift.closed_at ? clock(shift.closed_at) : "Still open"} ({hoursOpen(shift)})
+            </dd>
+          </div>
+          <div>
+            <dt>Result</dt>
+            <dd>
+              <strong>{resultText(status, difference)}</strong>
+              {snap && !snap.closed_by_owner ? " · closed by an admin" : ""}
+            </dd>
+          </div>
+          {shift.note ? (
+            <div>
+              <dt>Note</dt>
+              <dd>“{shift.note}”</dd>
+            </div>
+          ) : null}
+        </dl>
       </header>
 
       <section aria-labelledby="slip-cash">
         <Section id="slip-cash">Cash in the drawer</Section>
         <table className="slip-table">
           <tbody>
-            <Row label="Opening cash" value={money(shift.opening_cash)} />
-            <Row label="+ Cash taken" value={money(snap?.collected.cash ?? shift.collected.cash)} />
-            <Row label="− Cash paid back" value={paidBack ? `−${money(paidBack)}` : money(0)} />
-            {pharmacyCash ? (
-              <Row label="+ Pharmacy cash (net)" value={money(pharmacyCash)} />
-            ) : null}
-            <Row label="= Expected in drawer" value={money(expected)} strong />
+            <Row label="Cash at the start" value={money(shift.opening_cash)} />
             <Row
-              label="Counted"
+              label="Cash received from patients"
+              value={`+${money(snap?.collected.cash ?? shift.collected.cash)}`}
+            />
+            <Row
+              label="Cash refunded to patients"
+              value={paidBack ? `−${money(paidBack)}` : money(0)}
+            />
+            {healthrayCash ? (
+              <Row label="Paid in HealthRay by cash" value={`+${money(healthrayCash)}`} />
+            ) : null}
+            {pharmacyCash ? (
+              <Row label="Pharmacy cash (after refunds)" value={`+${money(pharmacyCash)}`} />
+            ) : null}
+            <Row label="Cash that should be in the drawer" value={money(expected)} strong />
+            <Row
+              label="Cash counted"
               value={
                 counted === null
                   ? shift.is_open
-                    ? "Not closed yet"
+                    ? "Not counted yet"
                     : "Not counted"
                   : money(counted)
               }
             />
-            <Row
-              label="Difference"
-              value={
-                difference === null
-                  ? "—"
-                  : `${difference < 0 ? "−" : difference > 0 ? "+" : ""}${money(Math.abs(difference))} ${status.label}`
-              }
-              strong
-            />
+            <Row label="Difference" value={differenceText(difference, status)} strong />
           </tbody>
         </table>
         {changed ? (
           <p className="slip-warn">
-            A payment in this shift was changed after it closed: expected cash is now{" "}
-            {money(shift.expected_cash)}. The figures above are as handed over.
+            A payment in this shift was changed after it closed, so the drawer should now hold{" "}
+            {money(shift.expected_cash)}. The figures above are what was handed over.
           </p>
         ) : null}
       </section>
 
       {denominations ? (
         <section aria-labelledby="slip-notes">
-          <Section id="slip-notes">Note count</Section>
+          <Section id="slip-notes">Notes counted</Section>
           <table className="slip-table">
             <tbody>
               {NOTES.filter((note) => denominations.notes?.[note]).map((note) => (
@@ -120,20 +162,22 @@ export default function HandoverSlip({ data, level = 1 }) {
       ) : null}
 
       <section aria-labelledby="slip-other">
-        <Section id="slip-other">Other money (not in the drawer)</Section>
+        <Section id="slip-other">Money not in the drawer</Section>
+        <p className="slip-note">Received another way, so it is not part of the cash count.</p>
         <table className="slip-table">
           <tbody>
             {otherModes.map(([label, sum]) => (
-              <Row key={label} label={`${label} (${sum.count})`} value={money(sum.amount)} />
+              <Row
+                key={label}
+                label={`${label} (${plural(sum.count, "payment")})`}
+                value={money(sum.amount)}
+              />
             ))}
             {!otherModes.length ? (
               <Row label={`Card / UPI / ${NEFT_LABEL}`} value={money(0)} />
             ) : null}
-            {shift.healthray.collected ? (
-              <Row
-                label="Paid in HealthRay (marked here)"
-                value={money(shift.healthray.collected)}
-              />
+            {healthrayOther ? (
+              <Row label="Paid in HealthRay (not cash)" value={money(healthrayOther)} />
             ) : null}
             {shift.prepaid.collected ? (
               <Row label="Paid earlier / online" value={money(shift.prepaid.collected)} />
@@ -149,12 +193,12 @@ export default function HandoverSlip({ data, level = 1 }) {
       </section>
 
       <section aria-labelledby="slip-count">
-        <Section id="slip-count">Work in this shift</Section>
+        <Section id="slip-count">Shift summary</Section>
         <table className="slip-table">
           <tbody>
-            <Row label="Payments taken" value={shift.payment_count} />
-            <Row label="Refunds paid out" value={shift.refund_count} />
-            <Row label="Deposits taken" value={shift.deposits.count} />
+            <Row label="Payments received" value={shift.payment_count} />
+            <Row label="Refunds given" value={shift.refund_count} />
+            <Row label="Deposits received" value={shift.deposits.count} />
             {snap ? <Row label="Patients" value={snap.patients} /> : null}
             {snap ? <Row label="Bills finalised" value={snap.bills_finalised} /> : null}
           </tbody>
@@ -162,7 +206,16 @@ export default function HandoverSlip({ data, level = 1 }) {
       </section>
 
       <footer className="slip-sign">
-        <div>Signature: ______________________</div>
+        <div className="slip-sign__boxes">
+          <div>
+            <span className="slip-sign__line" aria-hidden="true" />
+            Handed over by
+          </div>
+          <div>
+            <span className="slip-sign__line" aria-hidden="true" />
+            Received by
+          </div>
+        </div>
         <div>Printed {clock(new Date().toISOString())}</div>
       </footer>
     </article>

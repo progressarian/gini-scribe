@@ -1394,6 +1394,34 @@ body > [role="dialog"][aria-modal="true"] .bc-shiftask {
 body > [role="dialog"][aria-modal="true"] .bc-shiftask p {
   margin: 0;
 }
+body > [role="dialog"][aria-modal="true"] .bc-shiftask .bc-totals--drawer {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+body > [role="dialog"][aria-modal="true"] .bc-shiftask .bc-shiftask__cap {
+  padding-bottom: 4px;
+  text-align: left;
+  font-weight: 600;
+  color: #0f172a;
+}
+body > [role="dialog"][aria-modal="true"] .bc-shiftask .bc-totals--drawer th,
+body > [role="dialog"][aria-modal="true"] .bc-shiftask .bc-totals--drawer td {
+  padding: 4px 0;
+  border-bottom: 1px solid #e2e8f0;
+  font-weight: 400;
+  text-align: left;
+}
+body > [role="dialog"][aria-modal="true"] .bc-shiftask .bc-totals--drawer td {
+  padding-left: 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+body > [role="dialog"][aria-modal="true"] .bc-shiftask .bc-totals--drawer tr:last-child > * {
+  font-weight: 700;
+  color: #0f172a;
+  border-bottom: 0;
+}
 body > [role="dialog"][aria-modal="true"] .bc-shiftask .bc-head__row {
   display: flex;
   align-items: flex-end;
@@ -3167,5 +3195,42 @@ body > [role="dialog"][aria-modal="true"] .bc-cc__warn {
 @container (max-width: 760px) {
   .gf .bc-shiftgrid {
     grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .gf .bc-totals.bc-totals--drawer {
+    max-width: none;
+  }
+  .gf .bc-shiftgrid__close {
+    padding-top: 10px;
+    border-top: 1px solid var(--bd);
+  }
+  .gf .bc-shiftgrid__close > .bc-head__row {
+    margin-top: 0;
+  }
+}
+@container (max-width: 520px) {
+  .gf .bc-card[aria-label="Shift"] {
+    padding: 10px;
+  }
+  .gf .bc-card[aria-label="Shift"] .bc-pastday {
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
+  .gf .bc-shiftgrid__close > .bc-head__row > .bc-field {
+    flex: 1 1 100%;
+  }
+  .gf .bc-shiftgrid__close > .bc-head__row > .bc-hint {
+    flex: 1 1 100%;
+  }
+  .gf .bc-shiftgrid__close > .bc-head__row > .st-btn {
+    flex: 1 1 100%;
+    min-height: 40px;
+    justify-content: center;
+  }
+  .gf .bc-card[aria-label="Shift"] .bc-notes__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .gf .bc-card[aria-label="Shift"] .ltablewrap {
+    overflow-x: visible;
   }
 }

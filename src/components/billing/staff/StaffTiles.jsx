@@ -1,3 +1,4 @@
+import { UPI_MONEY_KEYS } from "../../../../shared/billingVocab.js";
 import { changeOf, count, money, rangeLabel } from "../dashboard/dashboardText";
 
 function Tile({ label, value, hint, children }) {
@@ -22,7 +23,7 @@ function Line({ label, value }) {
 }
 
 const sumOf = (amounts = {}, keys) => keys.reduce((sum, key) => sum + (amounts[key] ?? 0), 0);
-const NON_CASH = ["card", "upi_bharatpe", "upi_paytm", "upi_other", "upi_unknown", "neft"];
+const NON_CASH = ["card", ...UPI_MONEY_KEYS, "upi_unknown", "neft"];
 
 export default function StaffTiles({ data }) {
   const total = data.total;

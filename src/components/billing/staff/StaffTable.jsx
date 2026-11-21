@@ -1,6 +1,7 @@
+import { UPI_MONEY_KEYS } from "../../../../shared/billingVocab.js";
 import { count, money } from "../dashboard/dashboardText";
 
-const NON_CASH = ["card", "upi_bharatpe", "upi_paytm", "upi_other", "upi_unknown", "neft"];
+const NON_CASH = ["card", ...UPI_MONEY_KEYS, "upi_unknown", "neft"];
 const IN_HEALTHRAY = ["healthray", "prepaid"];
 
 const sumOf = (amounts = {}, keys) => keys.reduce((sum, key) => sum + (amounts[key] ?? 0), 0);
