@@ -96,7 +96,6 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
   const ready =
     amount > 0 &&
     Boolean(form.mode) &&
-    (!needsReference || form.reference.trim()) &&
     (!needsApp || form.upiApp) &&
     !needsShift &&
     !receive.isPending;
@@ -245,7 +244,7 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
             )}
             {needsReference && (
               <label className="bc-field">
-                <span className="bc-field__lbl">Reference *</span>
+                <span className="bc-field__lbl">Reference (optional)</span>
                 <input
                   className="bc-field__in"
                   maxLength={60}

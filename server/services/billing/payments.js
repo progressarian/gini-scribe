@@ -83,6 +83,7 @@ const TAKING = {
   mode: "A payment must be taken as one of",
   modes: [...TAKE_MODES, DEPOSIT_MODE, PREPAID_MODE],
   upiApp: true,
+  referenceOptional: true,
   reference: (mode) => `A ${MODE_LABEL[mode]} payment needs its reference number`,
   none: "Enter the payment being taken",
   many: `At most ${PAYMENTS_AT_ONCE} payments can be taken at once`,
@@ -127,7 +128,7 @@ function cleanPayment(entry, words) {
   const amount = paise(cleanMoney(entry?.amount, words.amount));
   if (amount <= 0) throw httpError(400, words.positive);
   const reference = typeof entry?.reference === "string" ? entry.reference.trim() : "";
-  if (!NO_REFERENCE.includes(mode) && !reference) {
+  if (!words.referenceOptional && !NO_REFERENCE.includes(mode) && !reference) {
     throw httpError(400, words.reference(mode));
   }
   if (reference.length > REFERENCE_MAX) {

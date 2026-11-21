@@ -13,13 +13,12 @@ export const needsReference = (mode) => !!mode && mode !== "cash";
 export const paidModeProblem = ({ mode, upiApp, reference }) => {
   if (!mode) return "Choose how the patient paid — cash, card, UPI or NEFT / cheque.";
   if (needsUpiApp(mode) && !upiApp) return "Choose the UPI app.";
-  if (needsReference(mode) && !reference.trim()) return "Add the reference number.";
   return null;
 };
 
 export const paidModeBody = ({ mode, upiApp, reference }) => ({
   mode,
-  reference: needsReference(mode) ? reference.trim() : null,
+  reference: needsReference(mode) ? reference.trim() || null : null,
   upiApp: needsUpiApp(mode) ? upiApp : null,
 });
 
@@ -59,7 +58,7 @@ export default function PaidModeFields({
       )}
       {needsReference(mode) && (
         <label className="bc-field">
-          <span className="bc-field__lbl">Reference</span>
+          <span className="bc-field__lbl">Reference (optional)</span>
           <input
             className="bc-field__in"
             value={reference}

@@ -194,10 +194,8 @@ function splitPayments(split, left, extraToDeposit = false) {
     if (!Number.isInteger(amount) || amount <= 0) {
       throw httpError(400, "Each part of a split needs an amount above zero");
     }
-    const reference = part.mode === DRAWER_MODE ? null : String(part.reference || "").trim();
-    if (part.mode !== DRAWER_MODE && !reference) {
-      throw httpError(400, `The ${part.mode.toUpperCase()} part needs its reference number`);
-    }
+    const reference =
+      part.mode === DRAWER_MODE ? null : String(part.reference || "").trim() || null;
     return { mode: part.mode, amount, reference, upi_app: cleanUpiApp(part.mode, part.upiApp) };
   });
   const total = payments.reduce((sum, part) => sum + part.amount, 0);
@@ -255,10 +253,8 @@ function paymentsFor(view, input) {
   if (!TAKE_MODES.includes(input.mode)) {
     throw httpError(400, `Choose how the rest is paid: ${TAKE_MODES.join(", ")}`);
   }
-  const reference = input.mode === DRAWER_MODE ? null : String(input.reference || "").trim();
-  if (input.mode !== DRAWER_MODE && !reference) {
-    throw httpError(400, `A ${input.mode.toUpperCase()} payment needs its reference number`);
-  }
+  const reference =
+    input.mode === DRAWER_MODE ? null : String(input.reference || "").trim() || null;
   return [
     ...wanted,
     { mode: input.mode, amount: left, reference, upi_app: cleanUpiApp(input.mode, input.upiApp) },

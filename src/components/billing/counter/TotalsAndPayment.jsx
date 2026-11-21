@@ -93,13 +93,6 @@ export default function TotalsAndPayment({
     (laterChosen || (entered > 0 && entered === balance));
   const busy = take.isPending || final.isPending;
   const missingMode = rows.some((row) => paiseOf(row.amount) > 0 && !row.mode);
-  const missingReference = rows.some(
-    (row) =>
-      paiseOf(row.amount) > 0 &&
-      row.mode &&
-      !NO_REFERENCE.includes(row.mode) &&
-      !row.reference.trim(),
-  );
   const missingUpiApp = rows.some(
     (row) => paiseOf(row.amount) > 0 && needsUpiApp(row.mode) && !row.upiApp,
   );
@@ -125,7 +118,6 @@ export default function TotalsAndPayment({
     shiftClosed &&
       typedRows.some((row) => row.mode === "cash" || !row.mode) &&
       "Cash needs an open shift — open one above.",
-    missingReference && "Add the reference for each card, UPI or NEFT / cheque payment.",
     missingUpiApp && "Choose the UPI app for each UPI payment.",
     depositOver && `The deposit holds ${fromPaise(depositAvailable)} — lower the deposit payment.`,
   ].filter(Boolean);
@@ -440,7 +432,7 @@ export default function TotalsAndPayment({
                     )}
                     {row.mode && !NO_REFERENCE.includes(row.mode) && (
                       <label className="bc-field bc-pay__ref">
-                        <span className="bc-field__lbl">Reference</span>
+                        <span className="bc-field__lbl">Reference (optional)</span>
                         <input
                           className="bc-field__in"
                           maxLength={60}
@@ -500,12 +492,6 @@ export default function TotalsAndPayment({
             </div>
           )}
 
-          {missingReference && (
-            <div className="bc-hint">
-              Add the reference for each card, UPI or NEFT / cheque payment.
-            </div>
-          )}
-
           {missingUpiApp && <div className="bc-hint">Choose the UPI app for each UPI payment.</div>}
 
           {depositOver && (
@@ -529,7 +515,6 @@ export default function TotalsAndPayment({
                 (entered <= 0 && !finishes) ||
                 entered > balance ||
                 missingMode ||
-                missingReference ||
                 missingUpiApp ||
                 depositOver ||
                 cashWithoutShift ||

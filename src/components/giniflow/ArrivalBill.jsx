@@ -91,18 +91,12 @@ export function arrivalBlocker(preview, choices, shiftOpen = true) {
   }
   if (choices.mode !== SPLIT) {
     if (needsUpiApp(choices.mode) && !choices.upiApp) return UPI_APP_MISSING;
-    return choices.mode === "cash" || choices.reference.trim()
-      ? null
-      : `Enter the ${TAKE_MODE_LABEL[choices.mode]} reference number.`;
+    return null;
   }
   const noMode = choices.split.findIndex((part) => !part.mode);
   if (noMode >= 0) return `Choose how part ${noMode + 1} was paid.`;
   const empty = choices.split.findIndex((part) => toPaise(part.amount) <= 0);
   if (empty >= 0) return `Enter an amount for part ${empty + 1}, or remove it.`;
-  const noRef = choices.split.findIndex((part) => part.mode !== "cash" && !part.reference.trim());
-  if (noRef >= 0) {
-    return `Enter the ${TAKE_MODE_LABEL[choices.split[noRef].mode]} reference number for part ${noRef + 1}.`;
-  }
   const noApp = choices.split.findIndex((part) => needsUpiApp(part.mode) && !part.upiApp);
   if (noApp >= 0) return `Choose the UPI app for part ${noApp + 1}.`;
   const total = splitTotal(choices.split);
@@ -138,7 +132,7 @@ export function arrivalPayload(preview, choices) {
           split: choices.split.map((part) => ({
             mode: part.mode,
             amount: toPaise(part.amount),
-            reference: part.mode === "cash" ? null : part.reference.trim(),
+            reference: part.mode === "cash" ? null : part.reference.trim() || null,
             ...(needsUpiApp(part.mode) ? { upiApp: part.upiApp } : {}),
           })),
         }
@@ -146,7 +140,7 @@ export function arrivalPayload(preview, choices) {
     ...(collect && choices.mode !== SPLIT
       ? {
           mode: choices.mode,
-          reference: choices.mode === "cash" ? null : choices.reference.trim(),
+          reference: choices.mode === "cash" ? null : choices.reference.trim() || null,
           ...(needsUpiApp(choices.mode) ? { upiApp: choices.upiApp } : {}),
         }
       : {}),
@@ -236,7 +230,7 @@ function SplitRows({ split, collect, onChange, extraToDeposit, onExtraToDeposit 
             <input
               className="ab-ref"
               aria-label={`Part ${index + 1} reference`}
-              placeholder={`${TAKE_MODE_LABEL[part.mode]} reference number`}
+              placeholder={`${TAKE_MODE_LABEL[part.mode]} reference (optional)`}
               value={part.reference}
               onChange={(e) => setPart(index, { reference: e.target.value })}
             />
@@ -674,7 +668,7 @@ export default function ArrivalBill({
             <input
               className="ab-ref"
               aria-label={`${TAKE_MODE_LABEL[choices.mode]} reference`}
-              placeholder={`${TAKE_MODE_LABEL[choices.mode]} reference number`}
+              placeholder={`${TAKE_MODE_LABEL[choices.mode]} reference (optional)`}
               value={choices.reference}
               onChange={(e) => onChange({ ...choices, reference: e.target.value })}
             />
