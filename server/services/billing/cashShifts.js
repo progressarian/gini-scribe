@@ -112,12 +112,36 @@ const PHARMACY_DRAWER_SQL = `
   SELECT COALESCE(SUM(CASE WHEN direction = 'in' THEN amount ELSE -amount END), 0) AS cash
     FROM pharmacy_payments WHERE shift_id = $1 AND mode = $2`;
 
+const HEALTHRAY_CASH = `h.mode = '${HEALTHRAY_MODE}' AND h.paid_via = '${DRAWER_MODE}' AND h.voided_at IS NULL`;
+
+const HEALTHRAY_DRAWER_SQL = `
+  SELECT COALESCE(SUM(CASE WHEN h.direction = 'in' THEN h.amount ELSE -h.amount END), 0) AS cash
+    FROM cash_shifts s
+    JOIN payments h ON h.received_by = s.user_id AND ${HEALTHRAY_CASH}
+                   AND h.received_at >= s.opened_at
+                   AND h.received_at <= COALESCE(s.closed_at, NOW())
+   WHERE s.id = $1`;
+
 async function drawerCash(client, shiftId) {
-  const [hospital, pharmacy] = await Promise.all([
+  const [hospital, pharmacy, healthray] = await Promise.all([
     client.query(DRAWER_SQL, [shiftId, DRAWER_MODE]),
     client.query(PHARMACY_DRAWER_SQL, [shiftId, DRAWER_MODE]),
+    client.query(HEALTHRAY_DRAWER_SQL, [shiftId]),
   ]);
-  return (paise(hospital.rows[0].cash) + paise(pharmacy.rows[0].cash)) / 100;
+  return (
+    (paise(hospital.rows[0].cash) + paise(pharmacy.rows[0].cash) + paise(healthray.rows[0].cash)) /
+    100
+  );
+}
+
+export async function shiftHoldingPayment(client, payment) {
+  const { rows } = await client.query(
+    `SELECT id FROM cash_shifts
+      WHERE user_id = $1 AND opened_at <= $2 AND (closed_at IS NULL OR closed_at >= $2)
+      ORDER BY opened_at DESC LIMIT 1`,
+    [payment.received_by, payment.received_at],
+  );
+  return rows[0]?.id ?? null;
 }
 
 export const SHIFT_SQL = `
@@ -129,6 +153,7 @@ export const SHIFT_SQL = `
          t.payment_count, t.bill_count, t.refund_count, t.credit_note_count,
          t.deposits_received, t.deposits_refunded, t.deposit_count,
          hr.healthray_collected, hr.healthray_refunded, hr.prepaid_collected,
+         hr.healthray_cash_in, hr.healthray_cash_out,
          ph.pharmacy_collected, ph.pharmacy_refunded, ph.pharmacy_cash_in, ph.pharmacy_cash_out,
          ph.pharmacy_count
     FROM cash_shifts s
@@ -153,7 +178,11 @@ export const SHIFT_SQL = `
              COALESCE(SUM(h.amount) FILTER (WHERE h.mode = '${HEALTHRAY_MODE}'
                                                 AND h.direction = 'out'), 0) AS healthray_refunded,
              COALESCE(SUM(h.amount) FILTER (WHERE h.mode = '${PREPAID_MODE}'
-                                                AND h.direction = 'in'), 0) AS prepaid_collected
+                                                AND h.direction = 'in'), 0) AS prepaid_collected,
+             COALESCE(SUM(h.amount) FILTER (WHERE ${HEALTHRAY_CASH}
+                                                AND h.direction = 'in'), 0) AS healthray_cash_in,
+             COALESCE(SUM(h.amount) FILTER (WHERE ${HEALTHRAY_CASH}
+                                                AND h.direction = 'out'), 0) AS healthray_cash_out
         FROM payments h
        WHERE h.mode IN ('${HEALTHRAY_MODE}', '${PREPAID_MODE}') AND h.received_by = s.user_id
          AND h.received_at >= s.opened_at AND h.received_at <= COALESCE(s.closed_at, NOW())
@@ -210,6 +239,8 @@ export function shape(row) {
     healthray: {
       collected: money(row.healthray_collected),
       refunded: money(row.healthray_refunded),
+      cash_collected: money(row.healthray_cash_in),
+      cash_refunded: money(row.healthray_cash_out),
     },
     prepaid: { collected: money(row.prepaid_collected) },
     pharmacy: {
@@ -222,7 +253,9 @@ export function shape(row) {
     expected_cash: isOpen
       ? (paise(drawerOf(openingCash, collected, refunded)) +
           paise(row.pharmacy_cash_in) -
-          paise(row.pharmacy_cash_out)) /
+          paise(row.pharmacy_cash_out) +
+          paise(row.healthray_cash_in) -
+          paise(row.healthray_cash_out)) /
         100
       : money(row.expected_cash),
     counted_cash: row.counted_cash === null ? null : money(row.counted_cash),

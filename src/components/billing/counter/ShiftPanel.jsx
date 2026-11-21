@@ -131,12 +131,26 @@ export default function ShiftPanel() {
                       shift.pharmacy.cash_refunded,
                       "pharmacy-cash-out",
                     )}
+                  {shift.healthray?.cash_collected > 0 &&
+                    figure(
+                      "Paid in HealthRay by cash",
+                      shift.healthray.cash_collected,
+                      "healthray-cash",
+                    )}
+                  {shift.healthray?.cash_refunded > 0 &&
+                    figure(
+                      "HealthRay cash paid back",
+                      shift.healthray.cash_refunded,
+                      "healthray-cash-out",
+                    )}
                   {figure("Expected in the drawer", shift.expected_cash, "expected")}
                 </tbody>
               </table>
-              {shift.healthray?.collected > 0 && (
+              {shift.healthray?.collected > (shift.healthray?.cash_collected ?? 0) && (
                 <div className="bc-hint" aria-label="Paid in HealthRay">
-                  Paid in HealthRay {rupees(shift.healthray.collected)} (not in the drawer)
+                  Paid in HealthRay{" "}
+                  {rupees(shift.healthray.collected - (shift.healthray.cash_collected ?? 0))} by
+                  card, UPI, NEFT or mode not recorded (not in the drawer)
                 </div>
               )}
               {shift.pharmacy?.collected > shift.pharmacy?.cash_collected && (

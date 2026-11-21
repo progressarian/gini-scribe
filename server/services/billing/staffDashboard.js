@@ -1,6 +1,11 @@
 import pool from "../../config/db.js";
 import { paise } from "../../../shared/labPayment.js";
-import { DEPOSIT_MODE, HEALTHRAY_MODE, PREPAID_MODE } from "../../../shared/billingVocab.js";
+import {
+  DEPOSIT_MODE,
+  HEALTHRAY_MODE,
+  PREPAID_MODE,
+  UPI_MONEY_COLUMNS,
+} from "../../../shared/billingVocab.js";
 import { indiaToday } from "./categoryResolver.js";
 import { cleanDate, CLOSED_BY_TEST_CANCEL, INT_MAX } from "./common.js";
 import { daysBetween, previousRange } from "./dashboardPeriods.js";
@@ -16,9 +21,7 @@ import { CAPABILITIES, hasAnyCapability } from "../../../shared/permissions.js";
 export const STAFF_MONEY_COLUMNS = [
   { key: "cash", label: "Cash", drawer: true },
   { key: "card", label: "Swipe" },
-  { key: "upi_bharatpe", label: "BharatPe (QR Code)" },
-  { key: "upi_paytm", label: "Paytm" },
-  { key: "upi_other", label: "Other UPI" },
+  ...UPI_MONEY_COLUMNS,
   { key: "upi_unknown", label: "UPI (app not recorded)" },
   { key: "neft", label: "NEFT / CHEQUE" },
   { key: HEALTHRAY_MODE, label: "Paid in HealthRay", outside: true },
@@ -298,10 +301,7 @@ export function shiftInPaise(shift, today) {
       received: paise(shift.deposits.received),
       refunded: paise(shift.deposits.refunded),
     },
-    healthray: {
-      collected: paise(shift.healthray.collected),
-      refunded: paise(shift.healthray.refunded),
-    },
+    healthray: flow(shift.healthray),
     prepaid: { collected: paise(shift.prepaid.collected) },
     pharmacy: {
       count: shift.pharmacy.count,

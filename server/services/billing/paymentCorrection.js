@@ -3,7 +3,7 @@ import { CAPABILITIES, hasAnyCapability } from "../../../shared/permissions.js";
 import { HEALTHRAY_MODE } from "../../../shared/billingVocab.js";
 import { paise } from "../../../shared/labPayment.js";
 import { writeAudit } from "./audit.js";
-import { DRAWER_MODE, refreshClosedDrawer, TAKE_MODES } from "./cashShifts.js";
+import { DRAWER_MODE, refreshClosedDrawer, shiftHoldingPayment, TAKE_MODES } from "./cashShifts.js";
 import { auditFields } from "./common.js";
 import { cleanPaidMode } from "./paymentMode.js";
 import { httpError, inTransaction } from "./transaction.js";
@@ -134,6 +134,10 @@ async function recordHealthrayMode(client, before, wanted, ctx) {
     },
     ...auditFields(ctx),
   });
+  if (before.paid_via === DRAWER_MODE || wanted.mode === DRAWER_MODE) {
+    const shiftId = await shiftHoldingPayment(client, before);
+    if (shiftId) await refreshClosedDrawer(client, shiftId, ctx);
+  }
   return { ...updated[0], amount: paise(updated[0].amount) };
 }
 

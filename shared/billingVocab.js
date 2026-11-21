@@ -32,8 +32,23 @@ export const PREPAID_LABEL = "Paid earlier / online";
 export const UPI_MODE = "upi";
 export const NEFT_MODE = "neft";
 export const NEFT_LABEL = "NEFT / Cheque";
-export const UPI_APP_LABEL = { bharatpe: "BharatPe (QR)", paytm: "Paytm", other: "Other UPI" };
+export const UPI_APP_LABEL = {
+  bharatpe: "BharatPe (QR)",
+  phonepe: "PhonePe",
+  gpay: "Google Pay",
+  paytm: "Paytm",
+  bhim: "BHIM",
+  amazonpay: "Amazon Pay",
+  cred: "CRED",
+  bank: "Bank app (UPI)",
+  other: "Other UPI",
+};
 export const UPI_APPS = Object.keys(UPI_APP_LABEL);
+export const UPI_MONEY_COLUMNS = UPI_APPS.map((app) => ({
+  key: `upi_${app}`,
+  label: app === "bharatpe" ? "BharatPe (QR Code)" : UPI_APP_LABEL[app],
+}));
+export const UPI_MONEY_KEYS = UPI_MONEY_COLUMNS.map((column) => column.key);
 export const UPI_APP_UNKNOWN = "UPI (app not recorded)";
 
 export function upiAppText(app) {

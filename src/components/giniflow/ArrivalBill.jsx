@@ -35,7 +35,7 @@ export const emptyArrivalChoices = () => ({
 
 const PREPAID = "prepaid";
 
-const UPI_APP_MISSING = "Choose the UPI app it was paid by (BharatPe, Paytm or other UPI).";
+const UPI_APP_MISSING = "Choose the UPI app it was paid by.";
 
 const prepaidWithoutRef = (preview, choices) =>
   (preview?.lines || []).find(
