@@ -40,7 +40,8 @@ export const UPI_APP_LABEL = {
   bhim: "BHIM",
   amazonpay: "Amazon Pay",
   cred: "CRED",
-  bank: "Bank app (UPI)",
+  icici: "ICICI Bank",
+  bank: "Other bank app (UPI)",
   other: "Other UPI",
 };
 export const UPI_APPS = Object.keys(UPI_APP_LABEL);

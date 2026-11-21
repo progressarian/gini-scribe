@@ -13,11 +13,8 @@ export function cleanPaidMode(input, ask) {
   }
   const upiApp = cleanUpiApp(mode, input?.upi_app);
   const typed = typeof input?.reference === "string" ? input.reference.trim() : "";
-  if (mode !== DRAWER_MODE && !typed) {
-    throw httpError(400, `A ${MODE_LABEL[mode]} payment needs its reference number`);
-  }
   if (typed.length > REFERENCE_MAX) {
     throw httpError(400, `The reference is too long — keep it under ${REFERENCE_MAX} letters`);
   }
-  return { mode, reference: mode === DRAWER_MODE ? null : typed, upi_app: upiApp };
+  return { mode, reference: mode === DRAWER_MODE ? null : typed || null, upi_app: upiApp };
 }

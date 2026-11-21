@@ -67,9 +67,6 @@ function cleanReceipt(input) {
     throw httpError(400, `One deposit can be at most ₹${DEPOSIT_MAX.toLocaleString("en-IN")}`);
   }
   const reference = typeof input?.reference === "string" ? input.reference.trim() : "";
-  if (mode !== DRAWER_MODE && !reference) {
-    throw httpError(400, `A ${MODE_LABEL[mode]} deposit needs its reference number`);
-  }
   if (reference.length > REFERENCE_MAX) {
     throw httpError(400, `The reference is too long — keep it under ${REFERENCE_MAX} letters`);
   }
