@@ -134,6 +134,30 @@ const BILL_LOGO_DATA_URI = (() => {
   }
 })();
 
+const rupeeFontUri = (weight) => {
+  try {
+    const file = join(
+      dirname(fileURLToPath(import.meta.url)),
+      `../../templates/assets/rupee-${weight}.woff2`,
+    );
+    return `data:font/woff2;base64,${readFileSync(file).toString("base64")}`;
+  } catch {
+    return "";
+  }
+};
+
+const RUPEE_FONT_CSS = [
+  ["regular", 400],
+  ["bold", 700],
+]
+  .map(([name, weight]) => [rupeeFontUri(name), weight])
+  .filter(([uri]) => uri)
+  .map(
+    ([uri, weight]) =>
+      `@font-face{font-family:BillRupee;src:url(${uri}) format("woff2");font-weight:${weight};unicode-range:U+20B9}`,
+  )
+  .join("\n");
+
 export const BILL_PAGE_FOOTER = `
   <div style="width:100%;padding:0 12mm;font-family:Arial,Helvetica,sans-serif;font-size:9px;font-weight:700;color:#000;">
     <div style="text-align:right;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>
@@ -142,10 +166,11 @@ export const BILL_PAGE_FOOTER = `
 export const renderBillPdf = (html) => renderHtmlToPdf(html, { footerTemplate: BILL_PAGE_FOOTER });
 
 const DOCUMENT_CSS = `
+${RUPEE_FONT_CSS}
 :root{--bp-ink:#111;--bp-rule:#222;--bp-bar:#ddd;--bp-band:#f4f1f1}
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;background:#fff}
-body{font-family:Roboto,Arial,Helvetica,"Liberation Sans",sans-serif;font-size:11px;line-height:1.4;color:var(--bp-ink);-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{font-family:BillRupee,Roboto,Arial,Helvetica,"Liberation Sans",sans-serif;font-size:11px;line-height:1.4;color:var(--bp-ink);-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .bp-page{position:relative;width:100%;padding:0 1px}
 .bp-head{display:flex;align-items:center;gap:5mm;margin-bottom:7mm}
 .bp-logo img{display:block;height:21mm;width:auto;max-width:34mm}

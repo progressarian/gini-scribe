@@ -61,7 +61,7 @@ test.describe("PH11 pharmacy medicines", () => {
       gst_rate_pct: "12.00",
       default_mrp: "35.50",
       default_sale_rate: "32.00",
-      allow_loose_sale: true,
+      allow_loose_sale: false,
       version: 1,
     });
     const audit = await one(

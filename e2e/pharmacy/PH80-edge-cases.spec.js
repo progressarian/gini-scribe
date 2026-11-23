@@ -108,6 +108,7 @@ test.describe("PH80 edge cases across the pharmacy flow", () => {
           unit_label: "tab",
           pack_label: "strip",
           gst_rate_pct: 12,
+          allow_loose_sale: true,
         },
       })
     ).json();

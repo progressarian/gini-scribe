@@ -3,7 +3,6 @@ dist/
 *.env
 # `*.env` matches `.env` but NOT `.env.backup-…` or `.env.local` — a copy of the
 # real file kept under any other suffix is still the real file, keys and all.
-.env.*
 !.env.example
 .vite/
 
@@ -36,3 +35,4 @@ docs/gini-flow/billing-handover/
 docs/gini-flow/billing-handover-*.zip
 .~lock.*#
 .claude/
+config.bat

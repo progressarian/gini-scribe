@@ -203,14 +203,6 @@ export default function MedicineDialog({ record: medicine, onClose }) {
           },
         )}
         {f.select("unit_label", "Unit", plain(UNIT_LABELS), { required: true })}
-        <label className="fset__check">
-          <input
-            type="checkbox"
-            checked={form.allow_loose_sale}
-            onChange={f.setField("allow_loose_sale")}
-          />
-          Can be sold loose (single {form.unit_label})
-        </label>
       </div>
 
       <h3 className="phv-section">Tax and price</h3>
