@@ -19,11 +19,19 @@ export function isoDate(value) {
   m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(s);
   if (m) return `${m[3]}-${pad(m[2])}-${pad(m[1])}`;
   m = /^(\d{1,2})[/.-](\d{4})$/.exec(s);
-  if (m) {
-    const last = new Date(Date.UTC(Number(m[2]), Number(m[1]), 0)).getUTCDate();
-    return `${m[2]}-${pad(m[1])}-${pad(last)}`;
+  if (m) return monthEnd(Number(m[2]), Number(m[1]));
+  m = /^([A-Za-z]{3})[A-Za-z]*[\s/.-]+(\d{4})$/.exec(s);
+  if (m && MONTHS.includes(m[1].toLowerCase())) {
+    return monthEnd(Number(m[2]), MONTHS.indexOf(m[1].toLowerCase()) + 1);
   }
   return s;
+}
+
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+function monthEnd(year, month) {
+  const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return `${year}-${pad(month)}-${pad(last)}`;
 }
 
 export const asText = (v) =>

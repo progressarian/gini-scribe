@@ -635,7 +635,11 @@ function DraftBill({ bill, renderPrescription, onDiscarded }) {
     }
   };
 
+  const saving = useRef(false);
+
   const saveLines = async (lines, extra = {}) => {
+    if (saving.current) return false;
+    saving.current = true;
     setError("");
     try {
       await save.mutateAsync({
@@ -651,6 +655,8 @@ function DraftBill({ bill, renderPrescription, onDiscarded }) {
     } catch (err) {
       setError(requestErrorOf(err, "Could not update the bill"));
       return false;
+    } finally {
+      saving.current = false;
     }
   };
 

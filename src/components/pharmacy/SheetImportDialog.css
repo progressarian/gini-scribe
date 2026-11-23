@@ -216,3 +216,29 @@
   font-size: 13px;
   background: transparent;
 }
+.bill-dialog.bill-dialog--wide.sid.sid--tall {
+  max-width: 1120px;
+  height: 94vh;
+  max-height: 94vh;
+  overflow-y: hidden;
+}
+.sid--tall > * {
+  flex-shrink: 0;
+}
+.sid--tall > .sid-list {
+  flex: 1 1 auto;
+  min-height: 160px;
+  max-height: none;
+}
+.fset.bill-ui .sid--tall .flow-table.sid-changes thead th,
+.fset.bill-ui .sid--tall .flow-table.sid-changes tbody th,
+.fset.bill-ui .sid--tall .flow-table.sid-changes tbody td {
+  padding: 4px 10px;
+}
+.sid--tall .sid-conflict,
+.sid--tall .sid-problem {
+  padding: 8px 12px;
+}
+.sid--tall .sid-tiles .phs-tile {
+  padding: 8px 14px;
+}

@@ -42,7 +42,7 @@ const formOf = (m) => ({
   max_stock_units: text(m?.max_stock_units),
   reorder_qty_units: text(m?.reorder_qty_units),
   default_rack: text(m?.default_rack),
-  allow_loose_sale: m?.allow_loose_sale ?? true,
+  allow_loose_sale: m?.allow_loose_sale ?? false,
 });
 
 const MONEY = /^\d{1,8}(\.\d{1,2})?$/;

@@ -19,6 +19,8 @@ import {
   pharmacyPurchaseUpdateSchema,
   pharmacyPurchaseVersionSchema,
   pharmacySheetDecisionFields,
+  pharmacyPurchaseLineSchema,
+  pharmacyStockImportQuerySchema,
 } from "../schemas/index.js";
 import { auditContext } from "../services/billing/audit.js";
 import {
@@ -46,6 +48,13 @@ import {
   stockSummary,
 } from "../services/pharmacy/stockView.js";
 import { stockList, stockListWorkbook } from "../services/pharmacy/stockList.js";
+import {
+  addOpeningStock,
+  applyStockImport,
+  previewStockImport,
+  stockImportProblemFile,
+  stockImportTemplate,
+} from "../services/pharmacy/stockImport.js";
 
 const router = Router();
 const ID = /^[1-9][0-9]{0,9}$/;
@@ -131,6 +140,62 @@ router.post(
       auditContext(req),
     ),
   ),
+);
+
+const STOCK_IMPORT = `${PURCHASES}/stock-import`;
+const canManageMasters = (req, res, next) =>
+  hasAnyCapability(req.doctor, [CAP.PHARMACY_MASTER])
+    ? next()
+    : res
+        .status(403)
+        .json({ error: "Only pharmacy admins can load stock that creates medicines and vendors" });
+
+router.get(`${STOCK_IMPORT}/template.xlsx`, canManageMasters, async (req, res) => {
+  try {
+    sendSheet(res, await stockImportTemplate(), "pharmacy-stock-import-template.xlsx");
+  } catch (e) {
+    handleError(res, e, "Stock import template");
+  }
+});
+
+router.post(
+  `${STOCK_IMPORT}/preview`,
+  canManageMasters,
+  readSheetUpload,
+  route("Check stock sheet", (req) => previewStockImport(req.body)),
+);
+
+router.post(
+  `${STOCK_IMPORT}/problems.xlsx`,
+  canManageMasters,
+  readSheetUpload,
+  async (req, res) => {
+    try {
+      sendSheet(res, await stockImportProblemFile(req.body), "pharmacy-stock-rows-left-out.xlsx");
+    } catch (e) {
+      handleError(res, e, "Stock rows left out");
+    }
+  },
+);
+
+router.post(
+  STOCK_IMPORT,
+  canManageMasters,
+  validateQuery(pharmacyStockImportQuerySchema),
+  readSheetUpload,
+  route("Import stock sheet", (req) =>
+    applyStockImport(
+      req.body,
+      { hash: req.query.hash, fileName: req.query.name },
+      auditContext(req),
+    ),
+  ),
+);
+
+router.post(
+  `${PURCHASES}/add-stock`,
+  validate(pharmacyPurchaseLineSchema, pharmacyPurchaseLabels),
+  route("Add stock", (req) => addOpeningStock(req.body, auditContext(req)), 201),
 );
 
 router.get(

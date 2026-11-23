@@ -43,7 +43,20 @@ const formInName = (name) =>
     .split(/[\s.()/-]+/)
     .map((word) => medicineTypeFor({ form: word }) || medicineTypeFor({ name: word }))
     .find(Boolean) ?? null;
-const UNIT_BY_FORM = { TAB: "tab", CAP: "cap", INJ: "vial", "INSULIN PEN": "pen", SAC: "sachet" };
+export const UNIT_BY_FORM = {
+  TAB: "tab",
+  CAP: "cap",
+  INJ: "vial",
+  "INSULIN PEN": "pen",
+  SAC: "sachet",
+};
+
+export function darpanForm(type, name) {
+  const t = String(type ?? "")
+    .trim()
+    .toUpperCase();
+  return DARPAN_FORM[t] || medicineTypeFor({ form: t, name }) || formInName(name) || "OTHER";
+}
 const SCHEDULE_BY_TEXT = new Map(
   Object.entries(SCHEDULE_LABEL).flatMap(([key, label]) => [
     [key.toLowerCase(), key],
@@ -266,14 +279,7 @@ async function darpanRows(db) {
       ORDER BY lower(i.item_name)`,
   );
   return rows.map((i, index) => {
-    const type = String(i.item_type || i.category || "")
-      .trim()
-      .toUpperCase();
-    const form =
-      DARPAN_FORM[type] ||
-      medicineTypeFor({ form: type, name: i.item_name }) ||
-      formInName(i.item_name) ||
-      "OTHER";
+    const form = darpanForm(i.item_type || i.category, i.item_name);
     return {
       row: index + 1,
       linkKey: i.link_key,
