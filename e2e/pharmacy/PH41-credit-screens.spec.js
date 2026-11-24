@@ -42,6 +42,7 @@ test.describe("PH41 credit at the counter, approval and dues", () => {
           unit_label: "tab",
           pack_label: "strip",
           gst_rate_pct: 12,
+          allow_loose_sale: true,
         },
       })
     ).json();

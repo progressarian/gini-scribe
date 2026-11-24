@@ -83,6 +83,7 @@ test.describe("PH42 credit limit per patient and the approver's view of the reco
           unit_label: "tab",
           pack_label: "strip",
           gst_rate_pct: 12,
+          allow_loose_sale: true,
         },
       })
     ).json();

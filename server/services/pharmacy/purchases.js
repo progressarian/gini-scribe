@@ -30,6 +30,7 @@ const LINE_FIELDS = [
   "mrp",
   "sale_rate",
   "rack_no",
+  "vendor_id",
 ];
 
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
@@ -78,9 +79,10 @@ export async function listPurchases(
 async function loadLines(db, purchaseId) {
   const { rows } = await db.query(
     `SELECT pl.*, m.name AS medicine_name, m.code AS medicine_code, m.pack_size, m.pack_label,
-            m.unit_label, m.is_active AS medicine_active
+            m.unit_label, m.is_active AS medicine_active, lv.name AS vendor_name
        FROM pharmacy_purchase_lines pl
        JOIN pharmacy_medicines m ON m.id = pl.medicine_id
+       LEFT JOIN pharmacy_vendors lv ON lv.id = pl.vendor_id
       WHERE pl.purchase_id = $1
       ORDER BY pl.line_no`,
     [purchaseId],
@@ -232,7 +234,7 @@ export async function updatePurchase(id, { version, lines, ...input }, ctx = {},
            FROM jsonb_to_recordset($2::jsonb) AS x(
              line_no int, medicine_id int, batch_no text, expiry_date date, mfg_date date,
              qty_packs int, free_packs int, purchase_rate numeric, discount_pct numeric,
-             gst_rate_pct numeric, mrp numeric, sale_rate numeric, rack_no text,
+             gst_rate_pct numeric, mrp numeric, sale_rate numeric, rack_no text, vendor_id int,
              taxable_amount numeric, discount_amount numeric, gst_amount numeric, line_total numeric)`,
         [id, JSON.stringify(records)],
       );
@@ -294,7 +296,7 @@ async function batchFor(client, line, purchase, ctx) {
       line.purchase_rate,
       line.gst_rate_pct,
       line.rack_no,
-      purchase.vendor_id,
+      line.vendor_id ?? purchase.vendor_id,
       ctx.actorId ?? null,
     ],
   );

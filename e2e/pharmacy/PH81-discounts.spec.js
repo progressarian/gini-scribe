@@ -271,4 +271,38 @@ test.describe("PH81 discounts at the pharmacy counter", () => {
     await expect(page.getByText("Discount (incl. 5% on the bill)")).toBeVisible();
     await expect(page.getByRole("button", { name: "Finalise and collect ₹68.00" })).toBeVisible();
   });
+
+  test("Enter then Tab on a line % saves the bill once, without a version clash", async ({
+    page,
+  }) => {
+    const bill = await saved(await newBill(), [
+      { batch_id: batchA, qty_units: 10 },
+      { batch_id: batchB, qty_units: 10 },
+    ]);
+    const saves = [];
+    await page.route(`**/api/pharmacy/bills/${bill.id}`, async (route) => {
+      if (route.request().method() !== "PUT") return route.continue();
+      saves.push(route.request().postDataJSON());
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return route.continue();
+    });
+    await loginAs(page, "pharmacy");
+    await gotoReady(
+      page,
+      `/pharmacy/billing/${bill.id}`,
+      () => page.getByRole("button", { name: "Finalise and collect ₹76.00" }),
+      { timeout: 30000 },
+    );
+    const lineInput = page.getByLabel(`Discount % for ${TAG} Cardace 5 batch CAR1`);
+    await lineInput.fill("10");
+    await lineInput.press("Enter");
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: "Finalise and collect ₹72.00" })).toBeVisible();
+    await expect(page.getByText("Someone else changed this bill")).toHaveCount(0);
+    expect(saves).toHaveLength(1);
+
+    const stored = await (await pharmacist.get(`/api/pharmacy/bills/${bill.id}`)).json();
+    expect(stored.version).toBe(bill.version + 1);
+    expect(Number(stored.lines.find((l) => l.batch_id === batchA).discount_pct)).toBe(10);
+  });
 });

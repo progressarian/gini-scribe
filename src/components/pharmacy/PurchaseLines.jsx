@@ -44,7 +44,7 @@ export function PurchaseLinesEditor({ lines, errors, onChange, onRemove }) {
           <tr>
             <th>Medicine</th>
             {COLUMNS.map((c) => (
-              <th key={c.field} className={c.numeric ? "phs-num" : undefined}>
+              <th key={c.field} className="pur-col">
                 {c.label}
               </th>
             ))}
@@ -79,7 +79,7 @@ export function PurchaseLinesEditor({ lines, errors, onChange, onRemove }) {
                   const id = `pur-${line.key}-${c.field}`;
                   const invalid = Boolean(errors[`${line.key}.${c.field}`]);
                   return (
-                    <td key={c.field} data-label={c.label}>
+                    <td key={c.field} data-label={c.label} className="pur-col">
                       <label className="sr-only" htmlFor={id} id={`${id}-label`}>
                         {c.label} for line {i + 1}, {line.medicine.name}
                       </label>
@@ -95,7 +95,7 @@ export function PurchaseLinesEditor({ lines, errors, onChange, onRemove }) {
                       ) : (
                         <input
                           id={id}
-                          className="jb-assign pur-input"
+                          className={`jb-assign pur-input${c.numeric ? " pur-input--num" : ""}`}
                           style={{ width: c.width }}
                           type={c.type ?? "text"}
                           inputMode={c.numeric ? "decimal" : undefined}

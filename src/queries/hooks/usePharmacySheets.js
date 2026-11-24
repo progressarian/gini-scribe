@@ -53,3 +53,22 @@ export function fileSheetSource(base, params = () => ({})) {
     },
   };
 }
+
+export function stockImportSource(base) {
+  return {
+    check: async (file) => (await api.post(`${base}/preview`, file, upload)).data,
+    apply: async (file, hash) =>
+      (await api.post(base, file, { ...upload, params: { hash, name: file.name } })).data,
+    problems: async (file, fileName) => {
+      try {
+        const res = await api.post(`${base}/problems.xlsx`, file, {
+          ...upload,
+          responseType: "blob",
+        });
+        saveBlob({ blob: res.data, fileName });
+      } catch (err) {
+        throw await blobError(err);
+      }
+    },
+  };
+}

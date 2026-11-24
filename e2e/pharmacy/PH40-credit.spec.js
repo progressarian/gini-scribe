@@ -76,6 +76,7 @@ test.describe("PH40 credit on pharmacy bills", () => {
           unit_label: "tab",
           pack_label: "strip",
           gst_rate_pct: 12,
+          allow_loose_sale: true,
         },
       })
     ).json();

@@ -20,16 +20,25 @@ export default function BatchPickerDialog({
   applyLabel = "Add to bill",
   removeLabel = "Remove from bill",
 }) {
+  const step = medicine.allow_loose_sale ? 1 : Math.max(Number(medicine.pack_size) || 1, 1);
+  const countLabel = step > 1 ? medicine.pack_label : medicine.unit_label;
+  const countText = (n) => `${n} ${countLabel}${n === 1 || countLabel.endsWith("s") ? "" : "s"}`;
+  const available = (b) => Math.floor(b.qty_units / step);
+  const countBatches = medicine.batches.map((b) => ({ ...b, qty_units: available(b) }));
   const sellable = medicine.batches.filter((b) => !b.expired);
   const inStock = sellable.reduce((sum, b) => sum + b.qty_units, 0);
-  const prefill = suggested && !Object.keys(current).length ? suggested : null;
+  const countInStock = sellable.reduce((sum, b) => sum + available(b), 0);
+  const prefill = suggested && !Object.keys(current).length ? Math.ceil(suggested / step) : null;
   const [qty, setQty] = useState(() => {
     if (prefill) {
-      const { picked } = autoFill(medicine.batches, prefill);
+      const { picked } = autoFill(countBatches, prefill);
       return Object.fromEntries(medicine.batches.map((b) => [b.id, picked[b.id] ?? ""]));
     }
     return Object.fromEntries(
-      medicine.batches.map((b) => [b.id, current[b.id] ? String(current[b.id].qty_units) : ""]),
+      medicine.batches.map((b) => [
+        b.id,
+        current[b.id] ? String(current[b.id].qty_units / step) : "",
+      ]),
     );
   });
   const [checked, setChecked] = useState(() =>
@@ -41,7 +50,7 @@ export default function BatchPickerDialog({
   );
   const [touched, setTouched] = useState(false);
 
-  const units = (id) => Number(qty[id] || 0);
+  const units = (id) => Math.round(Number(qty[id] || 0) * step);
   const total = medicine.batches.reduce((sum, b) => sum + units(b.id), 0);
   const nearExpiry = (b) => !b.expired && daysLeft(b.expiry_date) <= warnDays;
 
@@ -49,8 +58,7 @@ export default function BatchPickerDialog({
   for (const b of medicine.batches) {
     const n = units(b.id);
     if (!n) continue;
-    if (n > b.qty_units)
-      problems[b.id] = `Only ${b.qty_units} ${medicine.unit_label} in this batch.`;
+    if (n > b.qty_units) problems[b.id] = `Only ${countText(available(b))} in this batch.`;
     else if (!medicine.allow_loose_sale && n % medicine.pack_size)
       problems[b.id] =
         `Whole ${medicine.pack_label}s only (${medicine.pack_size} ${medicine.unit_label} each).`;
@@ -67,11 +75,11 @@ export default function BatchPickerDialog({
       setFillNote("Enter the quantity needed first.");
       return;
     }
-    const { picked, short } = autoFill(medicine.batches, n);
+    const { picked, short } = autoFill(countBatches, n);
     setQty(Object.fromEntries(medicine.batches.map((b) => [b.id, picked[b.id] ?? ""])));
     setFillNote(
       short
-        ? `Only ${inStock} ${medicine.unit_label} are in stock, ${short} short.`
+        ? `Only ${countText(countInStock)} in stock, ${short} short.`
         : `Filled from the earliest expiry first.`,
     );
   };
@@ -108,8 +116,8 @@ export default function BatchPickerDialog({
     >
       <div className="phb-fill">
         <FormField
-          label={`Quantity needed (${medicine.unit_label})`}
-          hint={needed ? packUnits(Number(needed), medicine) : "Then auto-fill the batches"}
+          label={`Quantity needed (${countLabel})`}
+          hint={needed ? packUnits(Number(needed) * step, medicine) : "Then auto-fill the batches"}
         >
           <input
             className="jb-assign"
@@ -147,7 +155,7 @@ export default function BatchPickerDialog({
               <th>Rack</th>
               <th className="phs-num">In stock</th>
               <th className="phs-num">MRP / {medicine.pack_label}</th>
-              <th className="phs-num">Give ({medicine.unit_label})</th>
+              <th className="phs-num">Give ({countLabel})</th>
             </tr>
           </thead>
           <tbody>

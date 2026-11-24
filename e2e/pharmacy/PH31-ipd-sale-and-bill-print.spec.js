@@ -48,6 +48,7 @@ test.describe("PH31 IPD sales and the printed pharmacy bill", () => {
           pack_label: "strip",
           gst_rate_pct: 12,
           hsn_code: "30049099",
+          allow_loose_sale: true,
           ...extra,
         },
       })

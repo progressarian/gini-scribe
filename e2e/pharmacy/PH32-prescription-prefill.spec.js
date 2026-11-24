@@ -49,6 +49,7 @@ test.describe("PH32 billing from today's prescription", () => {
           unit_label: "tab",
           pack_label: "strip",
           gst_rate_pct: 12,
+          allow_loose_sale: true,
         },
       })
     ).json();

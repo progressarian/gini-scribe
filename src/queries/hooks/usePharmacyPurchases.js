@@ -57,3 +57,23 @@ export const useCancelPurchase = () =>
   );
 
 export const RECEIPT_TEMPLATE_URL = `${BASE}/template.xlsx`;
+
+export function useAddStock() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (line) => (await api.post(`${BASE}/add-stock`, line)).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [...purchaseKeys.all, "list"] });
+      for (const key of STOCK_KEYS) queryClient.invalidateQueries({ queryKey: key });
+    },
+  });
+}
+
+export const STOCK_IMPORT_BASE = `${BASE}/stock-import`;
+export const STOCK_IMPORT_TEMPLATE_URL = `${STOCK_IMPORT_BASE}/template.xlsx`;
+export const STOCK_IMPORT_INVALIDATE = [
+  ...STOCK_KEYS,
+  purchaseKeys.all,
+  ["pharmacy-medicines"],
+  ["pharmacy-vendors"],
+];

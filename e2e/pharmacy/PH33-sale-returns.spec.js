@@ -90,6 +90,7 @@ test.describe("PH33 sale returns and pharmacy credit notes", () => {
           unit_label: "tab",
           pack_label: "strip",
           gst_rate_pct: 12,
+          allow_loose_sale: true,
         },
       })
     ).json();

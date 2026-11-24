@@ -39,6 +39,7 @@ export const pharmacyPurchaseLineSchema = z
     mrp: money(0.01, "must be more than 0"),
     sale_rate: money(0.01, "must be more than 0"),
     rack_no: optionalText(40),
+    vendor_id: optionalId,
   })
   .refine((l) => l.qty_packs + l.free_packs > 0, {
     path: ["qty_packs"],
@@ -153,4 +154,9 @@ export const pharmacyBatchListQuerySchema = z.object({
   dir: z.enum(["asc", "desc"]).default("asc"),
   limit: z.coerce.number().int().min(1).max(500).default(50),
   offset: z.coerce.number().int().min(0).default(0),
+});
+
+export const pharmacyStockImportQuerySchema = z.object({
+  hash: z.string().regex(/^[0-9a-f]{64}$/, "is missing. Check the file again before importing"),
+  name: z.string().trim().max(200).optional(),
 });

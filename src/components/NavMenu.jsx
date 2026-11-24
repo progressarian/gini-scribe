@@ -76,7 +76,8 @@ export default function NavMenu({
     if (!open || !buttonRef.current) return;
     const rect = buttonRef.current.getBoundingClientRect();
     const left = Math.max(EDGE, Math.min(rect.left, window.innerWidth - MENU_WIDTH - EDGE));
-    setPlace({ top: rect.bottom + 4, left });
+    const top = rect.bottom + 4;
+    setPlace({ top, left, maxHeight: window.innerHeight - top - EDGE });
   }, [open]);
 
   useEffect(() => {
@@ -93,15 +94,18 @@ export default function NavMenu({
       }
     };
     const close = () => setOpen(false);
+    const scrolled = (e) => {
+      if (!menuRef.current?.contains(e.target)) setOpen(false);
+    };
     document.addEventListener("mousedown", outside);
     document.addEventListener("keydown", key);
     window.addEventListener("resize", close);
-    window.addEventListener("scroll", close, true);
+    window.addEventListener("scroll", scrolled, true);
     return () => {
       document.removeEventListener("mousedown", outside);
       document.removeEventListener("keydown", key);
       window.removeEventListener("resize", close);
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("scroll", scrolled, true);
     };
   }, [open]);
 
@@ -160,7 +164,12 @@ export default function NavMenu({
           className="tab-menu"
           role="menu"
           aria-label={label}
-          style={{ top: place.top, left: place.left, width: MENU_WIDTH }}
+          style={{
+            top: place.top,
+            left: place.left,
+            width: MENU_WIDTH,
+            maxHeight: place.maxHeight,
+          }}
           onMouseEnter={hoverIn}
           onMouseLeave={hoverOut}
           onKeyDown={(e) => {

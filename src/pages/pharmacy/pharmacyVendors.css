@@ -146,6 +146,17 @@
 .pur-lines td {
   vertical-align: top;
 }
+.fset.bill-ui .flow-table.pur-lines thead th.pur-col,
+.pur-lines td.pur-col {
+  text-align: center;
+}
+.pur-lines td.pur-col > div {
+  display: inline-block;
+}
+.fset.bill-ui .pur-input--num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .pur-lines__medicine {
   min-width: 200px;
   max-width: 280px;

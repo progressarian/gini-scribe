@@ -42,7 +42,7 @@ const formOf = (m) => ({
   max_stock_units: text(m?.max_stock_units),
   reorder_qty_units: text(m?.reorder_qty_units),
   default_rack: text(m?.default_rack),
-  allow_loose_sale: m?.allow_loose_sale ?? true,
+  allow_loose_sale: m?.allow_loose_sale ?? false,
 });
 
 const MONEY = /^\d{1,8}(\.\d{1,2})?$/;
@@ -203,14 +203,6 @@ export default function MedicineDialog({ record: medicine, onClose }) {
           },
         )}
         {f.select("unit_label", "Unit", plain(UNIT_LABELS), { required: true })}
-        <label className="fset__check">
-          <input
-            type="checkbox"
-            checked={form.allow_loose_sale}
-            onChange={f.setField("allow_loose_sale")}
-          />
-          Can be sold loose (single {form.unit_label})
-        </label>
       </div>
 
       <h3 className="phv-section">Tax and price</h3>

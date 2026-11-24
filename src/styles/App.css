@@ -1309,8 +1309,11 @@
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .tab-menu-item {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;

@@ -1,9 +1,12 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
+import { FileSpreadsheet, Plus } from "lucide-react";
 import useAuthStore from "../../stores/authStore";
 import { CAPABILITIES, hasAnyCapability, hasCapability } from "../../../shared/permissions";
 import BatchStockPanel from "../../components/pharmacy/BatchStockPanel";
 import DarpanStockPanel from "../../components/pharmacy/DarpanStockPanel";
 import StockListPanel from "../../components/pharmacy/StockListPanel";
+import AddStockDialog from "../../components/pharmacy/AddStockDialog";
+import StockImportDialog from "../../components/pharmacy/StockImportDialog";
 import "../../styles/flow.css";
 import "../flow/FlowSettings.css";
 import "../billing/billing.css";
@@ -29,6 +32,10 @@ export default function PharmacyStockPage() {
     CAPABILITIES.PHARMACY_MASTER,
   ]);
   const canAdjust = hasCapability(role, CAPABILITIES.PHARMACY_STOCK_ADJUST);
+  const canLoadStock =
+    hasCapability(role, CAPABILITIES.PHARMACY_PURCHASE) &&
+    hasCapability(role, CAPABILITIES.PHARMACY_MASTER);
+  const [dialog, setDialog] = useState(null);
 
   const select = (key) => {
     setTab(key);
@@ -51,7 +58,29 @@ export default function PharmacyStockPage() {
             available while both systems run side by side.
           </p>
         </div>
+        {canLoadStock ? (
+          <div className="phs-head__acts">
+            <button
+              type="button"
+              className="flow-btn flow-btn-ghost phs-upload"
+              onClick={() => setDialog("import")}
+            >
+              <FileSpreadsheet size={15} aria-hidden="true" />
+              Import stock (Excel)
+            </button>
+            <button
+              type="button"
+              className="flow-btn flow-btn-primary phs-upload"
+              onClick={() => setDialog("add")}
+            >
+              <Plus size={15} aria-hidden="true" />
+              Add stock
+            </button>
+          </div>
+        ) : null}
       </header>
+      {dialog === "add" ? <AddStockDialog onClose={() => setDialog(null)} /> : null}
+      {dialog === "import" ? <StockImportDialog onClose={() => setDialog(null)} /> : null}
 
       <div className="bst-tabs" role="tablist" aria-label="Stock views" onKeyDown={onKeyDown}>
         {TABS.map((t) => (

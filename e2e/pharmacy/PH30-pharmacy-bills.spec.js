@@ -47,6 +47,7 @@ test.describe("PH30 pharmacy counter bills", () => {
           unit_label: "tab",
           pack_label: "strip",
           gst_rate_pct: 12,
+          allow_loose_sale: true,
           ...extra,
         },
       })
@@ -479,5 +480,69 @@ test.describe("PH30 pharmacy counter bills", () => {
       [glim.id],
     );
     expect(left.n).toBe(15);
+  });
+
+  test("a medicine sold in whole strips is picked by the strip and saved as tablets", async ({
+    page,
+  }) => {
+    const strip = await medicine("Telsartan 40", { allow_loose_sale: false });
+    const receipt = await (
+      await admin.post("/api/pharmacy/purchases", { data: { kind: "opening" } })
+    ).json();
+    const draft = await (
+      await admin.put(`/api/pharmacy/purchases/${receipt.id}`, {
+        data: {
+          version: receipt.version,
+          lines: [
+            {
+              medicine_id: strip.id,
+              batch_no: "TS1",
+              expiry_date: dayOffset(400),
+              qty_packs: 3,
+              purchase_rate: "20",
+              gst_rate_pct: 12,
+              mrp: "40",
+              sale_rate: "35",
+            },
+          ],
+        },
+      })
+    ).json();
+    const posted = await admin.post(`/api/pharmacy/purchases/${receipt.id}/post`, {
+      data: { version: draft.version },
+    });
+    expect(posted.status(), await posted.text()).toBe(200);
+    const bill = await (
+      await pharmacist.post("/api/pharmacy/bills", {
+        data: { patient_id: walkin.id, sale_type: "walkin" },
+      })
+    ).json();
+
+    await loginAs(page, "pharmacy");
+    await gotoReady(
+      page,
+      `/pharmacy/billing/${bill.id}`,
+      () => page.getByRole("combobox", { name: "Add medicine" }),
+      { timeout: 30000 },
+    );
+    await page.getByRole("combobox", { name: "Add medicine" }).fill(`${TAG} Telsartan`);
+    await page.getByRole("option", { name: new RegExp(`${TAG} Telsartan 40`) }).click();
+    const picker = page.getByRole("dialog", { name: /Choose batches/ });
+    await expect(picker.getByRole("columnheader", { name: "Give (strip)" })).toBeVisible();
+    await expect(picker.getByLabel("Quantity needed (strip)")).toBeVisible();
+
+    const give = picker.getByLabel("Quantity from batch TS1");
+    await give.fill("4");
+    await picker.getByRole("button", { name: "Add to bill" }).click();
+    await expect(picker.getByText("Only 3 strips in this batch.")).toBeVisible();
+
+    await give.fill("2");
+    await expect(picker.getByText("Giving 2 strips")).toBeVisible();
+    await picker.getByRole("button", { name: "Add to bill" }).click();
+    await expect(picker).toBeHidden();
+
+    const saved = await (await pharmacist.get(`/api/pharmacy/bills/${bill.id}`)).json();
+    expect(saved.lines).toHaveLength(1);
+    expect(saved.lines[0].qty_units).toBe(20);
   });
 });
