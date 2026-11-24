@@ -171,7 +171,6 @@ function medicineDraft(group) {
     schedule: "none",
     default_mrp: top.mrp,
     default_sale_rate: top.sale_rate,
-    allow_loose_sale: false,
   };
 }
 
@@ -406,13 +405,11 @@ const MEDICINE_FIELDS = [
   "default_sale_rate",
   "medicine_key",
   "needs_review",
-  "allow_loose_sale",
 ];
 
 const MEDICINE_TYPES_SQL = `name text, generic_name text, manufacturer text, form text, pack_size int,
   unit_label text, pack_label text, hsn_code text, gst_rate_pct numeric, schedule text,
-  default_mrp numeric, default_sale_rate numeric, medicine_key text, needs_review boolean,
-  allow_loose_sale boolean`;
+  default_mrp numeric, default_sale_rate numeric, medicine_key text, needs_review boolean`;
 
 async function createMedicines(medicines, ctx, db) {
   const created = new Map();

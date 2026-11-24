@@ -27,7 +27,6 @@ export const medicineRecords = masterRecords({
     "reorder_qty_units",
     "default_rack",
     "medicine_key",
-    "allow_loose_sale",
     "needs_review",
   ],
   duplicates: {

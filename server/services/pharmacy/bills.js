@@ -87,7 +87,7 @@ async function loadLines(db, billId) {
   const { rows } = await db.query(
     `SELECT bl.id, bl.line_no, bl.medicine_id, bl.batch_id, bl.medicine_name, bl.batch_no,
             bl.expiry_date, bl.hsn_code, bl.schedule, bl.rack_no, bl.pack_size, bl.unit_label,
-            m.pack_label, m.allow_loose_sale, bl.qty_units, bl.pack_mrp, bl.pack_sale_rate,
+            m.pack_label, bl.qty_units, bl.pack_mrp, bl.pack_sale_rate,
             bl.gst_rate_pct, bl.tax_rate_pct, bl.gross_amount, bl.mrp_amount, bl.mrp_capped,
             bl.taxable, bl.cgst, bl.sgst, bl.folded_gst, bl.total, bl.discount_pct,
             bl.discount_amount, bl.bill_discount,
@@ -242,7 +242,7 @@ async function batchesFor(client, locationId, batchIds) {
   const { rows } = await client.query(
     `SELECT b.id, b.medicine_id, b.batch_no, b.expiry_date, b.pack_size, b.mrp, b.sale_rate,
             b.gst_rate_pct, b.rack_no, m.name AS medicine_name, m.hsn_code, m.schedule,
-            m.unit_label, m.allow_loose_sale, m.is_active,
+            m.unit_label, m.is_active,
             COALESCE(s.qty_units, 0) AS qty_units
        FROM pharmacy_batches b
        JOIN pharmacy_medicines m ON m.id = b.medicine_id
@@ -270,7 +270,7 @@ function checkLine(line, batch, settings, { forFinal = false } = {}) {
       { batch_id: batch.id, near_expiry: true },
     );
   }
-  if (!batch.allow_loose_sale && line.qty_units % batch.pack_size !== 0) {
+  if (line.qty_units % batch.pack_size !== 0) {
     throw httpError(
       400,
       `${batch.medicine_name} is sold in whole packs of ${batch.pack_size} ${batch.unit_label}`,

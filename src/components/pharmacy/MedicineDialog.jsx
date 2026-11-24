@@ -42,7 +42,6 @@ const formOf = (m) => ({
   max_stock_units: text(m?.max_stock_units),
   reorder_qty_units: text(m?.reorder_qty_units),
   default_rack: text(m?.default_rack),
-  allow_loose_sale: m?.allow_loose_sale ?? false,
 });
 
 const MONEY = /^\d{1,8}(\.\d{1,2})?$/;
@@ -111,7 +110,6 @@ const payloadOf = (form, editing) => ({
   max_stock_units: orNull(form.max_stock_units),
   reorder_qty_units: orNull(form.reorder_qty_units),
   default_rack: orNull(form.default_rack),
-  allow_loose_sale: form.allow_loose_sale,
 });
 
 const packHint = (units, form) => {

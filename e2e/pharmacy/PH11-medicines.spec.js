@@ -61,7 +61,6 @@ test.describe("PH11 pharmacy medicines", () => {
       gst_rate_pct: "12.00",
       default_mrp: "35.50",
       default_sale_rate: "32.00",
-      allow_loose_sale: false,
       version: 1,
     });
     const audit = await one(
@@ -81,14 +80,13 @@ test.describe("PH11 pharmacy medicines", () => {
         unit_label: "pen",
         pack_label: "unit",
         gst_rate_pct: 7.5,
-        allow_loose_sale: false,
       }),
     });
     const body = await response.json();
     expect(response.status(), JSON.stringify(body)).toBe(201);
     expect(body.code).toBe(`${TAG.slice(0, 8)}-INS`);
     expect(body.gst_rate_pct).toBe("7.50");
-    expect(body.allow_loose_sale).toBe(false);
+    expect(body).not.toHaveProperty("allow_loose_sale");
   });
 
   test("selling above MRP and a maximum below the minimum are refused", async () => {

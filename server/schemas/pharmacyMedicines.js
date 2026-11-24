@@ -59,7 +59,6 @@ const medicineFields = {
   max_stock_units: units(1),
   reorder_qty_units: units(1),
   default_rack: optionalText(40),
-  allow_loose_sale: z.boolean().default(false),
 };
 
 const consistent = (schema) =>

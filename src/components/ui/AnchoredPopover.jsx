@@ -11,6 +11,7 @@ export default function AnchoredPopover({
   gap = 4,
   className = "",
   popoverRef,
+  container,
 }) {
   const innerRef = useRef(null);
   const ref = popoverRef || innerRef;
@@ -66,6 +67,6 @@ export default function AnchoredPopover({
     >
       {children}
     </div>,
-    document.body,
+    container ?? document.body,
   );
 }

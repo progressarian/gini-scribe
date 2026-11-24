@@ -20,7 +20,7 @@ export default function BatchPickerDialog({
   applyLabel = "Add to bill",
   removeLabel = "Remove from bill",
 }) {
-  const step = medicine.allow_loose_sale ? 1 : Math.max(Number(medicine.pack_size) || 1, 1);
+  const step = Math.max(Number(medicine.pack_size) || 1, 1);
   const countLabel = step > 1 ? medicine.pack_label : medicine.unit_label;
   const countText = (n) => `${n} ${countLabel}${n === 1 || countLabel.endsWith("s") ? "" : "s"}`;
   const available = (b) => Math.floor(b.qty_units / step);
@@ -59,7 +59,7 @@ export default function BatchPickerDialog({
     const n = units(b.id);
     if (!n) continue;
     if (n > b.qty_units) problems[b.id] = `Only ${countText(available(b))} in this batch.`;
-    else if (!medicine.allow_loose_sale && n % medicine.pack_size)
+    else if (n % medicine.pack_size)
       problems[b.id] =
         `Whole ${medicine.pack_label}s only (${medicine.pack_size} ${medicine.unit_label} each).`;
     else if (nearExpiry(b) && !checked[b.id])

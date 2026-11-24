@@ -47,7 +47,6 @@ test.describe("PH30 pharmacy counter bills", () => {
           unit_label: "tab",
           pack_label: "strip",
           gst_rate_pct: 12,
-          allow_loose_sale: true,
           ...extra,
         },
       })
@@ -62,27 +61,26 @@ test.describe("PH30 pharmacy counter bills", () => {
     admin = await apiAs("pharmacy_admin");
     pharmacist = await apiAs("pharmacy");
     nurse = await apiAs("nurse");
-    tablet = await medicine("Metformin 500");
+    tablet = await medicine("Metformin 500", { pack_size: 1 });
     wholeOnly = await medicine("Insulin Pen", {
       form: "INJ",
       pack_size: 5,
       unit_label: "pen",
       pack_label: "box",
-      allow_loose_sale: false,
     });
 
     const receipt = await (
       await admin.post("/api/pharmacy/purchases", { data: { kind: "opening" } })
     ).json();
-    const line = (medicine_id, batch_no, expiry_date, qty_packs, rack_no) => ({
+    const perStrip = { purchase_rate: "20", mrp: "40", sale_rate: "35" };
+    const perTablet = { purchase_rate: "2", mrp: "4", sale_rate: "3.5" };
+    const line = (medicine_id, batch_no, expiry_date, qty_packs, rack_no, rates = perStrip) => ({
       medicine_id,
       batch_no,
       expiry_date,
       qty_packs,
-      purchase_rate: "20",
       gst_rate_pct: 12,
-      mrp: "40",
-      sale_rate: "35",
+      ...rates,
       rack_no,
     });
     const saved = await (
@@ -90,8 +88,8 @@ test.describe("PH30 pharmacy counter bills", () => {
         data: {
           version: receipt.version,
           lines: [
-            line(tablet.id, "LATE1", dayOffset(500), 3, "B-2"),
-            line(tablet.id, "SOON1", dayOffset(20), 1, "B-1"),
+            line(tablet.id, "LATE1", dayOffset(500), 30, "B-2", perTablet),
+            line(tablet.id, "SOON1", dayOffset(20), 10, "B-1", perTablet),
             line(wholeOnly.id, "PEN1", dayOffset(300), 2, "F-1"),
           ],
         },
@@ -109,7 +107,7 @@ test.describe("PH30 pharmacy counter bills", () => {
     expired = (
       await one(
         `INSERT INTO pharmacy_batches (medicine_id, batch_no, expiry_date, pack_size, mrp, sale_rate, gst_rate_pct)
-         VALUES ($1, 'GONE1', $2, 10, 40, 35, 12) RETURNING id`,
+         VALUES ($1, 'GONE1', $2, 1, 4, 3.5, 12) RETURNING id`,
         [tablet.id, dayOffset(-3)],
       )
     ).id;
@@ -190,7 +188,7 @@ test.describe("PH30 pharmacy counter bills", () => {
     expect(bad.status()).toBe(400);
   });
 
-  test("a draft prices loose units with GST on top and rounds the bill to the rupee", async () => {
+  test("a draft prices tablets with GST on top and rounds the bill to the rupee", async () => {
     const created = await pharmacist.post("/api/pharmacy/bills", {
       data: { patient_id: walkin.id, sale_type: "walkin" },
     });
@@ -218,7 +216,7 @@ test.describe("PH30 pharmacy counter bills", () => {
     expect(bill).toMatchObject({ net_amount: "59.00", round_off: "0.20" });
   });
 
-  test("expired, near-expiry, loose and over-stock lines are refused with a reason", async () => {
+  test("expired, near-expiry, part-pack and over-stock lines are refused with a reason", async () => {
     const expiredLine = await save(pharmacist, bill, [{ batch_id: expired, qty_units: 1 }]);
     expect(expiredLine.status()).toBe(409);
     expect((await expiredLine.json()).error).toContain("cannot be sold");
@@ -227,9 +225,9 @@ test.describe("PH30 pharmacy counter bills", () => {
     expect(near.status()).toBe(409);
     expect((await near.json()).error).toContain("Confirm the near-expiry batch");
 
-    const loose = await save(pharmacist, bill, [{ batch_id: strips, qty_units: 3 }]);
-    expect(loose.status()).toBe(400);
-    expect((await loose.json()).error).toContain("whole packs of 5");
+    const partPack = await save(pharmacist, bill, [{ batch_id: strips, qty_units: 3 }]);
+    expect(partPack.status()).toBe(400);
+    expect((await partPack.json()).error).toContain("whole packs of 5");
 
     const tooMany = await save(pharmacist, bill, [{ batch_id: later, qty_units: 31 }]);
     expect(tooMany.status()).toBe(409);
@@ -388,7 +386,7 @@ test.describe("PH30 pharmacy counter bills", () => {
   });
 
   test("the pharmacist bills a walk-in at the counter with a split payment", async ({ page }) => {
-    const glim = await medicine("Glimepiride 2");
+    const glim = await medicine("Glimepiride 2", { pack_size: 1 });
     const receipt = await (
       await admin.post("/api/pharmacy/purchases", { data: { kind: "opening" } })
     ).json();
@@ -396,11 +394,11 @@ test.describe("PH30 pharmacy counter bills", () => {
       medicine_id: glim.id,
       batch_no,
       expiry_date: dayOffset(days),
-      qty_packs: 2,
-      purchase_rate: "20",
+      qty_packs: 20,
+      purchase_rate: "2",
       gst_rate_pct: 12,
-      mrp: "40",
-      sale_rate: "35",
+      mrp: "4",
+      sale_rate: "3.5",
       rack_no,
     });
     const saved = await (
@@ -427,7 +425,7 @@ test.describe("PH30 pharmacy counter bills", () => {
       { timeout: 30000 },
     );
     await page.getByRole("button", { name: "New bill" }).click();
-    const start = page.getByRole("dialog", { name: "New pharmacy bill" });
+    const start = page.getByRole("form", { name: "Patient and sale type" });
     await start.getByLabel("Find patient").fill(PHONE);
     await start.getByRole("radio", { name: new RegExp(`${TAG} Walkin`) }).check();
     await expect(start.getByRole("radio", { name: /^Walk-in Not a hospital/ })).toBeChecked();
@@ -436,22 +434,31 @@ test.describe("PH30 pharmacy counter bills", () => {
     await expect(page.getByRole("heading", { name: /New pharmacy bill/ })).toBeVisible();
     await expect(page.getByText(`${TAG} Walkin`).first()).toBeVisible();
 
-    await page.getByRole("combobox", { name: "Add medicine" }).fill(`${TAG} Glimepiride`);
-    await page.getByRole("option", { name: new RegExp(`${TAG} Glimepiride 2`) }).click();
-    const picker = page.getByRole("dialog", { name: /Choose batches/ });
-    const rows = picker.getByRole("row");
-    await expect(rows.nth(1)).toContainText("GL1");
-    await expect(rows.nth(1)).toContainText("C-1");
-    await expect(rows.nth(2)).toContainText("GL2");
-    await picker.getByLabel("Quantity needed (tab)").fill("25");
-    await picker.getByRole("button", { name: "Auto-fill (earliest expiry first)" }).click();
-    await expect(picker.getByLabel("Quantity from batch GL1")).toHaveValue("20");
-    await expect(picker.getByLabel("Quantity from batch GL2")).toHaveValue("5");
-    await picker.getByRole("button", { name: "Add to bill" }).click();
-    await expect(picker).toBeHidden();
+    const search = page.getByRole("combobox", { name: "Add medicine" });
+    await search.fill(`${TAG} Glimepiride`);
+    await expect(
+      page.getByRole("option", { name: new RegExp(`${TAG} Glimepiride 2`) }),
+    ).toBeVisible();
+    await search.press("Enter");
+    const batch = page.getByRole("combobox", { name: /^Batch for/ });
+    await expect(batch).toBeFocused();
+    const options = page.getByRole("listbox", { name: /^Batches of/ }).getByRole("option");
+    await expect(options.nth(0)).toContainText("GL1");
+    await expect(options.nth(0)).toContainText("Rack C-1");
+    await expect(options.nth(1)).toContainText("GL2");
+    await batch.press("Enter");
+    const qty = page.getByRole("textbox", { name: /^Quantity in .* for the new medicine$/ });
+    await expect(qty).toBeFocused();
+    await qty.fill("25");
+    await qty.press("Enter");
+    await page.getByLabel("Discount % for the new medicine").press("Enter");
+    await expect(
+      page.getByRole("status").filter({ hasText: "Only 20 strips left in batch GL1" }),
+    ).toContainText("5 strips taken from batch GL2");
+    await expect(search).toBeFocused();
 
     const lines = page.getByRole("table", { name: "Medicines on this bill" });
-    await expect(lines.getByRole("row")).toHaveCount(3);
+    await expect(lines.getByRole("row")).toHaveCount(4);
     await expect(page.getByRole("button", { name: "Finalise and collect ₹98.00" })).toBeVisible();
 
     const pay = page.getByRole("group", { name: "Payment 1" });
@@ -485,7 +492,7 @@ test.describe("PH30 pharmacy counter bills", () => {
   test("a medicine sold in whole strips is picked by the strip and saved as tablets", async ({
     page,
   }) => {
-    const strip = await medicine("Telsartan 40", { allow_loose_sale: false });
+    const strip = await medicine("Telsartan 40");
     const receipt = await (
       await admin.post("/api/pharmacy/purchases", { data: { kind: "opening" } })
     ).json();
@@ -525,21 +532,29 @@ test.describe("PH30 pharmacy counter bills", () => {
       () => page.getByRole("combobox", { name: "Add medicine" }),
       { timeout: 30000 },
     );
-    await page.getByRole("combobox", { name: "Add medicine" }).fill(`${TAG} Telsartan`);
-    await page.getByRole("option", { name: new RegExp(`${TAG} Telsartan 40`) }).click();
-    const picker = page.getByRole("dialog", { name: /Choose batches/ });
-    await expect(picker.getByRole("columnheader", { name: "Give (strip)" })).toBeVisible();
-    await expect(picker.getByLabel("Quantity needed (strip)")).toBeVisible();
+    const search = page.getByRole("combobox", { name: "Add medicine" });
+    await search.fill(`${TAG} Telsartan`);
+    await expect(
+      page.getByRole("option", { name: new RegExp(`${TAG} Telsartan 40`) }),
+    ).toBeVisible();
+    await search.press("Enter");
+    await page.getByRole("combobox", { name: /^Batch for/ }).press("Enter");
+    const qty = page.getByRole("textbox", { name: "Quantity in strips for the new medicine" });
+    await expect(qty).toBeFocused();
 
-    const give = picker.getByLabel("Quantity from batch TS1");
-    await give.fill("4");
-    await picker.getByRole("button", { name: "Add to bill" }).click();
-    await expect(picker.getByText("Only 3 strips in this batch.")).toBeVisible();
+    await qty.fill("4");
+    await qty.press("Enter");
+    await page.getByLabel("Discount % for the new medicine").press("Enter");
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Only 3 strips in stock." }),
+    ).toBeVisible();
+    await expect(qty).toBeFocused();
 
-    await give.fill("2");
-    await expect(picker.getByText("Giving 2 strips")).toBeVisible();
-    await picker.getByRole("button", { name: "Add to bill" }).click();
-    await expect(picker).toBeHidden();
+    await qty.fill("2");
+    await expect(page.getByText("2 strips", { exact: true })).toBeVisible();
+    await qty.press("Enter");
+    await page.getByLabel("Discount % for the new medicine").press("Enter");
+    await expect(page.getByRole("combobox", { name: "Add medicine" })).toBeFocused();
 
     const saved = await (await pharmacist.get(`/api/pharmacy/bills/${bill.id}`)).json();
     expect(saved.lines).toHaveLength(1);

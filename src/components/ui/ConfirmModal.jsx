@@ -24,6 +24,7 @@ export default function ConfirmModal({
   error = null,
   secondaryLabel,
   onSecondary,
+  focusConfirm = false,
 }) {
   useEffect(() => {
     if (!open) return;
@@ -140,6 +141,7 @@ export default function ConfirmModal({
           {onConfirm ? (
             <button
               type="button"
+              autoFocus={focusConfirm}
               onClick={onConfirm}
               disabled={confirmDisabled || busy}
               onMouseEnter={(e) => {

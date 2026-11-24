@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, HandCoins, Pill, Printer, Trash2, Undo2 } from "lucide-react";
+import { ArrowLeft, HandCoins, Pencil, Pill, Plus, Printer, Trash2, Undo2 } from "lucide-react";
 import ReturnDialog from "../../components/pharmacy/ReturnDialog";
 import { AskCreditDialog, CollectDueDialog } from "../../components/pharmacy/CreditDialogs";
 import useAuthStore from "../../stores/authStore";
@@ -19,16 +19,15 @@ import { PdfButton } from "../../components/billing/counter/PdfViewer";
 import api from "../../services/api";
 import { requestErrorOf } from "../../components/billing/format";
 import ConfirmModal from "../../components/ui/ConfirmModal";
-import MedicinePicker from "../../components/pharmacy/MedicinePicker";
-import BatchPickerDialog from "../../components/pharmacy/BatchPickerDialog";
+import BillEntryRow from "../../components/pharmacy/BillEntryRow";
 import { SelectInput } from "../../components/pharmacy/Fields";
-import { describeStock, useStockOptions } from "../../components/pharmacy/stockOptions";
 import BillPayments, {
   firstPayment,
   paymentProblems,
   paymentsForApi,
 } from "../../components/pharmacy/BillPayments";
-import { inr, packUnits, showDate } from "../../components/pharmacy/format";
+import { inr, packUnits, pctTyped, showDate } from "../../components/pharmacy/format";
+import { digitsTyped } from "../../components/billing/format";
 import { toast } from "../../stores/uiStore";
 import { batchKeys } from "../../queries/hooks/usePharmacyBatches";
 import {
@@ -74,12 +73,6 @@ const lineInput = (l) => ({
   near_expiry_ok: l.near_expiry_ok,
   discount_pct: Number(l.discount_pct ?? 0),
 });
-
-const pctTyped = (v) => {
-  const clean = v.replace(/[^\d.]/g, "");
-  const [whole, ...rest] = clean.split(".");
-  return rest.length ? `${whole.slice(0, 3)}.${rest.join("").slice(0, 2)}` : whole.slice(0, 3);
-};
 
 const lineDiscount = (l) => Number(l.discount_amount ?? 0) + Number(l.bill_discount ?? 0);
 
@@ -181,8 +174,49 @@ const shownPackRate = (bill, line) =>
       )
     : line.pack_sale_rate;
 
-function LinesTable({ bill, onChange, onRemove, onDiscount, busy }) {
-  const editable = Boolean(onChange);
+function QtyInput({ line, busy, onSave }) {
+  const size = Math.max(Number(line.pack_size) || 1, 1);
+  const saved = String(Math.round(line.qty_units / size));
+  const [value, setValue] = useState(saved);
+  useEffect(() => setValue(saved), [saved]);
+  const commit = () => {
+    if (!value || value === saved) {
+      setValue(saved);
+      return;
+    }
+    onSave(line, Number(value) * size);
+  };
+  return (
+    <input
+      className="jb-assign phb-qty"
+      inputMode="numeric"
+      maxLength={4}
+      aria-label={`Quantity in ${line.pack_label}s for ${line.medicine_name} batch ${line.batch_no}`}
+      disabled={busy}
+      value={value}
+      onChange={(e) => setValue(digitsTyped(e.target.value))}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit();
+        }
+      }}
+    />
+  );
+}
+
+function LinesTable({
+  bill,
+  onQty,
+  onEdit,
+  onRemove,
+  onDiscount,
+  busy,
+  editingId = null,
+  footer = null,
+}) {
+  const editable = Boolean(onQty);
   const showGst = !bill.gst_folded;
   const showDiscount = editable || bill.lines.some((l) => lineDiscount(l) > 0);
   return (
@@ -201,8 +235,22 @@ function LinesTable({ bill, onChange, onRemove, onDiscount, busy }) {
           </tr>
         </thead>
         <tbody>
+          {editable && !bill.lines.length ? (
+            <tr>
+              <td colSpan={showGst ? 8 : 7} className="phb-nolines-cell">
+                <div className="phb-nolines">
+                  <Pill size={20} className="phb-nolines__icon" aria-hidden="true" />
+                  <p className="phb-nolines__title">No medicines on this bill yet</p>
+                  <p className="phs-meta">
+                    Type the medicine below, press Enter, pick the batch with the arrow keys, then
+                    type the quantity and discount. Enter moves to the next field.
+                  </p>
+                </div>
+              </td>
+            </tr>
+          ) : null}
           {bill.lines.map((l) => (
-            <tr key={l.id}>
+            <tr key={l.id} className={l.id === editingId ? "phb-line--editing" : undefined}>
               <td data-label="Medicine">
                 <span className="phs-item">{l.medicine_name}</span>
                 {l.schedule && l.schedule !== "none" ? (
@@ -221,7 +269,11 @@ function LinesTable({ bill, onChange, onRemove, onDiscount, busy }) {
                 </span>
               </td>
               <td data-label="Quantity" className="phs-num">
-                {packUnits(l.qty_units, l)}
+                {editable ? (
+                  <QtyInput line={l} busy={busy} onSave={onQty} />
+                ) : (
+                  packUnits(l.qty_units, l)
+                )}
                 <span className="phs-meta">
                   {l.qty_units} {l.unit_label}
                 </span>
@@ -258,10 +310,11 @@ function LinesTable({ bill, onChange, onRemove, onDiscount, busy }) {
                   <button
                     type="button"
                     className="flow-btn flow-btn-ghost"
+                    aria-label={`Edit ${l.medicine_name} batch ${l.batch_no}`}
                     disabled={busy}
-                    onClick={() => onChange(l)}
+                    onClick={() => onEdit(l)}
                   >
-                    Change
+                    <Pencil size={14} aria-hidden="true" />
                   </button>
                   <button
                     type="button"
@@ -277,6 +330,7 @@ function LinesTable({ bill, onChange, onRemove, onDiscount, busy }) {
             </tr>
           ))}
         </tbody>
+        {footer ? <tfoot>{footer}</tfoot> : null}
       </table>
     </div>
   );
@@ -579,7 +633,8 @@ function DraftBill({ bill, renderPrescription, onDiscarded }) {
   const save = useSaveBill();
   const finalise = useFinaliseBill();
   const discard = useDiscardBill();
-  const [picking, setPicking] = useState(null);
+  const [entry, setEntry] = useState(null);
+  const [notice, setNotice] = useState("");
   const [loadingMedicine, setLoadingMedicine] = useState(false);
   const [payments, setPayments] = useState(() => firstPayment(bill.net_amount));
   const [payTouched, setPayTouched] = useState(false);
@@ -670,8 +725,9 @@ function DraftBill({ bill, renderPrescription, onDiscarded }) {
         queryFn: async () => (await api.get("/api/pharmacy/batches", { params })).data,
         staleTime: 0,
       });
-      setPicking({
-        medicine: { ...found.medicine, batches: found.batches },
+      setEntry({
+        medicine: found.medicine,
+        batches: found.batches,
         warnDays: found.near_expiry_warn_days,
         ...from,
       });
@@ -682,24 +738,35 @@ function DraftBill({ bill, renderPrescription, onDiscarded }) {
     }
   };
 
-  const currentFor = (medicine) =>
-    Object.fromEntries(
-      bill.lines
-        .filter((l) => l.medicine_id === medicine.id)
-        .map((l) => [l.batch_id, { qty_units: l.qty_units, near_expiry_ok: l.near_expiry_ok }]),
-    );
+  const editingId = entry?.editing?.id ?? null;
+  const kept = bill.lines.filter((l) => l.id !== editingId);
+  const onBill = Object.fromEntries(kept.map((l) => [l.batch_id, l.qty_units]));
 
-  const apply = async (chosen) => {
-    const medicineId = picking.medicine.id;
-    const others = bill.lines.filter((l) => l.medicine_id !== medicineId).map(lineInput);
-    const kept = new Map(
-      bill.lines
-        .filter((l) => l.medicine_id === medicineId)
-        .map((l) => [l.batch_id, Number(l.discount_pct ?? 0)]),
-    );
-    const withDiscount = chosen.map((c) => ({ ...c, discount_pct: kept.get(c.batch_id) ?? 0 }));
-    if (await saveLines([...others, ...withDiscount])) setPicking(null);
+  const addLines = async (added, addedNotice) => {
+    const merged = new Map(kept.map((l) => [l.batch_id, lineInput(l)]));
+    for (const line of added) {
+      const was = merged.get(line.batch_id);
+      merged.set(line.batch_id, {
+        batch_id: line.batch_id,
+        qty_units: (was?.qty_units ?? 0) + line.qty_units,
+        near_expiry_ok: Boolean(was?.near_expiry_ok || line.near_expiry_ok),
+        discount_pct: line.discount_pct ?? was?.discount_pct ?? 0,
+      });
+    }
+    const ok = await saveLines([...merged.values()]);
+    if (ok) {
+      setEntry(null);
+      setNotice(addedNotice);
+    }
+    return ok;
   };
+
+  const setLineQty = (line, units) =>
+    saveLines(
+      bill.lines.map((l) =>
+        l.id === line.id ? { ...lineInput(l), qty_units: units } : lineInput(l),
+      ),
+    );
 
   const setLineDiscount = (line, pct) =>
     saveLines(
@@ -785,35 +852,43 @@ function DraftBill({ bill, renderPrescription, onDiscarded }) {
           </h2>
           <span className="fset__count">{bill.lines.length}</span>
         </div>
-        <div className="phb-add">
-          <MedicinePicker
-            disabled={locked}
-            label="Add medicine"
-            placeholder="Type at least 2 letters of the medicine name or code"
-            useOptions={useStockOptions}
-            optionId={(m) => m.medicine_id}
-            describeOption={describeStock}
-            noMatchText="No medicine in stock matches."
-            onSelect={(m) => openPicker(m.medicine_id)}
-          />
-        </div>
-        {bill.lines.length ? (
-          <LinesTable
-            bill={bill}
-            busy={busy || locked}
-            onChange={(l) => openPicker(l.medicine_id)}
-            onRemove={remove}
-            onDiscount={setLineDiscount}
-          />
-        ) : (
-          <div className="phb-nolines">
-            <Pill size={20} className="phb-nolines__icon" aria-hidden="true" />
-            <p className="phb-nolines__title">No medicines on this bill yet</p>
-            <p className="phs-meta">
-              Search by medicine name or code above. Batches are offered soonest expiry first.
-            </p>
-          </div>
-        )}
+        <LinesTable
+          bill={bill}
+          busy={busy || locked}
+          onQty={setLineQty}
+          onEdit={(l) => {
+            setNotice("");
+            openPicker(l.medicine_id, { editing: l });
+          }}
+          onRemove={remove}
+          onDiscount={setLineDiscount}
+          editingId={editingId}
+          footer={
+            <BillEntryRow
+              entry={entry}
+              onBill={onBill}
+              showGst={!bill.gst_folded}
+              locked={locked}
+              busy={busy}
+              onPickMedicine={(medicineId) => {
+                setNotice("");
+                openPicker(medicineId, entry?.editing ? { editing: entry.editing } : {});
+              }}
+              onClear={() => setEntry(null)}
+              onAdd={addLines}
+            />
+          }
+        />
+        {notice ? (
+          <p className="phb-split-notice" role="status">
+            {notice}
+          </p>
+        ) : null}
+        {loadingMedicine ? (
+          <p className="phs-meta" role="status">
+            Loading batches…
+          </p>
+        ) : null}
         {save.isPending ? (
           <p className="phs-meta" role="status">
             Updating the bill…
@@ -883,22 +958,11 @@ function DraftBill({ bill, renderPrescription, onDiscarded }) {
 
       {askingCredit ? <AskCreditDialog bill={bill} onClose={() => setAskingCredit(false)} /> : null}
 
-      {picking ? (
-        <BatchPickerDialog
-          medicine={picking.medicine}
-          current={currentFor(picking.medicine)}
-          warnDays={picking.warnDays}
-          suggested={picking.suggested}
-          prescribed={picking.prescribed}
-          onApply={apply}
-          onClose={() => setPicking(null)}
-        />
-      ) : null}
-
       <ConfirmModal
         open={confirming}
         title="Finalise this bill?"
         variant="primary"
+        focusConfirm
         confirmLabel={finalise.isPending ? "Finalising…" : "Finalise bill"}
         busy={finalise.isPending}
         confirmDisabled={finalise.isPending}
@@ -1068,6 +1132,8 @@ export function BillWorkspace({ billId, renderPrescription, onDiscarded, compact
   const Title = compact ? "h2" : "h1";
   const [creditPending, setCreditPending] = useState(false);
   const [draft, setDraft] = useState(true);
+  const wasDraft = useRef(null);
+  const actsRef = useRef(null);
   const live = usePharmacyLive({ billId, enabled: draft });
   const query = useBill(billId, {
     refetchInterval: creditPending && live !== true ? 15000 : false,
@@ -1076,6 +1142,10 @@ export function BillWorkspace({ billId, renderPrescription, onDiscarded, compact
 
   useEffect(() => {
     if (!bill) return;
+    if (wasDraft.current === true && bill.status === "final") {
+      actsRef.current?.querySelector("button")?.focus();
+    }
+    wasDraft.current = bill.status === "draft";
     setDraft(bill.status === "draft");
     setCreditPending(bill.status === "draft" && bill.credit?.status === "pending");
   }, [bill]);
@@ -1124,7 +1194,7 @@ export function BillWorkspace({ billId, renderPrescription, onDiscarded, compact
           </p>
         </div>
         {bill.status === "final" ? (
-          <div className="phs-head__acts">
+          <div className="phs-head__acts" ref={actsRef}>
             <PdfButton
               className="flow-btn flow-btn-primary phs-upload"
               href={pharmacyBillPdfUrl(bill.id)}
@@ -1134,6 +1204,12 @@ export function BillWorkspace({ billId, renderPrescription, onDiscarded, compact
               <Printer size={15} aria-hidden="true" />
               {bill.bill_type === "credit_note" ? "Print credit note" : "Print bill"}
             </PdfButton>
+            {compact ? null : (
+              <Link className="flow-btn flow-btn-ghost phs-upload" to="/pharmacy/billing/new">
+                <Plus size={15} aria-hidden="true" />
+                Create new bill
+              </Link>
+            )}
           </div>
         ) : null}
       </header>

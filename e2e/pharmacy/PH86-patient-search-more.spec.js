@@ -61,7 +61,7 @@ test.describe("PH86 the new-bill patient search loads more matches", () => {
       },
     );
     await page.getByRole("button", { name: "New bill" }).click();
-    const dialog = page.getByRole("dialog", { name: "New pharmacy bill" });
+    const dialog = page.getByRole("form", { name: "Patient and sale type" });
     await dialog.getByLabel("Find patient").fill(TAG);
     const matches = dialog
       .getByRole("radiogroup", { name: "Matching patients" })

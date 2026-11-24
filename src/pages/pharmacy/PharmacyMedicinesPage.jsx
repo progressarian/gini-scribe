@@ -42,7 +42,6 @@ const COLUMNS = [
     render: (m) => (
       <>
         {m.form} · {m.pack_label} of {m.pack_size} {m.unit_label}
-        {m.allow_loose_sale ? null : <span className="phs-meta">Whole packs only</span>}
       </>
     ),
   },

@@ -48,7 +48,7 @@ const MEDICINE_STOCK = `
   ),
   rows AS (
     SELECT m.id AS medicine_id, m.code, m.name, m.generic_name, m.form, m.pack_size, m.pack_label,
-           m.unit_label, m.default_rack, m.is_active, m.allow_loose_sale, m.schedule,
+           m.unit_label, m.default_rack, m.is_active, m.schedule,
            COALESCE(stk.total_units, 0) AS total_units,
            COALESCE(stk.sellable_units, 0) AS sellable_units,
            COALESCE(stk.expired_units, 0) AS expired_units,
@@ -139,7 +139,7 @@ export async function batchesAt(
 export async function medicineBatches({ medicine_id, location_id, withCost = false }, db = pool) {
   const location = await locationFor(db, location_id);
   const { rows: medicine } = await db.query(
-    `SELECT id, code, name, pack_size, pack_label, unit_label, allow_loose_sale, schedule
+    `SELECT id, code, name, pack_size, pack_label, unit_label, schedule
        FROM pharmacy_medicines WHERE id = $1`,
     [medicine_id],
   );

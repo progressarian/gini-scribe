@@ -1,9 +1,7 @@
-import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Plus } from "lucide-react";
 import { inr, showDate } from "../../components/pharmacy/format";
 import Pagination from "../../components/ui/Pagination";
-import NewBillDialog from "../../components/pharmacy/NewBillDialog";
 import { BillStatus } from "./PharmacyBillEditorPage";
 import { useBillList } from "../../queries/hooks/usePharmacyBills";
 import { SALE_TYPE_LABEL } from "../../../shared/pharmacyVocab";
@@ -25,7 +23,6 @@ const STATUSES = [
 
 export default function PharmacyBillsPage() {
   const navigate = useNavigate();
-  const [creating, setCreating] = useState(false);
   const { search, setSearch, q } = useUrlSearch("q", () => setPage(1));
   const [status, setStatus] = useUrlState("status", "all");
   const [page, setPage] = useUrlState("page", 1, asNumber);
@@ -54,7 +51,7 @@ export default function PharmacyBillsPage() {
           <button
             type="button"
             className="flow-btn flow-btn-primary phs-upload"
-            onClick={() => setCreating(true)}
+            onClick={() => navigate("/pharmacy/billing/new")}
           >
             <Plus size={15} aria-hidden="true" />
             New bill
@@ -192,13 +189,6 @@ export default function PharmacyBillsPage() {
           </>
         )}
       </section>
-
-      {creating ? (
-        <NewBillDialog
-          onClose={() => setCreating(false)}
-          onCreated={(bill) => navigate(`/pharmacy/billing/${bill.id}`)}
-        />
-      ) : null}
     </div>
   );
 }

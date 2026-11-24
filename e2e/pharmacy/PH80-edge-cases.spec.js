@@ -108,7 +108,6 @@ test.describe("PH80 edge cases across the pharmacy flow", () => {
           unit_label: "tab",
           pack_label: "strip",
           gst_rate_pct: 12,
-          allow_loose_sale: true,
         },
       })
     ).json();
@@ -161,8 +160,8 @@ test.describe("PH80 edge cases across the pharmacy flow", () => {
     ]);
   });
 
-  test("odd pack sizes and loose units never price above MRP and keep the totals exact", async () => {
-    for (const qty of [1, 7, 14, 15, 16, 29]) {
+  test("an odd pack size never prices above MRP and keeps the totals exact", async () => {
+    for (const qty of [15, 30, 45, 60, 90, 150]) {
       const bill = await draft(qty);
       const line = bill.lines[0];
       expect(Number(line.total)).toBeLessThanOrEqual(Number(line.mrp_amount));
@@ -212,7 +211,7 @@ test.describe("PH80 edge cases across the pharmacy flow", () => {
   });
 
   test("a batch that expires or a medicine that is switched off after saving is refused at finalise", async () => {
-    const bill = await draft(1);
+    const bill = await draft(15);
     await query(`UPDATE pharmacy_medicines SET is_active = false WHERE id = $1`, [medicine.id]);
     const off = await finalise(bill);
     expect(off.status()).toBe(409);
@@ -231,7 +230,7 @@ test.describe("PH80 edge cases across the pharmacy flow", () => {
   });
 
   test("two returns racing for the same units cannot return more than was sold", async () => {
-    const bill = await (await finalise(await draft(10))).json();
+    const bill = await (await finalise(await draft(15))).json();
     const give = () =>
       pharmacist.post(`/api/pharmacy/bills/${bill.id}/returns`, {
         data: {
@@ -261,8 +260,7 @@ test.describe("PH80 edge cases across the pharmacy flow", () => {
   });
 
   test("returns made one at a time never credit more than the bill charged", async () => {
-    const bill = await (await finalise(await draft(4))).json();
-    expect(bill.net_amount).toBe("53.00");
+    const bill = await (await finalise(await draft(15))).json();
     const give = async (qty_units) => {
       const current = await (await pharmacist.get(`/api/pharmacy/bills/${bill.id}`)).json();
       const response = await pharmacist.post(`/api/pharmacy/bills/${bill.id}/returns`, {
@@ -277,10 +275,16 @@ test.describe("PH80 edge cases across the pharmacy flow", () => {
       return response.json();
     };
     const first = await give(1);
-    const second = await give(3);
-    expect(first.net_amount).toBe("13.33");
-    expect(second.net_amount).toBe("39.67");
-    expect(Number(first.net_amount) + Number(second.net_amount)).toBeCloseTo(53, 2);
+    const second = await give(14);
+    expect(Number(first.net_amount)).toBeGreaterThan(0);
+    expect(Number(second.net_amount)).toBeGreaterThan(0);
+    expect(Number(first.net_amount) + Number(second.net_amount)).toBeCloseTo(
+      Number(bill.lines[0].total),
+      2,
+    );
+    expect(Number(first.net_amount) + Number(second.net_amount)).toBeLessThanOrEqual(
+      Number(bill.net_amount),
+    );
   });
 
   test("dues cannot be over-collected even by two desks at once, nor collected on a credit note", async () => {
@@ -334,7 +338,7 @@ test.describe("PH80 edge cases across the pharmacy flow", () => {
       data: {
         from_location_id: main.id,
         to_location_id: ward.id,
-        lines: [{ batch_id: batchId, qty_units: 20 }],
+        lines: [{ batch_id: batchId, qty_units: 30 }],
       },
     });
     const indent = await (
@@ -342,11 +346,11 @@ test.describe("PH80 edge cases across the pharmacy flow", () => {
         data: {
           location_id: ward.id,
           patient_id: patient.id,
-          lines: [{ batch_id: batchId, qty_units: 10 }],
+          lines: [{ batch_id: batchId, qty_units: 15 }],
         },
       })
     ).json();
-    expect(await units(ward.id)).toBe(10);
+    expect(await units(ward.id)).toBe(15);
     const due = Number(indent.due_amount);
     const back = await nurse.post(`/api/pharmacy/indents/${indent.id}/returns`, {
       data: {
@@ -357,7 +361,7 @@ test.describe("PH80 edge cases across the pharmacy flow", () => {
     });
     expect(back.status(), await back.text()).toBe(201);
     const after = await back.json();
-    expect(await units(ward.id)).toBe(14);
+    expect(await units(ward.id)).toBe(19);
     expect(Number(after.due_amount)).toBeLessThan(due);
     expect(after.returned_units[indent.bill.lines[0].id]).toBe(4);
 
@@ -378,7 +382,7 @@ test.describe("PH80 edge cases across the pharmacy flow", () => {
     });
     expect(paidBack.status()).toBe(409);
     expect((await paidBack.json()).error).toContain("Ask the pharmacy");
-    expect(await units(ward.id)).toBe(14);
+    expect(await units(ward.id)).toBe(19);
   });
 
   test("odd search text and bad ids answer cleanly instead of failing", async () => {

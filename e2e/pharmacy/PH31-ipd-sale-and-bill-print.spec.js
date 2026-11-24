@@ -43,12 +43,11 @@ test.describe("PH31 IPD sales and the printed pharmacy bill", () => {
         data: {
           name: `${TAG} ${name}`,
           form: "TAB",
-          pack_size: 10,
+          pack_size: 1,
           unit_label: "tab",
           pack_label: "strip",
           gst_rate_pct: 12,
           hsn_code: "30049099",
-          allow_loose_sale: true,
           ...extra,
         },
       })
@@ -101,11 +100,11 @@ test.describe("PH31 IPD sales and the printed pharmacy bill", () => {
       medicine_id,
       batch_no,
       expiry_date: dayOffset(400),
-      qty_packs: 5,
-      purchase_rate: "50",
+      qty_packs: 50,
+      purchase_rate: "5",
       gst_rate_pct: 12,
-      mrp: "120",
-      sale_rate: "100",
+      mrp: "12",
+      sale_rate: "10",
       rack_no: "H-1",
     });
     const saved = await (
@@ -226,7 +225,7 @@ test.describe("PH31 IPD sales and the printed pharmacy bill", () => {
       { timeout: 30000 },
     );
     await page.getByRole("button", { name: "New bill" }).click();
-    const start = page.getByRole("dialog", { name: "New pharmacy bill" });
+    const start = page.getByRole("form", { name: "Patient and sale type" });
     await start.getByLabel("Find patient").fill(PHONE);
     await start.getByRole("radio", { name: new RegExp(`${TAG} Inpatient`) }).check();
     await start.getByRole("radio", { name: /^IPD/ }).check();
@@ -236,12 +235,18 @@ test.describe("PH31 IPD sales and the printed pharmacy bill", () => {
     await start.getByRole("button", { name: "Start bill" }).click();
 
     await expect(page.getByText("IPD · IPD/2026/0077")).toBeVisible();
-    await page.getByRole("combobox", { name: "Add medicine" }).fill(`${TAG} Pantoprazole`);
-    await page.getByRole("option", { name: new RegExp(`${TAG} Pantoprazole`) }).click();
-    const picker = page.getByRole("dialog", { name: /Choose batches/ });
-    await picker.getByLabel("Quantity from batch PAN1").fill("10");
-    await picker.getByRole("button", { name: "Add to bill" }).click();
-    await expect(picker).toBeHidden();
+    const search = page.getByRole("combobox", { name: "Add medicine" });
+    await search.fill(`${TAG} Pantoprazole`);
+    await expect(
+      page.getByRole("option", { name: new RegExp(`${TAG} Pantoprazole`) }),
+    ).toBeVisible();
+    await search.press("Enter");
+    await page.getByRole("combobox", { name: /^Batch for/ }).press("Enter");
+    const qty = page.getByRole("textbox", { name: /^Quantity in .* for the new medicine$/ });
+    await qty.fill("10");
+    await qty.press("Enter");
+    await page.getByLabel("Discount % for the new medicine").press("Enter");
+    await expect(search).toBeFocused();
 
     const lines = page.getByRole("table", { name: "Medicines on this bill" });
     await expect(lines.getByRole("row").nth(1)).toContainText("₹112.00");

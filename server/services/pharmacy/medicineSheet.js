@@ -26,7 +26,6 @@ export const MEDICINE_COLUMNS = [
   { field: "max_stock_units", header: "Maximum stock (units)", width: 14 },
   { field: "reorder_qty_units", header: "Reorder quantity (units)", width: 14 },
   { field: "default_rack", header: "Rack", width: 10 },
-  { field: "allow_loose_sale", header: "Loose sale (Yes/No)", width: 12 },
 ];
 
 const FIELDS = MEDICINE_COLUMNS.map((c) => c.field);
@@ -67,14 +66,6 @@ const SCHEDULE_BY_TEXT = new Map(
 const lower = (v) => (typeof v === "string" ? v.trim().toLowerCase() : v);
 const upper = (v) => (typeof v === "string" ? v.trim().toUpperCase() : v);
 
-const yesNo = (v) => {
-  if (v === true || v === false) return v;
-  const t = lower(v);
-  if (["yes", "y", "true", "1"].includes(t)) return true;
-  if (["no", "n", "false", "0"].includes(t)) return false;
-  return t ? v : undefined;
-};
-
 function toInput(values) {
   const input = {};
   for (const f of FIELDS) if (values[f] !== undefined) input[f] = values[f];
@@ -105,7 +96,6 @@ function toInput(values) {
   if (input.pack_label) input.pack_label = lower(input.pack_label);
   if (input.schedule)
     input.schedule = SCHEDULE_BY_TEXT.get(lower(input.schedule)) ?? input.schedule;
-  if (input.allow_loose_sale !== undefined) input.allow_loose_sale = yesNo(input.allow_loose_sale);
   return input;
 }
 
@@ -204,7 +194,7 @@ const HELP = [
   `Type must be one of the medicine types in Scribe, e.g. TAB, CAP, INJ, SYP, CRM, SURG. ITEM, OTHER.`,
   "Unit: tab, cap, ml, g, unit, vial, amp, sachet, pen, dose. Pack: strip, bottle, box, tube, vial, pack, unit.",
   "Schedule: Not scheduled, Schedule H, Schedule H1, Schedule X or Narcotic.",
-  "Rates are per pack. GST % is 0 to 28. Loose sale is Yes or No.",
+  "Rates are per pack. GST % is 0 to 28. Medicines are sold in whole packs only.",
   "When you upload, Scribe shows new medicines, changes to existing ones and any rows with mistakes before saving anything.",
 ];
 
@@ -229,7 +219,6 @@ export function medicineSample() {
         default_sale_rate: 140,
         min_stock_units: 150,
         default_rack: "A-3",
-        allow_loose_sale: "Yes",
       },
       {
         name: "Huminsulin R 40IU",
@@ -241,7 +230,6 @@ export function medicineSample() {
         gst_rate_pct: 5,
         schedule: "Schedule H",
         default_mrp: 180,
-        allow_loose_sale: "No",
       },
     ],
     help: HELP,
@@ -261,7 +249,6 @@ export async function medicineTemplate(db = pool) {
       default_mrp: m.default_mrp === null ? null : Number(m.default_mrp),
       default_sale_rate: m.default_sale_rate === null ? null : Number(m.default_sale_rate),
       schedule: SCHEDULE_LABEL[m.schedule] ?? m.schedule,
-      allow_loose_sale: m.allow_loose_sale ? "Yes" : "No",
     })),
     help: HELP,
   });

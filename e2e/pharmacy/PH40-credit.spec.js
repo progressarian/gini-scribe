@@ -72,11 +72,10 @@ test.describe("PH40 credit on pharmacy bills", () => {
         data: {
           name: `${TAG} Ecosprin 75`,
           form: "TAB",
-          pack_size: 10,
+          pack_size: 1,
           unit_label: "tab",
           pack_label: "strip",
           gst_rate_pct: 12,
-          allow_loose_sale: true,
         },
       })
     ).json();
@@ -92,11 +91,11 @@ test.describe("PH40 credit on pharmacy bills", () => {
               medicine_id: medicine.id,
               batch_no: "ECO1",
               expiry_date: dayOffset(400),
-              qty_packs: 20,
-              purchase_rate: "20",
+              qty_packs: 200,
+              purchase_rate: "2",
               gst_rate_pct: 12,
-              mrp: "40",
-              sale_rate: "35",
+              mrp: "4",
+              sale_rate: "3.5",
             },
           ],
         },

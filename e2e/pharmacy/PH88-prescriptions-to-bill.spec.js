@@ -85,7 +85,6 @@ test.describe("PH88 the pharmacy works today's prescriptions like medicine colle
             unit_label: "tab",
             pack_label: "strip",
             gst_rate_pct: 12,
-            allow_loose_sale: true,
           },
         })
       ).json();
@@ -341,23 +340,32 @@ test.describe("PH88 the pharmacy works today's prescriptions like medicine colle
 
     const telmaRow = rx.getByRole("row").filter({ hasText: `${TAG} Telma 40` });
     await telmaRow.getByRole("button", { name: "Add" }).click();
-    const picker = page.getByRole("dialog", { name: /Choose batches/ });
-    await picker.getByLabel(/^Quantity needed/).fill("20");
-    await picker.getByRole("button", { name: /Auto-fill/ }).click();
-    await picker.getByLabel("Near expiry checked").check();
-    await picker.getByRole("button", { name: "Add to bill" }).click();
-    await expect(picker).toBeHidden();
+    const batch = page.getByRole("combobox", { name: `Batch for ${TAG} Telma 40` });
+    await expect(batch).toBeFocused();
+    await expect(page.getByRole("option").filter({ hasText: "TNEAR" }).first()).toContainText(
+      "choosing confirms",
+    );
+    await batch.press("Enter");
+    const qty = page.getByRole("textbox", { name: "Quantity in strips for the new medicine" });
+    await qty.fill("2");
+    await qty.press("Enter");
+    await page.getByLabel("Discount % for the new medicine").press("Enter");
+    await expect(page.getByRole("status").filter({ hasText: "left in batch TNEAR" })).toContainText(
+      "1 strip taken from batch TFAR",
+    );
     await expect(telmaRow).toContainText("On bill");
 
     const zRow = rx.getByRole("row").filter({ hasText: `${TAG} Brand Z 2` });
     await zRow.getByRole("button", { name: "Substitute" }).click();
     await page.getByRole("combobox", { name: /Substitute for/ }).fill(`${TAG} Amlong`);
     await page.getByRole("option", { name: new RegExp(`${TAG} Amlong 5`) }).click();
-    const subPicker = page.getByRole("dialog", { name: /Choose batches/ });
-    await subPicker.getByLabel(/^Quantity needed/).fill("10");
-    await subPicker.getByRole("button", { name: /Auto-fill/ }).click();
-    await subPicker.getByRole("button", { name: "Add to bill" }).click();
-    await expect(subPicker).toBeHidden();
+    const subBatch = page.getByRole("combobox", { name: `Batch for ${TAG} Amlong 5` });
+    await expect(subBatch).toBeFocused();
+    await subBatch.press("Enter");
+    await page
+      .getByRole("textbox", { name: "Quantity in strips for the new medicine" })
+      .press("Enter");
+    await page.getByLabel("Discount % for the new medicine").press("Enter");
     await expect(zRow).toContainText("Substitute on bill");
 
     const qRow = rx.getByRole("row").filter({ hasText: `${TAG} Brand Q 9` });

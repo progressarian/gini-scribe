@@ -10,6 +10,18 @@
   font-weight: 600;
   color: var(--ui-ink2);
 }
+.mpick__label--hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.mpick__option.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
 .mpick__list {
   position: absolute;
   top: 100%;
@@ -66,4 +78,9 @@
   min-height: 16px;
   font-size: 12px;
   color: var(--fink3);
+}
+.mpick__list.mpick__list--floating {
+  position: static;
+  margin: 0;
+  max-height: min(320px, 45vh);
 }

@@ -18,7 +18,6 @@ export async function stockByKey(keys, locationId, db = pool) {
   if (!keys.length) return byKey;
   const { rows } = await db.query(
     `SELECT m.id, m.code, m.name, m.medicine_key, m.pack_size, m.pack_label, m.unit_label,
-            m.allow_loose_sale,
             COALESCE(SUM(s.qty_units) FILTER (WHERE b.expiry_date > $3::date), 0)::int
               AS sellable_units
        FROM pharmacy_medicines m
@@ -79,7 +78,6 @@ export async function prescriptionsFor(visitIds, { locationId, billId = null }, 
         pack_size: medicine.pack_size,
         pack_label: medicine.pack_label,
         unit_label: medicine.unit_label,
-        allow_loose_sale: medicine.allow_loose_sale,
         sellable_units: medicine.sellable_units,
       },
       suggested_units: units,

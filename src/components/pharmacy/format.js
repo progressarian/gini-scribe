@@ -13,6 +13,12 @@ export const showDate = (iso) =>
       })
     : null;
 
+export const pctTyped = (v) => {
+  const clean = v.replace(/[^\d.]/g, "");
+  const [whole, ...rest] = clean.split(".");
+  return rest.length ? `${whole.slice(0, 3)}.${rest.join("").slice(0, 2)}` : whole.slice(0, 3);
+};
+
 export const inr = (n) => {
   const value = Number(n || 0);
   const text = Math.abs(value).toLocaleString("en-IN", {

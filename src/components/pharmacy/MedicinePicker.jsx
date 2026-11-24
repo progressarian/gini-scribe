@@ -1,5 +1,6 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Search } from "lucide-react";
+import AnchoredPopover from "../ui/AnchoredPopover";
 import { useMedicineList } from "../../queries/hooks/usePharmacyMedicines";
 import "./MedicinePicker.css";
 
@@ -28,6 +29,8 @@ export default function MedicinePicker({
   optionId = (m) => m.id,
   noMatchText = "No active medicine matches. Add it on the Medicines page first.",
   disabled = false,
+  inputRef,
+  hideLabel = false,
 }) {
   const id = useId();
   const listId = `${id}-list`;
@@ -35,6 +38,7 @@ export default function MedicinePicker({
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
+  const fieldRef = useRef(null);
 
   useEffect(() => {
     const t = setTimeout(() => setQ(text.trim().length >= 2 ? text.trim() : ""), 200);
@@ -72,6 +76,30 @@ export default function MedicinePicker({
     }
   };
 
+  const inDialog = Boolean(fieldRef.current?.closest('[role="dialog"]'));
+
+  const list = (className) => (
+    <ul id={listId} role="listbox" aria-label={`${label} results`} className={className}>
+      {options.map((m, i) => (
+        <li
+          key={optionId(m)}
+          id={`${listId}-${optionId(m)}`}
+          role="option"
+          aria-selected={i === active}
+          className={`mpick__option${i === active ? " is-active" : ""}`}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            choose(m);
+          }}
+          onMouseEnter={() => setActive(i)}
+        >
+          <span className="mpick__name">{m.name}</span>
+          <span className="mpick__meta">{describeOption(m)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+
   const status = !q
     ? null
     : search.isError
@@ -84,13 +112,14 @@ export default function MedicinePicker({
 
   return (
     <div className="mpick">
-      <label htmlFor={id} className="mpick__label">
+      <label htmlFor={id} className={`mpick__label${hideLabel ? " mpick__label--hidden" : ""}`}>
         {label}
       </label>
-      <div className="mpick__field">
+      <div className="mpick__field" ref={fieldRef}>
         <Search size={15} className="mpick__icon" aria-hidden="true" />
         <input
           id={id}
+          ref={inputRef}
           className="jb-assign mpick__input"
           role="combobox"
           aria-autocomplete="list"
@@ -113,31 +142,19 @@ export default function MedicinePicker({
           onKeyDown={onKeyDown}
         />
       </div>
-      <ul
-        id={listId}
-        role="listbox"
-        aria-label={`${label} results`}
-        className="mpick__list"
-        hidden={!expanded || !options.length}
-      >
-        {options.map((m, i) => (
-          <li
-            key={optionId(m)}
-            id={`${listId}-${optionId(m)}`}
-            role="option"
-            aria-selected={i === active}
-            className={`mpick__option${i === active ? " is-active" : ""}`}
-            onMouseDown={(e) => {
-              e.preventDefault();
-              choose(m);
-            }}
-            onMouseEnter={() => setActive(i)}
+      {expanded && options.length ? (
+        inDialog ? (
+          list("mpick__list")
+        ) : (
+          <AnchoredPopover
+            anchorRef={fieldRef}
+            minWidth
+            container={fieldRef.current?.closest(".flow-root")}
           >
-            <span className="mpick__name">{m.name}</span>
-            <span className="mpick__meta">{describeOption(m)}</span>
-          </li>
-        ))}
-      </ul>
+            {list("mpick__list mpick__list--floating")}
+          </AnchoredPopover>
+        )
+      ) : null}
       <p className="mpick__status" role="status" aria-live="polite">
         {expanded ? status : null}
       </p>

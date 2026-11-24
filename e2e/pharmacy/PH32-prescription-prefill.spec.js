@@ -49,7 +49,6 @@ test.describe("PH32 billing from today's prescription", () => {
           unit_label: "tab",
           pack_label: "strip",
           gst_rate_pct: 12,
-          allow_loose_sale: true,
         },
       })
     ).json();
@@ -165,12 +164,16 @@ test.describe("PH32 billing from today's prescription", () => {
     const rx = page.getByRole("region", { name: "Today's prescription" });
     await expect(rx).toContainText("Not in the medicine list");
     await rx.getByRole("button", { name: `Add ${TAG} Glycomet 500 to the bill` }).click();
-    const picker = page.getByRole("dialog", { name: /Choose batches/ });
-    await expect(picker).toContainText("Prescribed: ");
-    await expect(picker.getByLabel("Quantity needed (tab)")).toHaveValue("60");
-    await expect(picker.getByLabel("Quantity from batch GLY1")).toHaveValue("60");
-    await picker.getByRole("button", { name: "Add to bill" }).click();
-    await expect(picker).toBeHidden();
+    const lines = page.getByRole("table", { name: "Medicines on this bill" });
+    await expect(lines).toContainText("Prescribed: ");
+    const batch = page.getByRole("combobox", { name: `Batch for ${TAG} Glycomet 500` });
+    await expect(batch).toBeFocused();
+    await batch.press("Enter");
+    const qty = page.getByRole("textbox", { name: "Quantity in strips for the new medicine" });
+    await expect(qty).toHaveValue("6");
+    await qty.press("Enter");
+    await page.getByLabel("Discount % for the new medicine").press("Enter");
+    await expect(page.getByRole("combobox", { name: "Add medicine" })).toBeFocused();
     await expect(rx.getByText("On bill")).toBeVisible();
     await expect(page.getByRole("button", { name: "Finalise and collect ₹134.00" })).toBeVisible();
   });

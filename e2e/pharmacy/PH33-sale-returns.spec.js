@@ -86,11 +86,10 @@ test.describe("PH33 sale returns and pharmacy credit notes", () => {
         data: {
           name: `${TAG} Telma 40`,
           form: "TAB",
-          pack_size: 10,
+          pack_size: 1,
           unit_label: "tab",
           pack_label: "strip",
           gst_rate_pct: 12,
-          allow_loose_sale: true,
         },
       })
     ).json();
@@ -106,11 +105,11 @@ test.describe("PH33 sale returns and pharmacy credit notes", () => {
               medicine_id: tablet.id,
               batch_no: "TEL1",
               expiry_date: dayOffset(400),
-              qty_packs: 10,
-              purchase_rate: "20",
+              qty_packs: 100,
+              purchase_rate: "2",
               gst_rate_pct: 12,
-              mrp: "40",
-              sale_rate: "35",
+              mrp: "4",
+              sale_rate: "3.5",
             },
           ],
         },

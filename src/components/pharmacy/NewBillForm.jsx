@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { UserPlus, Search } from "lucide-react";
 import FormField from "../ui/FormField";
-import MasterFormDialog from "./MasterFormDialog";
 import { digitsTyped, requestErrorOf } from "../billing/format";
 import { toast } from "../../stores/uiStore";
 import { inr } from "./format";
@@ -28,7 +27,10 @@ const EMPTY_WALKIN = { name: "", phone: "", age: "", sex: "" };
 const patientLine = (p) =>
   [p.file_no, p.phone, [p.age, p.sex].filter(Boolean).join(" ")].filter(Boolean).join(" · ");
 
-export default function NewBillDialog({ onCreated, onClose }) {
+export default function NewBillForm({ onCreated, onCancel }) {
+  const titleId = useId();
+  const formRef = useRef(null);
+  const resultsRef = useRef(null);
   const createBill = useCreateBill();
   const createWalkin = useCreateWalkin();
   const [search, setSearch] = useState("");
@@ -68,24 +70,34 @@ export default function NewBillDialog({ onCreated, onClose }) {
     }
   };
 
-  const problems = {};
-  if (walkinMode) {
-    if (walkin.name.trim().length < 2) problems.name = "Enter the customer's name.";
-    if (!/^\d{10,12}$/.test(walkin.phone)) problems.phone = "Enter a 10-digit mobile number.";
-    if (walkin.age && Number(walkin.age) > 130) problems.age = "Enter an age up to 130.";
-  } else if (!patient) {
-    problems.patient = "Choose the patient, or add a walk-in customer.";
-  }
-  if (saleType === "ipd" && !ipdNumber.trim()) problems.ipd = "Enter the IPD number.";
-  const errors = touched ? problems : {};
+  const problemsFor = (picked) => {
+    const found = {};
+    if (walkinMode) {
+      if (walkin.name.trim().length < 2) found.name = "Enter the customer's name.";
+      if (!/^\d{10,12}$/.test(walkin.phone)) found.phone = "Enter a 10-digit mobile number.";
+      if (walkin.age && Number(walkin.age) > 130) found.age = "Enter an age up to 130.";
+    } else if (!picked) {
+      found.patient = "Choose the patient, or add a walk-in customer.";
+    }
+    if (saleType === "ipd" && !ipdNumber.trim()) found.ipd = "Enter the IPD number.";
+    return found;
+  };
+  const errors = touched ? problemsFor(patient) : {};
+  const busy = createBill.isPending || createWalkin.isPending;
 
-  const submit = async (e) => {
-    e.preventDefault();
+  const submit = async (e, picked = patient) => {
+    e?.preventDefault();
     setTouched(true);
     setError("");
-    if (Object.keys(problems).length) return;
+    if (busy || Object.keys(problemsFor(picked)).length) return;
     try {
-      let chosen = patient;
+      let chosen = picked;
+      const type =
+        picked && picked !== patient
+          ? picked.registration_source === WALKIN_REGISTRATION_SOURCE
+            ? "walkin"
+            : "opd"
+          : saleType;
       if (walkinMode) {
         const made = await createWalkin.mutateAsync({
           name: walkin.name.trim(),
@@ -98,8 +110,8 @@ export default function NewBillDialog({ onCreated, onClose }) {
       }
       const bill = await createBill.mutateAsync({
         patient_id: chosen.id,
-        sale_type: saleType,
-        ipd_number: saleType === "ipd" ? ipdNumber.trim() : null,
+        sale_type: type,
+        ipd_number: type === "ipd" ? ipdNumber.trim() : null,
         prescriber_name: prescriber.trim() || null,
       });
       onCreated(bill);
@@ -108,18 +120,47 @@ export default function NewBillDialog({ onCreated, onClose }) {
     }
   };
 
-  const busy = createBill.isPending || createWalkin.isPending;
+  const radios = () => [...(resultsRef.current?.querySelectorAll('input[type="radio"]') ?? [])];
+
+  const onSearchKey = (e) => {
+    if (e.key === "ArrowDown" && results.length) {
+      e.preventDefault();
+      choose(results[0]);
+      radios()[0]?.focus();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (results.length === 1) {
+        choose(results[0]);
+        submit(null, results[0]);
+      } else if (patient) {
+        submit(null);
+      } else if (results.length) {
+        choose(results[0]);
+        radios()[0]?.focus();
+      }
+    }
+  };
+
+  const submitOnEnter = (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    formRef.current?.requestSubmit();
+  };
 
   return (
-    <MasterFormDialog
-      title="New pharmacy bill"
-      dirty={Boolean(patient || search || walkin.name || walkin.phone)}
-      busy={busy}
-      error={error}
-      submitLabel="Start bill"
+    <form
+      ref={formRef}
+      className="flow-card phb-newbill"
+      aria-labelledby={titleId}
       onSubmit={submit}
-      onClose={onClose}
+      noValidate
     >
+      <h2 id={titleId} className="flow-sec-title">
+        Patient and sale type
+      </h2>
+      <p className="phs-meta phb-newbill__keys">
+        Type to search, ↓ to move into the results, ↑/↓ to choose, Enter to start the bill.
+      </p>
       {walkinMode ? (
         <fieldset className="phb-section">
           <legend>Walk-in customer</legend>
@@ -195,7 +236,11 @@ export default function NewBillDialog({ onCreated, onClose }) {
               autoComplete="off"
               maxLength={80}
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPatient(null);
+              }}
+              onKeyDown={onSearchKey}
             />
           </FormField>
           {q.length < 2 ? null : found.isError ? (
@@ -208,7 +253,12 @@ export default function NewBillDialog({ onCreated, onClose }) {
             </p>
           ) : results.length ? (
             <>
-              <div className="phb-patients" role="radiogroup" aria-label="Matching patients">
+              <div
+                ref={resultsRef}
+                className="phb-patients"
+                role="radiogroup"
+                aria-label="Matching patients"
+              >
                 {results.map((p) => (
                   <label
                     key={p.id}
@@ -219,6 +269,7 @@ export default function NewBillDialog({ onCreated, onClose }) {
                       name="bill-patient"
                       checked={patient?.id === p.id}
                       onChange={() => choose(p)}
+                      onKeyDown={submitOnEnter}
                     />
                     <span>
                       <span className="phb-patient__name">{p.name}</span>
@@ -278,6 +329,7 @@ export default function NewBillDialog({ onCreated, onClose }) {
                 value={type}
                 checked={saleType === type}
                 onChange={() => setSaleType(type)}
+                onKeyDown={submitOnEnter}
               />
               <span>
                 <span className="phb-patient__name">{SALE_TYPE_LABEL[type]}</span>
@@ -311,6 +363,20 @@ export default function NewBillDialog({ onCreated, onClose }) {
           </FormField>
         </div>
       </fieldset>
-    </MasterFormDialog>
+
+      {error ? (
+        <p className="bill-dialog__error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <div className="phb-checkout__acts">
+        <button type="button" className="flow-btn flow-btn-ghost" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="submit" className="flow-btn flow-btn-primary" disabled={busy}>
+          {busy ? "Starting…" : "Start bill"}
+        </button>
+      </div>
+    </form>
   );
 }

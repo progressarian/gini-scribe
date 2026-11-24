@@ -270,7 +270,6 @@ export async function prescriptionPatient(patientId, { date = today() } = {}, db
         pack_size: medicine.pack_size,
         pack_label: medicine.pack_label,
         unit_label: medicine.unit_label,
-        allow_loose_sale: medicine.allow_loose_sale,
         sellable_units: medicine.sellable_units,
       },
       suggested_units: null,

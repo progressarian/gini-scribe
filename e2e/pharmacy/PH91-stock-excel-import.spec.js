@@ -191,7 +191,7 @@ test.describe("PH91 stock import from the old system's Excel", () => {
     });
 
     const tablet = await one(
-      `SELECT m.form, m.pack_size, m.pack_label, m.needs_review, m.allow_loose_sale, b.batch_no, b.mrp, b.sale_rate,
+      `SELECT m.form, m.pack_size, m.pack_label, m.needs_review, b.batch_no, b.mrp, b.sale_rate,
               b.purchase_rate, v.name AS vendor, v.phone, s.qty_units
          FROM pharmacy_batches b
          JOIN pharmacy_medicines m ON m.id = b.medicine_id
@@ -205,7 +205,6 @@ test.describe("PH91 stock import from the old system's Excel", () => {
       pack_size: 10,
       pack_label: "strip",
       needs_review: true,
-      allow_loose_sale: false,
       batch_no: "MF01",
       mrp: "120.00",
       sale_rate: "120.00",
