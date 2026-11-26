@@ -24,6 +24,7 @@ import {
   DRAWER_MODE,
   openShiftIdFor,
   PAYMENT_MODES,
+  NEW_TAKE_MODES,
   TAKE_MODES,
 } from "./cashShifts.js";
 import { cleanUpiApp } from "./upiApp.js";
@@ -81,7 +82,7 @@ const TAKING = {
   amount: "The amount taken",
   positive: "The amount taken must be more than zero",
   mode: "A payment must be taken as one of",
-  modes: [...TAKE_MODES, DEPOSIT_MODE, PREPAID_MODE],
+  modes: [...NEW_TAKE_MODES, DEPOSIT_MODE, PREPAID_MODE],
   upiApp: true,
   referenceOptional: true,
   reference: (mode) => `A ${MODE_LABEL[mode]} payment needs its reference number`,
@@ -94,6 +95,7 @@ const PAYING_BACK = {
   positive: "The amount paid back must be more than zero",
   mode: "Money can only go back as one of",
   modes: PAY_OUT_MODES,
+  referenceOptional: true,
   reference: (mode) => `A ${MODE_LABEL[mode]} refund needs the reversal's reference number`,
   none: "Enter the money being paid back",
   many: `At most ${PAYMENTS_AT_ONCE} refunds can be paid out at once`,

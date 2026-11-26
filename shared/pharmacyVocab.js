@@ -51,6 +51,7 @@ export const PAYMENT_MODE_LABEL = {
   neft: "NEFT / Cheque",
 };
 export const PAYMENT_MODES = Object.keys(PAYMENT_MODE_LABEL);
+export const TAKE_PAYMENT_MODES = ["cash", "card", "upi"];
 export const DEPOSIT_MODE = "deposit";
 export const PAYMENT_MODE_TEXT = { ...PAYMENT_MODE_LABEL, deposit: "From deposit" };
 export const ACCOUNT_ENTRY_LABEL = {

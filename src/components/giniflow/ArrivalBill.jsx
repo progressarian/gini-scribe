@@ -7,7 +7,7 @@ import {
   PAID_MODE_LABEL,
   TAKE_MODE_LABEL,
 } from "../billing/counter/lineText";
-import UpiAppField from "../billing/counter/UpiAppField";
+import { DEFAULT_UPI_APP } from "../../../shared/billingVocab.js";
 
 const COLLECT = "collect";
 const HEALTHRAY_SOURCE = "healthray";
@@ -25,7 +25,6 @@ export const emptyArrivalChoices = () => ({
   paid: {},
   mode: "",
   reference: "",
-  upiApp: "",
   split: [],
   extraToDeposit: false,
   add: [],
@@ -34,13 +33,6 @@ export const emptyArrivalChoices = () => ({
 });
 
 const PREPAID = "prepaid";
-
-const UPI_APP_MISSING = "Choose the UPI app it was paid by.";
-
-const prepaidWithoutRef = (preview, choices) =>
-  (preview?.lines || []).find(
-    (line) => choices.paid[line.itemId] === PREPAID && !(choices.paidRef[line.itemId] || "").trim(),
-  );
 
 const toPaise = (rupeesText) => Math.round(Number(rupeesText || 0) * 100);
 
@@ -77,28 +69,19 @@ export const takesCash = (preview, choices) =>
 
 export function arrivalBlocker(preview, choices, shiftOpen = true) {
   if (!preview) return "Working out the bill…";
-  const missing = prepaidWithoutRef(preview, choices);
-  if (missing) {
-    return `Enter the transaction ID or earlier receipt number for ${missing.name} (paid earlier / online).`;
-  }
   const collect = collectNowPaise(preview, choices);
   if (!collect) return null;
   if (!shiftOpen && takesCash(preview, choices)) {
-    return "Open your shift (Shift tab) before taking cash, so it is counted in your drawer — or choose Card, UPI or NEFT / Cheque.";
+    return "Open your shift (Shift tab) before taking cash, so it is counted in your drawer — or choose Card or UPI.";
   }
   if (!choices.mode) {
-    return "Choose how the patient paid — cash, card, UPI, NEFT / cheque, or split.";
+    return "Choose how the patient paid — cash, card, UPI or split.";
   }
-  if (choices.mode !== SPLIT) {
-    if (needsUpiApp(choices.mode) && !choices.upiApp) return UPI_APP_MISSING;
-    return null;
-  }
+  if (choices.mode !== SPLIT) return null;
   const noMode = choices.split.findIndex((part) => !part.mode);
   if (noMode >= 0) return `Choose how part ${noMode + 1} was paid.`;
   const empty = choices.split.findIndex((part) => toPaise(part.amount) <= 0);
   if (empty >= 0) return `Enter an amount for part ${empty + 1}, or remove it.`;
-  const noApp = choices.split.findIndex((part) => needsUpiApp(part.mode) && !part.upiApp);
-  if (noApp >= 0) return `Choose the UPI app for part ${noApp + 1}.`;
   const total = splitTotal(choices.split);
   if (total < collect) return "The split must add up to the amount to collect.";
   if (total > collect && !choices.extraToDeposit) {
@@ -133,7 +116,7 @@ export function arrivalPayload(preview, choices) {
             mode: part.mode,
             amount: toPaise(part.amount),
             reference: part.mode === "cash" ? null : part.reference.trim() || null,
-            ...(needsUpiApp(part.mode) ? { upiApp: part.upiApp } : {}),
+            ...(needsUpiApp(part.mode) ? { upiApp: DEFAULT_UPI_APP } : {}),
           })),
         }
       : {}),
@@ -141,7 +124,7 @@ export function arrivalPayload(preview, choices) {
       ? {
           mode: choices.mode,
           reference: choices.mode === "cash" ? null : choices.reference.trim() || null,
-          ...(needsUpiApp(choices.mode) ? { upiApp: choices.upiApp } : {}),
+          ...(needsUpiApp(choices.mode) ? { upiApp: DEFAULT_UPI_APP } : {}),
         }
       : {}),
   };
@@ -194,7 +177,7 @@ function SplitRows({ split, collect, onChange, extraToDeposit, onExtraToDeposit 
             className="ab-pay"
             aria-label={`Part ${index + 1} paid by`}
             value={part.mode}
-            onChange={(e) => setPart(index, { mode: e.target.value, upiApp: "" })}
+            onChange={(e) => setPart(index, { mode: e.target.value })}
           >
             <option value="" disabled>
               Choose mode
@@ -216,16 +199,6 @@ function SplitRows({ split, collect, onChange, extraToDeposit, onExtraToDeposit 
             value={part.amount}
             onChange={(e) => setAmount(index, e.target.value)}
           />
-          {needsUpiApp(part.mode) && (
-            <UpiAppField
-              className="ab-upi"
-              labelClassName="sr-only"
-              selectClassName="ab-pay"
-              label={`Part ${index + 1} UPI app`}
-              value={part.upiApp}
-              onChange={(upiApp) => setPart(index, { upiApp })}
-            />
-          )}
           {part.mode && part.mode !== "cash" && (
             <input
               className="ab-ref"
@@ -262,7 +235,6 @@ function SplitRows({ split, collect, onChange, extraToDeposit, onExtraToDeposit 
                   mode: "",
                   amount: left > 0 ? String(rupeesFromPaise(left)) : "",
                   reference: "",
-                  upiApp: "",
                 },
               ])
             }
@@ -526,7 +498,7 @@ export default function ArrivalBill({
                       <input
                         className="ab-ref ab-paid-ref"
                         aria-label={`${line.name} payment reference`}
-                        placeholder="Transaction ID / receipt no."
+                        placeholder="Transaction ID / receipt no. (optional)"
                         maxLength={60}
                         value={choices.paidRef[line.itemId] || ""}
                         onChange={(e) =>
@@ -614,7 +586,7 @@ export default function ArrivalBill({
                   name="arrivalMode"
                   value={mode}
                   checked={choices.mode === mode}
-                  onChange={() => onChange({ ...choices, mode, upiApp: "" })}
+                  onChange={() => onChange({ ...choices, mode })}
                 />
                 {label}
               </label>
@@ -636,9 +608,8 @@ export default function ArrivalBill({
                             mode: "",
                             amount: String(rupeesFromPaise(collect)),
                             reference: "",
-                            upiApp: "",
                           },
-                          { mode: "", amount: "", reference: "", upiApp: "" },
+                          { mode: "", amount: "", reference: "" },
                         ],
                   })
                 }
@@ -655,15 +626,6 @@ export default function ArrivalBill({
               onExtraToDeposit={(extraToDeposit) => onChange({ ...choices, extraToDeposit })}
             />
           )}
-          {needsUpiApp(choices.mode) && (
-            <UpiAppField
-              className="ab-upi"
-              labelClassName="sr-only"
-              selectClassName="ab-pay"
-              value={choices.upiApp}
-              onChange={(upiApp) => onChange({ ...choices, upiApp })}
-            />
-          )}
           {choices.mode && choices.mode !== "cash" && choices.mode !== SPLIT && (
             <input
               className="ab-ref"
@@ -675,7 +637,7 @@ export default function ArrivalBill({
           )}
         </div>
       )}
-      {blocker && !splitShowsWhy && (collect > 0 || prepaidWithoutRef(preview, choices)) && (
+      {blocker && !splitShowsWhy && collect > 0 && (
         <div className="ab-err" role="alert">
           {blocker}
         </div>

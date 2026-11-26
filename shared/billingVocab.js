@@ -45,6 +45,7 @@ export const UPI_APP_LABEL = {
   other: "Other UPI",
 };
 export const UPI_APPS = Object.keys(UPI_APP_LABEL);
+export const DEFAULT_UPI_APP = "icici";
 export const UPI_MONEY_COLUMNS = UPI_APPS.map((app) => ({
   key: `upi_${app}`,
   label: app === "bharatpe" ? "BharatPe (QR Code)" : UPI_APP_LABEL[app],

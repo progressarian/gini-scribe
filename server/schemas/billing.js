@@ -42,9 +42,9 @@ import {
   REFERENCE_MAX as PAYMENT_REFERENCE_MAX,
 } from "../services/billing/payments.js";
 import {
-  DRAWER_MODE,
   NOTE_MAX as SHIFT_NOTE_MAX,
   STATUSES as SHIFT_STATUSES,
+  NEW_TAKE_MODES,
   TAKE_MODES,
 } from "../services/billing/cashShifts.js";
 import {
@@ -1085,31 +1085,24 @@ const paymentAmount = z.union([
 ]);
 
 const paymentEntry = (modes) =>
-  z
-    .strictObject(
-      {
-        mode: z.enum(modes, { message: `must be one of: ${modes.join(", ")}` }),
-        amount: paymentAmount,
-        reference: z.union([z.string().trim().max(PAYMENT_REFERENCE_MAX), z.null()]).optional(),
-        upi_app: z.enum(UPI_APPS).nullish(),
-        ...NO_PRICE,
-      },
-      objectOnly('must be a payment, like { mode: "cash", amount: 500 }'),
-    )
-    .refine(
-      (entry) =>
-        [DRAWER_MODE, HEALTHRAY_MODE, DEPOSIT_MODE].includes(entry.mode) ||
-        Boolean(entry.reference),
-      "needs its reference number when it isn't cash",
-    );
+  z.strictObject(
+    {
+      mode: z.enum(modes, { message: `must be one of: ${modes.join(", ")}` }),
+      amount: paymentAmount,
+      reference: z.union([z.string().trim().max(PAYMENT_REFERENCE_MAX), z.null()]).optional(),
+      upi_app: z.enum(UPI_APPS).nullish(),
+      ...NO_PRICE,
+    },
+    objectOnly('must be a payment, like { mode: "cash", amount: 500 }'),
+  );
 
-const takenPayment = paymentEntry([...TAKE_MODES, DEPOSIT_MODE, PREPAID_MODE]);
+const takenPayment = paymentEntry([...NEW_TAKE_MODES, DEPOSIT_MODE, PREPAID_MODE]);
 
 const paidOutPayment = paymentEntry([...TAKE_MODES, HEALTHRAY_MODE, PREPAID_MODE]);
 
 export const billingDepositReceiveSchema = z.strictObject(
   {
-    mode: z.enum(TAKE_MODES, { message: `must be one of: ${TAKE_MODES.join(", ")}` }),
+    mode: z.enum(NEW_TAKE_MODES, { message: `must be one of: ${NEW_TAKE_MODES.join(", ")}` }),
     amount: paymentAmount,
     reference: z.union([z.string().trim().max(PAYMENT_REFERENCE_MAX), z.null()]).optional(),
     upi_app: z.enum(UPI_APPS).nullish(),

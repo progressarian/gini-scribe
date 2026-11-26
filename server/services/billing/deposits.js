@@ -1,6 +1,6 @@
 import pool from "../../config/db.js";
 import { paise } from "../../../shared/labPayment.js";
-import { DEPOSIT_MAX, DEPOSIT_MODE, NEFT_MODE } from "../../../shared/billingVocab.js";
+import { DEPOSIT_MAX, DEPOSIT_MODE } from "../../../shared/billingVocab.js";
 import { writeAudit } from "./audit.js";
 import { nextNumber, seriesFor } from "./billNumber.js";
 import { CAPABILITIES, hasAnyCapability } from "../../../shared/permissions.js";
@@ -10,7 +10,7 @@ import {
   openShiftIdFor,
   PAYMENT_MODES,
   refreshClosedDrawer,
-  TAKE_MODES,
+  NEW_TAKE_MODES,
 } from "./cashShifts.js";
 import { cleanUpiApp } from "./upiApp.js";
 import { SUPABASE_SERVICE_KEY, SUPABASE_URL, STORAGE_BUCKET } from "../../config/storage.js";
@@ -20,7 +20,6 @@ import { httpError, inTransaction } from "./transaction.js";
 export const ENTRIES_SHOWN = 50;
 const REFERENCE_MAX = 60;
 const NOTE_MAX = 300;
-const MODE_LABEL = { cash: "cash", card: "card", upi: "UPI", [NEFT_MODE]: "NEFT / cheque" };
 const TEXT_MAX = 300;
 const IPD_NUMBER_MAX = 40;
 export const CONSENT_DOC_TYPE = "deposit_consent";
@@ -58,8 +57,8 @@ function cleanPatientId(value) {
 
 function cleanReceipt(input) {
   const mode = typeof input?.mode === "string" ? input.mode.trim().toLowerCase() : "";
-  if (!TAKE_MODES.includes(mode)) {
-    throw httpError(400, `A deposit is taken as one of: ${TAKE_MODES.join(", ")}`);
+  if (!NEW_TAKE_MODES.includes(mode)) {
+    throw httpError(400, `A deposit is taken as one of: ${NEW_TAKE_MODES.join(", ")}`);
   }
   const amount = paise(cleanMoney(input?.amount, "The deposit amount"));
   if (amount <= 0) throw httpError(400, "The deposit must be more than zero");
@@ -669,9 +668,6 @@ export async function payOutRefund(requestIdValue, input, ctx, db = pool) {
       throw httpError(409, "This deposit refund was already paid back or rejected");
     }
     const mode = request.approved_mode;
-    if (mode !== DRAWER_MODE && !reference) {
-      throw httpError(400, `A ${MODE_LABEL[mode]} refund needs the reversal's reference number`);
-    }
     const amount = paise(request.amount);
     const account = await lockAccount(client, request.patient_id);
     if (account.balance < amount) {

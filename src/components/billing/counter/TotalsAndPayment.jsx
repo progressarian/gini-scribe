@@ -10,14 +10,13 @@ import {
   useRereadBill,
   useTakePayments,
 } from "../../../queries/hooks/useBilling";
-import { DEPOSIT_MODE, HEALTHRAY_MODE } from "../../../../shared/billingVocab.js";
+import { DEFAULT_UPI_APP, DEPOSIT_MODE, HEALTHRAY_MODE } from "../../../../shared/billingVocab.js";
 import { errorOf, fromPaise, moneyTyped } from "../format";
 import { HEALTHRAY_LABEL, needsUpiApp, TAKE_MODE_LABEL, takenModeText } from "./lineText";
 import { balanceOf, finaliseBlockers, payLaterAllowed } from "./finaliseChecks";
 import { emptyPaymentRow } from "./counterForm";
 import { shiftReminder } from "./shiftReminder";
 import PaymentsReceived from "./PaymentsReceived";
-import UpiAppField from "./UpiAppField";
 import { announcePaid } from "./paidSignal";
 import { useMakeFinal } from "./useMakeFinal";
 import { SavedOpenShiftForm } from "./OpenShiftForm";
@@ -40,7 +39,6 @@ const NO_PAID_MODE = { mode: "", upiApp: "", reference: "" };
 const REFERENCE_HINT = {
   card: "e.g. last 4 digits or slip no.",
   upi: "e.g. UPI transaction ID",
-  neft: "e.g. UTR or cheque no.",
 };
 
 const hrPart = (amount = "") => ({ ...NO_PAID_MODE, amount });
@@ -120,9 +118,6 @@ export default function TotalsAndPayment({
     (laterChosen || (entered > 0 && entered === balance));
   const busy = take.isPending || final.isPending;
   const missingMode = rows.some((row) => paiseOf(row.amount) > 0 && !row.mode);
-  const missingUpiApp = rows.some(
-    (row) => paiseOf(row.amount) > 0 && needsUpiApp(row.mode) && !row.upiApp,
-  );
   const depositLeftFor = (index) =>
     depositAvailable -
     rows.reduce(
@@ -141,11 +136,10 @@ export default function TotalsAndPayment({
     opening && "The bill is still loading.",
     entered <= 0 && !finishes && "Enter the amount received.",
     entered > balance && `That is ${fromPaise(entered - balance)} more than is due.`,
-    missingMode && "Choose how the patient paid — cash, card, UPI or NEFT / cheque.",
+    missingMode && "Choose how the patient paid — cash, card or UPI.",
     shiftClosed &&
       typedRows.some((row) => row.mode === "cash" || !row.mode) &&
       "Cash needs an open shift — open one above.",
-    missingUpiApp && "Choose the UPI app for each UPI payment.",
     depositOver && `The deposit holds ${fromPaise(depositAvailable)} — lower the deposit payment.`,
   ].filter(Boolean);
 
@@ -181,7 +175,7 @@ export default function TotalsAndPayment({
       setCapped(paiseOf(typed) > most ? { index, most, deposit: true } : null);
       return;
     }
-    change(index, needsUpiApp(mode) ? { mode } : { mode, upiApp: "" });
+    change(index, { mode, upiApp: needsUpiApp(mode) ? DEFAULT_UPI_APP : "" });
   };
 
   const finishWithoutPayment = async () => {
@@ -203,7 +197,7 @@ export default function TotalsAndPayment({
           mode: row.mode,
           amount: row.amount.trim(),
           ...(row.reference.trim() ? { reference: row.reference.trim() } : {}),
-          ...(needsUpiApp(row.mode) ? { upi_app: row.upiApp } : {}),
+          ...(needsUpiApp(row.mode) ? { upi_app: DEFAULT_UPI_APP } : {}),
         }));
       if (finishes) {
         const made = await final.makeFinal(bill, { payLater: laterChosen, payments });
@@ -457,13 +451,6 @@ export default function TotalsAndPayment({
                           : `Only ${fromPaise(capped.most)} is still due, so this payment was capped at that.`}
                       </p>
                     )}
-                    {needsUpiApp(row.mode) && (
-                      <UpiAppField
-                        className="bc-field bc-pay__ref"
-                        value={row.upiApp}
-                        onChange={(upiApp) => change(index, { upiApp })}
-                      />
-                    )}
                     {row.mode && !NO_REFERENCE.includes(row.mode) && (
                       <label className="bc-field bc-pay__ref">
                         <span className="bc-field__lbl">Reference (optional)</span>
@@ -522,11 +509,9 @@ export default function TotalsAndPayment({
 
           {missingMode && (
             <div className="bc-hint" role="alert">
-              Choose how the patient paid — cash, card, UPI or NEFT / cheque.
+              Choose how the patient paid — cash, card or UPI.
             </div>
           )}
-
-          {missingUpiApp && <div className="bc-hint">Choose the UPI app for each UPI payment.</div>}
 
           {depositOver && (
             <div className="bc-hint" role="alert">
@@ -549,7 +534,6 @@ export default function TotalsAndPayment({
                 (entered <= 0 && !finishes) ||
                 entered > balance ||
                 missingMode ||
-                missingUpiApp ||
                 depositOver ||
                 cashWithoutShift ||
                 opening ||

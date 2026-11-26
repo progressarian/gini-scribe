@@ -11,11 +11,10 @@ import {
 import { errorOf, fromPaise } from "../format";
 import { when } from "../importText";
 import { needsUpiApp, PAYMENT_MODE_LABEL, TAKE_MODE_LABEL, takenModeText } from "./lineText";
-import UpiAppField from "./UpiAppField";
 import { PdfButton } from "./PdfViewer";
 import DepositMoves, { AmountField } from "./DepositMoves";
 import VoidDepositDialog from "./VoidDepositDialog";
-import { DEPOSIT_MAX } from "../../../../shared/billingVocab.js";
+import { DEFAULT_UPI_APP, DEPOSIT_MAX } from "../../../../shared/billingVocab.js";
 import { useEarlierShiftCheck } from "./useEarlierShiftCheck";
 
 const KIND_LABEL = {
@@ -32,7 +31,6 @@ const KIND_LABEL = {
 const REFERENCE_HINT = {
   card: "e.g. last 4 digits or slip no.",
   upi: "e.g. UPI transaction ID",
-  neft: "e.g. UTR or cheque no.",
 };
 
 const blankForm = () => ({ mode: "", amount: "", reference: "", upiApp: "", note: "" });
@@ -93,12 +91,7 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
   const needsReference = Boolean(form.mode) && form.mode !== "cash";
   const needsShift = form.mode === "cash" && !shift?.is_open;
   const needsApp = needsUpiApp(form.mode);
-  const ready =
-    amount > 0 &&
-    Boolean(form.mode) &&
-    (!needsApp || form.upiApp) &&
-    !needsShift &&
-    !receive.isPending;
+  const ready = amount > 0 && Boolean(form.mode) && !needsShift && !receive.isPending;
 
   const change = (patch) => {
     setForm((was) => ({ ...was, ...patch }));
@@ -121,7 +114,7 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
         mode: form.mode,
         amount: form.amount.trim(),
         ...(form.reference.trim() ? { reference: form.reference.trim() } : {}),
-        ...(needsApp ? { upi_app: form.upiApp } : {}),
+        ...(needsApp ? { upi_app: DEFAULT_UPI_APP } : {}),
         ...(form.note.trim() ? { note: form.note.trim() } : {}),
       });
       setForm(blankForm());
@@ -217,7 +210,13 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
               <select
                 className="bc-field__in"
                 value={form.mode}
-                onChange={(e) => change({ mode: e.target.value, reference: "", upiApp: "" })}
+                onChange={(e) =>
+                  change({
+                    mode: e.target.value,
+                    reference: "",
+                    upiApp: needsUpiApp(e.target.value) ? DEFAULT_UPI_APP : "",
+                  })
+                }
               >
                 <option value="" disabled>
                   Choose mode
@@ -235,13 +234,6 @@ export default function DepositPanel({ patientId, patientName, patientFileNo, op
               reason={`One deposit can be at most ${fromPaise(DEPOSIT_MAX * 100)}`}
               onChange={(amount) => change({ amount })}
             />
-            {needsApp && (
-              <UpiAppField
-                label="UPI app *"
-                value={form.upiApp}
-                onChange={(upiApp) => change({ upiApp })}
-              />
-            )}
             {needsReference && (
               <label className="bc-field">
                 <span className="bc-field__lbl">Reference (optional)</span>

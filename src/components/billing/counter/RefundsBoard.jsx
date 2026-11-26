@@ -75,17 +75,12 @@ function DepositPayOut({ row }) {
           className="bc-field__in"
           maxLength={60}
           aria-label={`${PAYMENT_MODE_LABEL[mode]} reference for ${row.patient.name}`}
-          placeholder={`${PAYMENT_MODE_LABEL[mode]} reference`}
+          placeholder={`${PAYMENT_MODE_LABEL[mode]} reference (optional)`}
           value={reference}
           onChange={(e) => setReference(e.target.value)}
         />
       )}
-      <button
-        type="button"
-        className="st-btn st-btn-grn"
-        disabled={pay.isPending || (needsReference && !reference.trim())}
-        onClick={payOut}
-      >
+      <button type="button" className="st-btn st-btn-grn" disabled={pay.isPending} onClick={payOut}>
         {pay.isPending
           ? "Paying back…"
           : `Pay back ${fromPaise(row.amounts.to_pay)} by ${PAYMENT_MODE_LABEL[mode]}`}

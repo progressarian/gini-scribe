@@ -4,7 +4,7 @@ import { paise } from "../../../shared/labPayment.js";
 import { CARRY_STATE, carryOverChoices, carryOverIn } from "../giniflow/carryOver.js";
 import { checkInIn } from "../giniflow/journey.js";
 import { addLine, finaliseBill, openDraftIn, removeLine } from "./bills.js";
-import { DRAWER_MODE, TAKE_MODES } from "./cashShifts.js";
+import { DRAWER_MODE, NEW_TAKE_MODES } from "./cashShifts.js";
 import { cleanUpiApp } from "./upiApp.js";
 import { receiveDeposit } from "./deposits.js";
 import { collectPlannedIn, moneyOn } from "./payments.js";
@@ -187,8 +187,8 @@ const rupeeText = (paise) => `₹${(paise / 100).toLocaleString("en-IN")}`;
 
 function splitPayments(split, left, extraToDeposit = false) {
   const payments = split.map((part) => {
-    if (!TAKE_MODES.includes(part.mode)) {
-      throw httpError(400, `Each part of a split is one of: ${TAKE_MODES.join(", ")}`);
+    if (!NEW_TAKE_MODES.includes(part.mode)) {
+      throw httpError(400, `Each part of a split is one of: ${NEW_TAKE_MODES.join(", ")}`);
     }
     const amount = Math.round(Number(part.amount));
     if (!Number.isInteger(amount) || amount <= 0) {
@@ -228,12 +228,6 @@ function paymentsFor(view, input) {
       throw httpError(400, "Say where it was paid: in HealthRay, or earlier / online");
     }
     const reference = source === PREPAID_MODE ? String(typed || "").trim() : "";
-    if (source === PREPAID_MODE && !reference) {
-      throw httpError(
-        400,
-        `Enter the transaction ID or earlier receipt number for ${line.name}, paid earlier / online`,
-      );
-    }
     const amount = Math.min(line.amount, left);
     const key = `${source}|${reference}`;
     const was = already.get(key);
@@ -250,8 +244,8 @@ function paymentsFor(view, input) {
     const { onBill, toDeposit } = splitPayments(input.split, left, input.extraToDeposit === true);
     return { wanted: [...wanted, ...onBill], toDeposit };
   }
-  if (!TAKE_MODES.includes(input.mode)) {
-    throw httpError(400, `Choose how the rest is paid: ${TAKE_MODES.join(", ")}`);
+  if (!NEW_TAKE_MODES.includes(input.mode)) {
+    throw httpError(400, `Choose how the rest is paid: ${NEW_TAKE_MODES.join(", ")}`);
   }
   const reference =
     input.mode === DRAWER_MODE ? null : String(input.reference || "").trim() || null;

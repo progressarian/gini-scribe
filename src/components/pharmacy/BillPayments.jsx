@@ -2,12 +2,16 @@ import { Plus, X } from "lucide-react";
 import FormField from "../ui/FormField";
 import { inr } from "./format";
 import { toPaise, toRupees } from "../../../shared/pharmacyMoney";
-import { UPI_APP_LABEL } from "../../../shared/billingVocab";
-import { PAYMENTS_AT_ONCE, PAYMENT_MODE_LABEL, PAYMENT_MODES } from "../../../shared/pharmacyVocab";
-import { SelectInput, optionsOf } from "./Fields";
+import { DEFAULT_UPI_APP } from "../../../shared/billingVocab";
+import {
+  PAYMENTS_AT_ONCE,
+  PAYMENT_MODE_LABEL,
+  TAKE_PAYMENT_MODES,
+} from "../../../shared/pharmacyVocab";
+import { SelectInput } from "./Fields";
 
 export const firstPayment = (net) => [
-  { mode: "cash", amount: toRupees(toPaise(net)), reference: "", upi_app: "" },
+  { mode: "cash", amount: toRupees(toPaise(net)), reference: "" },
 ];
 
 const moneyTyped = (v) => {
@@ -25,9 +29,6 @@ export function paymentProblems(rows, net, shortBy = 0, depositBalance = 0) {
     if (!(toPaise(p.amount) > 0)) e.amount = "Enter an amount more than 0.";
     else if (p.mode === "deposit" && fromDeposit > toPaise(depositBalance))
       e.amount = `Only ${inr(depositBalance)} is left in the deposit.`;
-    if (p.mode !== "cash" && p.mode !== "deposit" && !p.reference.trim())
-      e.reference = "Enter the transaction or slip number.";
-    if (p.mode === "upi" && !p.upi_app) e.upi_app = "Choose the UPI app.";
     return e;
   });
   const gap = toPaise(net) - rows.reduce((sum, p) => sum + toPaise(p.amount), 0);
@@ -50,8 +51,8 @@ export const paymentsForApi = (rows) =>
     .map((p) => ({
       mode: p.mode,
       amount: toPaise(p.amount) / 100,
-      reference: p.mode === "cash" ? null : p.reference.trim(),
-      upi_app: p.mode === "upi" ? p.upi_app : null,
+      reference: p.mode === "cash" || p.mode === "deposit" ? null : p.reference.trim() || null,
+      upi_app: p.mode === "upi" ? DEFAULT_UPI_APP : null,
     }));
 
 export default function BillPayments({
@@ -65,7 +66,8 @@ export default function BillPayments({
   depositBalance = 0,
 }) {
   const check = paymentProblems(rows, net, shortBy, depositBalance);
-  const modes = Number(depositBalance) > 0 ? [...PAYMENT_MODES, "deposit"] : PAYMENT_MODES;
+  const modes =
+    Number(depositBalance) > 0 ? [...TAKE_PAYMENT_MODES, "deposit"] : TAKE_PAYMENT_MODES;
   const update = (i, patch) => onChange(rows.map((p, j) => (j === i ? { ...p, ...patch } : p)));
   const addRow = () =>
     onChange([
@@ -74,7 +76,6 @@ export default function BillPayments({
         mode: "upi",
         amount: check.gap > check.allowed ? toRupees(check.gap - check.allowed) : "",
         reference: "",
-        upi_app: "",
       },
     ]);
 
@@ -107,17 +108,8 @@ export default function BillPayments({
                 onChange={(e) => update(i, { amount: moneyTyped(e.target.value) })}
               />
             </FormField>
-            {p.mode === "upi" ? (
-              <FormField label="UPI app" required error={errors.upi_app}>
-                <SelectInput
-                  value={p.upi_app}
-                  onChange={(upi_app) => update(i, { upi_app })}
-                  options={[{ value: "", label: "Choose" }, ...optionsOf(UPI_APP_LABEL)]}
-                />
-              </FormField>
-            ) : null}
             {p.mode !== "cash" && p.mode !== "deposit" ? (
-              <FormField label="Reference" required error={errors.reference}>
+              <FormField label="Reference (optional)">
                 <input
                   className="jb-assign"
                   maxLength={60}

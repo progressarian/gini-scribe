@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { UPI_APPS } from "../../shared/billingVocab.js";
+import { DEFAULT_UPI_APP, UPI_APPS } from "../../shared/billingVocab.js";
 import {
   COUNTER_SALE_TYPES,
   PAYMENTS_AT_ONCE,
-  PAYMENT_MODES,
   RX_NOT_GIVEN_REASON_LABEL,
+  TAKE_PAYMENT_MODES,
   RX_OUTCOMES,
 } from "../../shared/pharmacyVocab.js";
 import { blankToNull, optionalText, phoneField } from "./pharmacyFields.js";
@@ -86,9 +86,14 @@ export const pharmacyBillUpdateSchema = z
     message: "cannot be more than 100%",
   });
 
+const withUpiApp = (p) => ({
+  ...p,
+  upi_app: p.mode === "upi" ? p.upi_app || DEFAULT_UPI_APP : null,
+});
+
 const payment = z
   .strictObject({
-    mode: z.enum([...PAYMENT_MODES, "deposit"]),
+    mode: z.enum([...TAKE_PAYMENT_MODES, "deposit"]),
     amount: z.coerce
       .number()
       .positive("must be more than 0")
@@ -97,14 +102,7 @@ const payment = z
     reference: optionalText(60),
     upi_app: z.preprocess(blankToNull, z.enum(UPI_APPS).nullish()),
   })
-  .refine((p) => p.mode === "cash" || p.mode === "deposit" || Boolean(p.reference), {
-    path: ["reference"],
-    message: "is needed for a card, UPI or NEFT payment",
-  })
-  .refine((p) => p.mode !== "upi" || Boolean(p.upi_app), {
-    path: ["upi_app"],
-    message: "is needed for a UPI payment",
-  });
+  .transform(withUpiApp);
 
 export const pharmacyBillFinaliseSchema = z.strictObject({
   version,
@@ -139,18 +137,11 @@ export const pharmacyWalkinSchema = z.strictObject({
 
 const refund = z
   .strictObject({
-    mode: z.enum(PAYMENT_MODES),
+    mode: z.enum(TAKE_PAYMENT_MODES),
     reference: optionalText(60),
     upi_app: z.preprocess(blankToNull, z.enum(UPI_APPS).nullish()),
   })
-  .refine((p) => p.mode === "cash" || Boolean(p.reference), {
-    path: ["reference"],
-    message: "is needed for a card, UPI or NEFT refund",
-  })
-  .refine((p) => p.mode !== "upi" || Boolean(p.upi_app), {
-    path: ["upi_app"],
-    message: "is needed for a UPI refund",
-  });
+  .transform(withUpiApp);
 
 export const pharmacySaleReturnSchema = z.strictObject({
   version,
@@ -223,17 +214,13 @@ export const pharmacyCollectDueSchema = z.strictObject({
 });
 
 const moneyIn = z.strictObject({
-  mode: z.enum(PAYMENT_MODES),
+  mode: z.enum(TAKE_PAYMENT_MODES),
   amount: money,
   reference: optionalText(60),
   upi_app: z.preprocess(blankToNull, z.enum(UPI_APPS).nullish()),
   reason: optionalText(300),
 });
 
-const needsReference = (p) => p.mode === "cash" || Boolean(p.reference);
-const referenceRule = { path: ["reference"], message: "is needed for a card, UPI or NEFT payment" };
-const needsUpiApp = (p) => p.mode !== "upi" || Boolean(p.upi_app);
-const upiRule = { path: ["upi_app"], message: "is needed for a UPI payment" };
 const reason = z.string().trim().min(3, "must say why").max(300);
 
 export const pharmacyAccountLabels = {
@@ -243,14 +230,9 @@ export const pharmacyAccountLabels = {
   upi_app: "UPI app",
 };
 
-export const pharmacyDepositSchema = moneyIn
-  .refine(needsReference, referenceRule)
-  .refine(needsUpiApp, upiRule);
+export const pharmacyDepositSchema = moneyIn.transform(withUpiApp);
 
-export const pharmacyDepositRefundSchema = moneyIn
-  .extend({ reason })
-  .refine(needsReference, referenceRule)
-  .refine(needsUpiApp, upiRule);
+export const pharmacyDepositRefundSchema = moneyIn.extend({ reason }).transform(withUpiApp);
 
 export const pharmacyWriteOffSchema = z.strictObject({
   amount: z.preprocess(blankToNull, money.nullish()),

@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import ConfirmModal from "../../ui/ConfirmModal";
 import { useCurrentShift, useMyShifts } from "../../../queries/hooks/useBilling";
 import { errorOf, rupees } from "../format";
-import { PAYMENT_MODE_LABEL, shiftStateText, TAKE_MODE_LABEL } from "./lineText";
+import { PAYMENT_MODE_LABEL, SHIFT_MODE_LABEL, shiftStateText } from "./lineText";
 import { shiftReminder } from "./shiftReminder";
 import OpenShiftForm from "./OpenShiftForm";
 import CountCashFields from "./CountCashFields";
@@ -105,7 +105,7 @@ export default function ShiftPanel() {
               <table className="ltable bc-totals bc-totals--drawer" aria-label="Drawer">
                 <tbody>
                   {figure("Opening cash", shift.opening_cash, "opening")}
-                  {Object.entries(TAKE_MODE_LABEL)
+                  {Object.entries(SHIFT_MODE_LABEL)
                     .filter(
                       ([mode]) =>
                         Object.hasOwn(PAYMENT_MODE_LABEL, mode) || shift.collected[mode] > 0,
@@ -114,7 +114,7 @@ export default function ShiftPanel() {
                       figure(`${label} collected`, shift.collected[mode], mode),
                     )}
                   {figure("Cash paid back", shift.refunded?.cash ?? 0, "refunded-cash")}
-                  {Object.entries(TAKE_MODE_LABEL)
+                  {Object.entries(SHIFT_MODE_LABEL)
                     .filter(([mode]) => mode !== "cash" && (shift.refunded?.[mode] ?? 0) > 0)
                     .map(([mode, label]) =>
                       figure(`${label} paid back`, shift.refunded[mode], `refunded-${mode}`),

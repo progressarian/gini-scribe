@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useCorrectPaymentMode } from "../../../queries/hooks/useBilling";
 import { errorOf, fromPaise } from "../format";
-import { HEALTHRAY_MODE } from "../../../../shared/billingVocab";
+import { DEFAULT_UPI_APP, HEALTHRAY_MODE } from "../../../../shared/billingVocab";
 import { needsUpiApp, paymentModeText, takenModeText } from "./lineText";
 import PaidModeFields, { PAID_MODES, paidModeBody, paidModeProblem } from "./PaidModeFields";
 
@@ -32,10 +32,9 @@ const timeOf = (iso) =>
 function CorrectForm({ bill, payment, onDone, onCancel }) {
   const correct = useCorrectPaymentMode();
   const healthray = isHealthray(payment);
-  const [paid, setPaid] = useState({
-    mode: PAID_MODES.find((m) => m !== currentMode(payment)) || "cash",
-    upiApp: "",
-    reference: "",
+  const [paid, setPaid] = useState(() => {
+    const first = PAID_MODES.find((m) => m !== currentMode(payment)) || "cash";
+    return { mode: first, upiApp: needsUpiApp(first) ? DEFAULT_UPI_APP : "", reference: "" };
   });
   const [reason, setReason] = useState("");
   const [error, setError] = useState(null);
@@ -66,7 +65,10 @@ function CorrectForm({ bill, payment, onDone, onCancel }) {
         value={paid}
         onChange={setPaid}
         modes={PAID_MODES.filter(
-          (m) => m !== currentMode(payment) || payment.reference || needsUpiApp(m),
+          (m) =>
+            m !== currentMode(payment) ||
+            payment.reference ||
+            (needsUpiApp(m) && payment.upi_app !== DEFAULT_UPI_APP),
         )}
       />
       <label className="bc-field">

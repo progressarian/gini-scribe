@@ -8,9 +8,9 @@ import { useCreateReturn } from "../../queries/hooks/usePharmacyBills";
 import { useReturnIndent } from "../../queries/hooks/usePharmacyDepartments";
 import { pharmacyBillTotals, pharmacyReturnAmounts } from "../../../shared/pharmacyPricing";
 import { toPaise, toRupees } from "../../../shared/pharmacyMoney";
-import { UPI_APP_LABEL } from "../../../shared/billingVocab";
-import { PAYMENT_MODE_LABEL, PAYMENT_MODES } from "../../../shared/pharmacyVocab";
-import { SelectInput, optionsOf } from "./Fields";
+import { DEFAULT_UPI_APP } from "../../../shared/billingVocab";
+import { PAYMENT_MODE_LABEL, TAKE_PAYMENT_MODES } from "../../../shared/pharmacyVocab";
+import { SelectInput } from "./Fields";
 
 export default function ReturnDialog({ bill, returned, onDone, onClose, indentId = null }) {
   const billReturn = useCreateReturn();
@@ -20,7 +20,6 @@ export default function ReturnDialog({ bill, returned, onDone, onClose, indentId
   const [reason, setReason] = useState("");
   const [mode, setMode] = useState("cash");
   const [reference, setReference] = useState("");
-  const [upiApp, setUpiApp] = useState("");
   const [touched, setTouched] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState("");
@@ -48,9 +47,6 @@ export default function ReturnDialog({ bill, returned, onDone, onClose, indentId
   }
   if (!chosen.length) problems.lines = "Enter the quantity coming back for at least one medicine.";
   if (reason.trim().length < 3) problems.reason = "Say why the medicines came back.";
-  if (needsRefund && mode !== "cash" && !reference.trim())
-    problems.reference = "Enter the refund reference.";
-  if (needsRefund && mode === "upi" && !upiApp) problems.upiApp = "Choose the UPI app.";
   if (indentId && refund > 0)
     problems.lines = `Only ${inr(toRupees(offDue))} is still due on this bill. Ask the pharmacy to take back the rest and refund it.`;
   const errors = touched ? problems : {};
@@ -81,8 +77,8 @@ export default function ReturnDialog({ bill, returned, onDone, onClose, indentId
         ...base,
         refund: {
           mode,
-          reference: mode === "cash" ? null : reference.trim(),
-          upi_app: mode === "upi" ? upiApp : null,
+          reference: mode === "cash" ? null : reference.trim() || null,
+          upi_app: mode === "upi" ? DEFAULT_UPI_APP : null,
         },
       });
       toast(
@@ -198,22 +194,12 @@ export default function ReturnDialog({ bill, returned, onDone, onClose, indentId
               value={mode}
               disabled={confirming}
               onChange={setMode}
-              options={PAYMENT_MODES.map((m) => ({ value: m, label: PAYMENT_MODE_LABEL[m] }))}
-            />
-          </FormField>
-        ) : null}
-        {needsRefund && mode === "upi" ? (
-          <FormField label="UPI app" required error={errors.upiApp}>
-            <SelectInput
-              value={upiApp}
-              disabled={confirming}
-              onChange={setUpiApp}
-              options={[{ value: "", label: "Choose" }, ...optionsOf(UPI_APP_LABEL)]}
+              options={TAKE_PAYMENT_MODES.map((m) => ({ value: m, label: PAYMENT_MODE_LABEL[m] }))}
             />
           </FormField>
         ) : null}
         {needsRefund && mode !== "cash" ? (
-          <FormField label="Refund reference" required error={errors.reference}>
+          <FormField label="Refund reference (optional)">
             <input
               className="jb-assign"
               maxLength={60}

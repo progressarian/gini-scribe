@@ -1,7 +1,7 @@
 import { useState } from "react";
 import MasterFormDialog from "./MasterFormDialog";
 import FormField from "../ui/FormField";
-import { SelectInput, optionsOf } from "./Fields";
+import { SelectInput } from "./Fields";
 import { requestErrorOf } from "../billing/format";
 import { inr } from "./format";
 import { toast } from "../../stores/uiStore";
@@ -11,8 +11,8 @@ import {
   useWriteOff,
 } from "../../queries/hooks/usePharmacyAccounts";
 import { toPaise } from "../../../shared/pharmacyMoney";
-import { UPI_APP_LABEL } from "../../../shared/billingVocab";
-import { PAYMENT_MODE_LABEL, PAYMENT_MODES } from "../../../shared/pharmacyVocab";
+import { DEFAULT_UPI_APP } from "../../../shared/billingVocab";
+import { PAYMENT_MODE_LABEL, TAKE_PAYMENT_MODES } from "../../../shared/pharmacyVocab";
 
 const moneyTyped = (v) => {
   const clean = v.replace(/[^\d.]/g, "");
@@ -59,7 +59,6 @@ export function DepositDialog({ account, refund = false, onClose }) {
     mode: "cash",
     amount: "",
     reference: "",
-    upi_app: "",
     reason: "",
   });
   const [touched, setTouched] = useState(false);
@@ -70,8 +69,6 @@ export function DepositDialog({ account, refund = false, onClose }) {
   const problems = {};
   if (!(amount > 0)) problems.amount = "Enter an amount more than 0.";
   else if (refund && amount > balance) problems.amount = `Only ${inr(account.balance)} is left.`;
-  if (v.mode !== "cash" && !v.reference.trim()) problems.reference = "Enter the reference.";
-  if (v.mode === "upi" && !v.upi_app) problems.upi_app = "Choose the UPI app.";
   if (refund && v.reason.trim().length < 3) problems.reason = "Say why it is refunded.";
   const errors = touched ? problems : {};
 
@@ -85,8 +82,8 @@ export function DepositDialog({ account, refund = false, onClose }) {
         target: account.id,
         mode: v.mode,
         amount: amount / 100,
-        reference: v.mode === "cash" ? null : v.reference.trim(),
-        upi_app: v.mode === "upi" ? v.upi_app : null,
+        reference: v.mode === "cash" ? null : v.reference.trim() || null,
+        upi_app: v.mode === "upi" ? DEFAULT_UPI_APP : null,
         reason: v.reason.trim() || null,
       });
       toast(
@@ -123,21 +120,12 @@ export function DepositDialog({ account, refund = false, onClose }) {
           <SelectInput
             value={v.mode}
             onChange={pick("mode")}
-            options={PAYMENT_MODES.map((m) => ({ value: m, label: PAYMENT_MODE_LABEL[m] }))}
+            options={TAKE_PAYMENT_MODES.map((m) => ({ value: m, label: PAYMENT_MODE_LABEL[m] }))}
           />
         </FormField>
         <AmountField value={v.amount} onChange={set("amount", moneyTyped)} error={errors.amount} />
-        {v.mode === "upi" ? (
-          <FormField label="UPI app" required error={errors.upi_app}>
-            <SelectInput
-              value={v.upi_app}
-              onChange={pick("upi_app")}
-              options={[{ value: "", label: "Choose" }, ...optionsOf(UPI_APP_LABEL)]}
-            />
-          </FormField>
-        ) : null}
         {v.mode !== "cash" ? (
-          <FormField label="Reference" required error={errors.reference}>
+          <FormField label="Reference (optional)">
             <input
               className="jb-assign"
               maxLength={60}

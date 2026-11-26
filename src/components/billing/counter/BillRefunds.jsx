@@ -46,9 +46,6 @@ function PayOut({ note, bill, onPaid }) {
 
   const entered = rows.reduce((sum, row) => sum + paiseOf(row.amount), 0);
   const cashOut = rows.some((row) => row.mode === "cash" && paiseOf(row.amount) > 0);
-  const missingReference = rows.some(
-    (row) => paiseOf(row.amount) > 0 && needsReference(row.mode) && !row.reference.trim(),
-  );
   const over = rows.some((row) => paiseOf(row.amount) > row.most);
 
   const change = (index, patch) =>
@@ -114,7 +111,7 @@ function PayOut({ note, bill, onPaid }) {
               </label>
               {needsReference(row.mode) && (
                 <label className="bc-field bc-pay__ref">
-                  <span className="bc-field__lbl">Reference</span>
+                  <span className="bc-field__lbl">Reference (optional)</span>
                   <input
                     className="bc-field__in"
                     maxLength={60}
@@ -128,15 +125,10 @@ function PayOut({ note, bill, onPaid }) {
           </div>
         ))}
       </div>
-      {missingReference && (
-        <div className="bc-hint">
-          Add the reversal reference for each card, UPI or NEFT / cheque refund.
-        </div>
-      )}
       <button
         type="button"
         className="bc-pay__go"
-        disabled={entered <= 0 || over || missingReference || payOut.isPending}
+        disabled={entered <= 0 || over || payOut.isPending}
         onClick={pay}
       >
         {payOut.isPending ? "Paying out…" : `Pay out ${fromPaise(entered)}`}

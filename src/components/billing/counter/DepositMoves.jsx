@@ -404,7 +404,7 @@ function PayBack({ patient, available, openRefund, onDone }) {
         </div>
         {needsReference && (
           <label className="bc-field">
-            <span className="bc-field__lbl">Reference *</span>
+            <span className="bc-field__lbl">Reference (optional)</span>
             <input
               className="bc-field__in"
               maxLength={60}
@@ -423,7 +423,7 @@ function PayBack({ patient, available, openRefund, onDone }) {
           <button
             type="button"
             className="st-btn st-btn-grn"
-            disabled={pay.isPending || (needsReference && !reference.trim())}
+            disabled={pay.isPending}
             onClick={payOut}
           >
             {pay.isPending ? "Paying back…" : `Pay back ${fromPaise(openRefund.amount)}`}

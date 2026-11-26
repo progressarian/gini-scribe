@@ -18,6 +18,7 @@ import { clearedInWindow } from "./clearedMoney.js";
 
 export const PAYMENT_MODES = ["cash", "card", "upi"];
 export const TAKE_MODES = [...PAYMENT_MODES, NEFT_MODE];
+export const NEW_TAKE_MODES = PAYMENT_MODES;
 export const DRAWER_MODE = "cash";
 
 export const NOTE_MAX = 500;

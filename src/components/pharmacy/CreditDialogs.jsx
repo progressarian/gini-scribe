@@ -359,7 +359,7 @@ export function DecideCreditDialog({ request, decision, onClose }) {
 export function CollectDueDialog({ bill, onClose }) {
   const collect = useCollectDue();
   const [rows, setRows] = useState([
-    { mode: "cash", amount: toRupees(toPaise(bill.due_amount)), reference: "", upi_app: "" },
+    { mode: "cash", amount: toRupees(toPaise(bill.due_amount)), reference: "" },
   ]);
   const [touched, setTouched] = useState(false);
   const [error, setError] = useState("");

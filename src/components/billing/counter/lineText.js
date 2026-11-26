@@ -61,14 +61,16 @@ export const requestStatusText = (status) => REQUEST_STATUS_LABEL[status] ?? sta
 
 export const PAYMENT_MODE_LABEL = { cash: "Cash", card: "Card", upi: "UPI" };
 
-export const TAKE_MODE_LABEL = { ...PAYMENT_MODE_LABEL, [NEFT_MODE]: NEFT_LABEL };
+export const TAKE_MODE_LABEL = PAYMENT_MODE_LABEL;
+
+export const SHIFT_MODE_LABEL = { ...TAKE_MODE_LABEL, [NEFT_MODE]: NEFT_LABEL };
 
 export const needsUpiApp = (mode) => mode === UPI_MODE;
 
 export const HEALTHRAY_LABEL = "Paid in HealthRay";
 
 export const PAID_MODE_LABEL = {
-  ...TAKE_MODE_LABEL,
+  ...SHIFT_MODE_LABEL,
   [HEALTHRAY_MODE]: HEALTHRAY_LABEL,
   [DEPOSIT_MODE]: "Paid from deposit",
   [PREPAID_MODE]: PREPAID_LABEL,
