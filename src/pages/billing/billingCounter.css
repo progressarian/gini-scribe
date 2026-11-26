@@ -2348,6 +2348,68 @@ body > [role="dialog"][aria-modal="true"] .bc-err {
   min-width: 0;
 }
 
+.bc-hr-confirm__part + .bc-hr-confirm__part {
+  padding-top: 8px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.bc-hr-confirm__parthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.bc-hr-confirm__remove {
+  display: inline-flex;
+  padding: 4px;
+  color: #64748b;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.bc-hr-confirm__remove:hover:not(:disabled) {
+  color: #b91c1c;
+  background: #fef2f2;
+}
+
+.bc-hr-confirm__split {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #0f766e;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.bc-hr-confirm__split:hover:not(:disabled) {
+  background: #f0fdfa;
+}
+
+.bc-hr-confirm__split:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.bc-hr-confirm .bc-hr-confirm__sum {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
 .bc-hr-confirm .bc-hr-confirm__need {
   margin: 0 0 8px;
   color: var(--ui-muted, #64748b);

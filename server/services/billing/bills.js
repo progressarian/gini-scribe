@@ -27,6 +27,7 @@ import {
   refuseReceptionMoney,
   releaseTestOrders,
   clearInHealthray,
+  PAYMENTS_AT_ONCE,
   settleTestOrders,
   syncLabSteps,
   takePayments,
@@ -44,6 +45,7 @@ import { httpError, inTransaction } from "./transaction.js";
 import { cleanPaidMode } from "./paymentMode.js";
 import {
   auditFields,
+  cleanMoney,
   hasField,
   INT_MAX,
   lockRow,
@@ -2302,7 +2304,7 @@ export async function clearHealthrayAndFinalise(billId, input, ctx, db = pool) {
   return inTransaction(async (client) => {
     const paid = await clearInHealthray(
       billId,
-      { version: input?.version, paid: input?.paid },
+      { version: input?.version, paid: input?.paid, splits: input?.splits },
       ctx,
       client,
     );
@@ -2313,10 +2315,34 @@ export async function clearHealthrayAndFinalise(billId, input, ctx, db = pool) {
   }, db);
 }
 
+const HEALTHRAY_ASK = "Choose how the patient paid in HealthRay";
+
+function cleanHealthraySplits(splits) {
+  if (!Array.isArray(splits) || splits.length < 2) return null;
+  if (splits.length > PAYMENTS_AT_ONCE) {
+    throw httpError(400, `A HealthRay payment can be split at most ${PAYMENTS_AT_ONCE} ways`);
+  }
+  return splits.map((split) => {
+    const amount = paise(cleanMoney(split?.amount, "Each part of the split"));
+    if (amount <= 0) throw httpError(400, "Each part of the split must be more than ₹0");
+    return {
+      ...cleanPaidMode(
+        { mode: split?.paid_via, reference: split?.reference, upi_app: split?.upi_app },
+        HEALTHRAY_ASK,
+      ),
+      amount,
+    };
+  });
+}
+
 export function clearHealthrayAtDesk(billId, input, ctx, db = pool) {
+  const splits = cleanHealthraySplits(input?.splits);
+  if (splits) {
+    return clearHealthrayAndFinalise(billId, { version: input?.version, splits }, ctx, db);
+  }
   const paid = cleanPaidMode(
     { mode: input?.paid_via, reference: input?.reference, upi_app: input?.upi_app },
-    "Choose how the patient paid in HealthRay",
+    HEALTHRAY_ASK,
   );
   return clearHealthrayAndFinalise(billId, { version: input?.version, paid }, ctx, db);
 }

@@ -546,13 +546,21 @@ export function useTakePayments() {
 export function useClearInHealthray() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ billId, version, mode, reference, upiApp }) => {
-      await api.post(`${DESK}/bills/${billId}/clear-healthray`, {
-        version,
-        paid_via: mode,
-        reference,
-        upi_app: upiApp,
-      });
+    mutationFn: async ({ billId, version, mode, reference, upiApp, splits }) => {
+      await api.post(
+        `${DESK}/bills/${billId}/clear-healthray`,
+        splits?.length
+          ? {
+              version,
+              splits: splits.map((split) => ({
+                paid_via: split.mode,
+                amount: split.amount,
+                reference: split.reference,
+                upi_app: split.upiApp,
+              })),
+            }
+          : { version, paid_via: mode, reference, upi_app: upiApp },
+      );
       try {
         return await read(`${DESK}/bills/${billId}`);
       } catch (e) {

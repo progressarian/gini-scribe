@@ -43,6 +43,30 @@ const REFERENCE_HINT = {
   neft: "e.g. UTR or cheque no.",
 };
 
+const hrPart = (amount = "") => ({ ...NO_PAID_MODE, amount });
+
+const hrPartProblem = (parts, balance) => {
+  if (parts.length === 1) return paidModeProblem(parts[0]);
+  for (const [index, part] of parts.entries()) {
+    if (paiseOf(part.amount) <= 0) return `Enter the amount for part ${index + 1}.`;
+    const problem = paidModeProblem(part);
+    if (problem) return `Part ${index + 1}: ${problem}`;
+  }
+  const entered = parts.reduce((sum, part) => sum + paiseOf(part.amount), 0);
+  return entered === balance
+    ? null
+    : `The parts add up to ${fromPaise(entered)} — they must add up to ${fromPaise(balance)}.`;
+};
+
+const hrPaidText = (parts) =>
+  parts.length === 1
+    ? `by ${takenModeText(parts[0].mode, parts[0].upiApp)}`
+    : `— ${parts
+        .map(
+          (part) => `${fromPaise(paiseOf(part.amount))} ${takenModeText(part.mode, part.upiApp)}`,
+        )
+        .join(" + ")}`;
+
 const healthrayPaidOf = (payments) =>
   (payments || [])
     .filter((payment) => payment.direction === "in" && payment.mode === HEALTHRAY_MODE)
@@ -74,8 +98,7 @@ export default function TotalsAndPayment({
   const final = useMakeFinal({ onBill, onPricesChanged, form });
   const [confirming, setConfirming] = useState(false);
   const [clearError, setClearError] = useState(null);
-  const [hrPaid, setHrPaid] = useState(NO_PAID_MODE);
-  const hrProblem = paidModeProblem(hrPaid);
+  const [hrParts, setHrParts] = useState([hrPart()]);
   const rows = form.value.rows;
   const setRows = (next) => form.set("rows", next);
   const [error, setError] = useState(null);
@@ -83,6 +106,10 @@ export default function TotalsAndPayment({
   const [capped, setCapped] = useState(null);
 
   const balance = balanceOf(bill);
+  const hrProblem = hrPartProblem(hrParts, balance);
+  const hrEntered = hrParts.reduce((sum, part) => sum + paiseOf(part.amount), 0);
+  const changeHrPart = (index, next) =>
+    setHrParts(hrParts.map((part, at) => (at === index ? next : part)));
   const entered = rows.reduce((sum, row) => sum + paiseOf(row.amount), 0);
   const remaining = balance - entered;
   const allowsLater = payLaterAllowed(bill, schemes, settings);
@@ -230,17 +257,24 @@ export default function TotalsAndPayment({
         billId: bill.id,
         visitId: bill.visit_id,
         version: bill.version,
-        ...paidModeBody(hrPaid),
+        ...(hrParts.length === 1
+          ? paidModeBody(hrParts[0])
+          : {
+              splits: hrParts.map((part) => ({
+                ...paidModeBody(part),
+                amount: part.amount.trim(),
+              })),
+            }),
       });
       onBill(cleared);
       form.drop("rows", "payLater");
       setCapped(null);
       setConfirming(false);
-      const paidBy = takenModeText(hrPaid.mode, hrPaid.upiApp);
+      const paidBy = hrPaidText(hrParts);
       setNote(
         cleared.status === "final" && bill.status === "draft"
-          ? `Marked ${fromPaise(balance)} as paid in HealthRay by ${paidBy}. Bill ${cleared.bill_no} made final.`
-          : `Marked ${fromPaise(balance)} as paid in HealthRay by ${paidBy}.`,
+          ? `Marked ${fromPaise(balance)} as paid in HealthRay ${paidBy}. Bill ${cleared.bill_no} made final.`
+          : `Marked ${fromPaise(balance)} as paid in HealthRay ${paidBy}.`,
       );
       announcePaid(bill.id);
     } catch (e) {
@@ -556,7 +590,7 @@ export default function TotalsAndPayment({
               disabled={busy || clear.isPending || opening}
               onClick={shiftCheck.guard(() => {
                 setClearError(null);
-                setHrPaid(NO_PAID_MODE);
+                setHrParts([hrPart()]);
                 setConfirming(true);
               })}
             >
@@ -618,14 +652,71 @@ export default function TotalsAndPayment({
                 <dd>{fromPaise(balance)}</dd>
               </div>
             </dl>
-            <div className="bc-hr-confirm__mode">
-              <PaidModeFields
-                label="How did the patient pay in HealthRay?"
-                placeholder="Choose mode"
-                value={hrPaid}
-                onChange={setHrPaid}
-              />
-            </div>
+            {hrParts.map((part, index) => (
+              <div className="bc-hr-confirm__part" key={index}>
+                {hrParts.length > 1 && (
+                  <div className="bc-hr-confirm__parthead">
+                    <span>Part {index + 1}</span>
+                    <button
+                      type="button"
+                      className="bc-hr-confirm__remove"
+                      aria-label={`Remove part ${index + 1}`}
+                      title="Remove"
+                      disabled={clear.isPending}
+                      onClick={() => {
+                        const left = hrParts.filter((_, at) => at !== index);
+                        setHrParts(left.length === 1 ? [{ ...left[0], amount: "" }] : left);
+                      }}
+                    >
+                      <X size={14} aria-hidden="true" />
+                    </button>
+                  </div>
+                )}
+                <div className="bc-hr-confirm__mode">
+                  <PaidModeFields
+                    label={hrParts.length > 1 ? "Mode" : "How did the patient pay in HealthRay?"}
+                    placeholder="Choose mode"
+                    value={part}
+                    onChange={(next) => changeHrPart(index, next)}
+                  />
+                  {hrParts.length > 1 && (
+                    <label className="bc-field">
+                      <span className="bc-field__lbl">Amount</span>
+                      <input
+                        className="bc-field__in"
+                        inputMode="decimal"
+                        placeholder="₹"
+                        value={part.amount}
+                        aria-invalid={paiseOf(part.amount) <= 0 ? true : undefined}
+                        onChange={(e) =>
+                          changeHrPart(index, { ...part, amount: moneyTyped(e.target.value) })
+                        }
+                      />
+                    </label>
+                  )}
+                </div>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="bc-hr-confirm__split"
+              disabled={clear.isPending || hrParts.length >= 10}
+              onClick={() =>
+                setHrParts(
+                  hrParts.length === 1
+                    ? [{ ...hrParts[0], amount: "" }, hrPart()]
+                    : [...hrParts, hrPart(toRupees(balance - hrEntered))],
+                )
+              }
+            >
+              <Plus size={14} aria-hidden="true" />
+              Split payment
+            </button>
+            {hrParts.length > 1 && (
+              <p className="bc-hr-confirm__sum" role="status">
+                Entered {fromPaise(hrEntered)} · Left {fromPaise(balance - hrEntered)}
+              </p>
+            )}
             {hrProblem ? (
               <p className="bc-hr-confirm__need" role="status">
                 {hrProblem}

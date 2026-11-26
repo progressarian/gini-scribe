@@ -606,20 +606,32 @@ export async function takePayments(billId, input, ctx, db = pool) {
   return collectOnBill(billId, version, () => wanted, ctx, db);
 }
 
+const healthrayRow = (amount, paid) => ({
+  mode: HEALTHRAY_MODE,
+  amount,
+  reference: paid?.reference ?? null,
+  upi_app: paid?.upi_app ?? null,
+  paid_via: paid?.mode ?? null,
+});
+
 export async function clearInHealthray(billId, input, ctx, db = pool) {
   const version = billVersion(input);
+  const splits = input?.splits;
   return collectOnBill(
     billId,
     version,
-    (outstanding) => [
-      {
-        mode: HEALTHRAY_MODE,
-        amount: outstanding,
-        reference: input?.paid?.reference ?? null,
-        upi_app: input?.paid?.upi_app ?? null,
-        paid_via: input?.paid?.mode ?? null,
-      },
-    ],
+    (outstanding) => {
+      if (!splits?.length) return [healthrayRow(outstanding, input?.paid)];
+      const asked = splits.reduce((sum, split) => sum + split.amount, 0);
+      if (asked !== outstanding) {
+        throw httpError(
+          409,
+          `The split adds up to ₹${rupees(asked)}, but ₹${rupees(outstanding)} is due — make the amounts match`,
+          { due: outstanding },
+        );
+      }
+      return splits.map((split) => healthrayRow(split.amount, split));
+    },
     ctx,
     db,
   );

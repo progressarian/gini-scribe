@@ -1188,6 +1188,21 @@ export const billingClearHealthraySchema = deskObject(
     paid_via: z.string().trim().max(10).optional(),
     reference: z.union([z.string().trim().max(60), z.null()]).optional(),
     upi_app: z.enum(UPI_APPS).nullish(),
+    splits: z
+      .array(
+        z.strictObject(
+          {
+            paid_via: z.string().trim().max(10),
+            amount: paymentAmount,
+            reference: z.union([z.string().trim().max(60), z.null()]).optional(),
+            upi_app: z.enum(UPI_APPS).nullish(),
+          },
+          objectOnly('must be a part of the split, like { paid_via: "cash", amount: 500 }'),
+        ),
+        { error: "must be a list of split parts" },
+      )
+      .max(PAYMENTS_AT_ONCE, `can be at most ${PAYMENTS_AT_ONCE} parts`)
+      .optional(),
   },
   objectOnly("Send the bill's version as an object"),
 );
