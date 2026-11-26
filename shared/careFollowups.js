@@ -60,6 +60,7 @@ export const NOT_AVAILABLE_REASONS = [
 ];
 
 export const CLOSE_OUTCOMES = [
+  { value: "done", label: "Already seen by in-house doctor" },
   { value: "not_available", label: "Not available here" },
   { value: "declined", label: "Patient declined" },
   { value: "closed", label: "Done elsewhere / no longer needed" },

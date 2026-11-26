@@ -105,18 +105,31 @@ function ReasonField({ value, onChange, touched, label = "Reason (required)" }) 
   );
 }
 
-export function OutcomeDialog({ item, initial = "", onClose, onDone }) {
+export function OutcomeDialog({
+  item,
+  initial = "",
+  doctors = [],
+  suggestedDoctor = "",
+  onClose,
+  onDone,
+}) {
   const save = useCloseFollowup();
+  const seenById = useId();
+  const seenByErrId = useId();
   const [outcome, setOutcome] = useState(initial);
   const [preset, setPreset] = useState("");
+  const [seenBy, setSeenBy] = useState(suggestedDoctor);
   const [reason, setReason] = useState("");
   const [touched, setTouched] = useState(false);
   const [error, setError] = useState("");
-  const fullReason = [preset, reason.trim()].filter(Boolean).join(" — ");
+  const seenInHouse = outcome === "done";
+  const missingDoctor = seenInHouse && !seenBy;
+  const lead = seenInHouse ? (seenBy ? `Seen by ${seenBy}` : "") : preset;
+  const fullReason = [lead, reason.trim()].filter(Boolean).join(" — ");
   const submit = async () => {
     setTouched(true);
     setError("");
-    if (!outcome || fullReason.length < REASON_MIN || save.isPending) return;
+    if (!outcome || missingDoctor || fullReason.length < REASON_MIN || save.isPending) return;
     try {
       await save.mutateAsync({ id: item.id, status: outcome, reason: fullReason });
       const label = CLOSE_OUTCOMES.find((o) => o.value === outcome)?.label;
@@ -154,6 +167,31 @@ export function OutcomeDialog({ item, initial = "", onClose, onDone }) {
           ))}
         </div>
         {touched && !outcome ? <p className="bill-dialog__error">Choose what happened</p> : null}
+        {seenInHouse && (
+          <div className="fset__field">
+            <label htmlFor={seenById}>Seen by (required)</label>
+            <select
+              id={seenById}
+              className="jb-assign"
+              value={seenBy}
+              onChange={(e) => setSeenBy(e.target.value)}
+              aria-invalid={Boolean(touched && missingDoctor)}
+              aria-describedby={touched && missingDoctor ? seenByErrId : undefined}
+            >
+              <option value="">Choose the doctor</option>
+              {doctors.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+            {touched && missingDoctor ? (
+              <p id={seenByErrId} className="bill-dialog__error">
+                Choose the doctor who saw the patient
+              </p>
+            ) : null}
+          </div>
+        )}
         {outcome === "not_available" && (
           <div className="cxl-charge__types" role="radiogroup" aria-label="Common reasons">
             {NOT_AVAILABLE_REASONS.map((r) => (
@@ -173,10 +211,8 @@ export function OutcomeDialog({ item, initial = "", onClose, onDone }) {
       <ReasonField
         value={reason}
         onChange={setReason}
-        touched={touched && fullReason.length < REASON_MIN}
-        label={
-          outcome === "not_available" && preset ? "More detail (optional)" : "Reason (required)"
-        }
+        touched={touched && !missingDoctor && fullReason.length < REASON_MIN}
+        label={lead ? "More detail (optional)" : "Reason (required)"}
       />
     </Shell>
   );

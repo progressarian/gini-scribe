@@ -83,9 +83,13 @@ const personKey = (name) =>
     .replace(/\bdr\b\.?/g, "")
     .replace(/[^a-z]/g, "");
 
-function bookingPrefill(item, doctors) {
+function suggestedDoctorIn(item, doctors) {
   const wanted = personKey(item.suggestedDoctor || item.matchedDoctor?.fullName);
-  const doctor = (wanted && doctors.find((d) => personKey(d) === wanted)) || "";
+  return (wanted && doctors.find((d) => personKey(d) === wanted)) || "";
+}
+
+function bookingPrefill(item, doctors) {
+  const doctor = suggestedDoctorIn(item, doctors);
   const due = item.dueOn && item.dueOn > todayIso() ? item.dueOn : todayIso();
   return {
     patient_name: item.patient.name,
@@ -895,6 +899,8 @@ export default function CareFollowupsPage() {
         <OutcomeDialog
           item={dialog.item}
           initial={dialog.initial}
+          doctors={doctors}
+          suggestedDoctor={suggestedDoctorIn(dialog.item, doctors)}
           onClose={() => setDialog(null)}
           onDone={done}
         />
