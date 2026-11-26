@@ -83,6 +83,18 @@ const personKey = (name) =>
     .replace(/\bdr\b\.?/g, "")
     .replace(/[^a-z]/g, "");
 
+function distinctDoctors(doctors) {
+  const seen = new Set();
+  return doctors
+    .map((d) => String(d || "").trim())
+    .filter((d) => {
+      const key = personKey(d);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
 function suggestedDoctorIn(item, doctors) {
   const wanted = personKey(item.suggestedDoctor || item.matchedDoctor?.fullName);
   return (wanted && doctors.find((d) => personKey(d) === wanted)) || "";
@@ -899,8 +911,8 @@ export default function CareFollowupsPage() {
         <OutcomeDialog
           item={dialog.item}
           initial={dialog.initial}
-          doctors={doctors}
-          suggestedDoctor={suggestedDoctorIn(dialog.item, doctors)}
+          doctors={distinctDoctors(doctors)}
+          suggestedDoctor={suggestedDoctorIn(dialog.item, distinctDoctors(doctors))}
           onClose={() => setDialog(null)}
           onDone={done}
         />

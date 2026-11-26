@@ -406,3 +406,35 @@
   margin: 8px 0 0;
   padding-left: 20px;
 }
+
+.cfu-outcome__types {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 10px;
+}
+.cfu-outcome__types .cxl-radio {
+  align-items: flex-start;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.cfu-outcome__types .cxl-radio input {
+  flex: none;
+  margin: 3px 0 0;
+}
+.cfu-outcome__seen {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--fbd);
+}
+@media (max-width: 480px) {
+  .cfu-dialog .cxl-charge {
+    padding: 10px 12px;
+  }
+  .cfu-dialog .cxl-facts {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .cfu-dialog .cxl-facts dd {
+    margin-bottom: 6px;
+  }
+}

@@ -36,7 +36,7 @@ function Shell({ title, item, onClose, onSubmit, busy, submitLabel, error, child
       <div className="flow-dialog-backdrop" onClick={onClose} role="presentation">
         <form
           ref={ref}
-          className="flow-card bill-dialog cxl-dialog"
+          className="flow-card bill-dialog cxl-dialog cfu-dialog"
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
@@ -126,14 +126,15 @@ export function OutcomeDialog({
   const missingDoctor = seenInHouse && !seenBy;
   const lead = seenInHouse ? (seenBy ? `Seen by ${seenBy}` : "") : preset;
   const fullReason = [lead, reason.trim()].filter(Boolean).join(" — ");
+  const outcomeLabel = (o) => (o.value === "done" && seenBy ? `${o.label} — ${seenBy}` : o.label);
   const submit = async () => {
     setTouched(true);
     setError("");
     if (!outcome || missingDoctor || fullReason.length < REASON_MIN || save.isPending) return;
     try {
       await save.mutateAsync({ id: item.id, status: outcome, reason: fullReason });
-      const label = CLOSE_OUTCOMES.find((o) => o.value === outcome)?.label;
-      onDone(`${item.patient.name}: ${label}`);
+      const chosen = CLOSE_OUTCOMES.find((o) => o.value === outcome);
+      onDone(`${item.patient.name}: ${outcomeLabel(chosen)}`);
     } catch (e) {
       setError(requestErrorOf(e, "Could not save the outcome"));
     }
@@ -150,7 +151,7 @@ export function OutcomeDialog({
     >
       <fieldset className="cxl-charge">
         <legend>What happened? (required)</legend>
-        <div className="cxl-charge__types" role="radiogroup">
+        <div className="cxl-charge__types cfu-outcome__types" role="radiogroup">
           {CLOSE_OUTCOMES.map((o) => (
             <label key={o.value} className="cxl-radio">
               <input
@@ -162,13 +163,13 @@ export function OutcomeDialog({
                   setPreset("");
                 }}
               />
-              {o.label}
+              {outcomeLabel(o)}
             </label>
           ))}
         </div>
         {touched && !outcome ? <p className="bill-dialog__error">Choose what happened</p> : null}
         {seenInHouse && (
-          <div className="fset__field">
+          <div className="fset__field cfu-outcome__seen">
             <label htmlFor={seenById}>Seen by (required)</label>
             <select
               id={seenById}
