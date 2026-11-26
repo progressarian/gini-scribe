@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "node init && node index.js",
-    "dev": "node init && nodemon index.js",
+    "start": "node index.js",
+    "dev": "nodemon index.js",
     "worker": "node worker.js",
-    "dev:worker": "node init && nodemon worker.js",
+    "dev:worker": "nodemon worker.js",
     "db:init": "node db-init.js",
     "analytics:report": "node scripts/build-gini-report.mjs",
     "analytics:snapshot": "node scripts/build-gini-report.mjs --snapshot",
