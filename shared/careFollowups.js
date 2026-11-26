@@ -1,3 +1,5 @@
+import { CALL_STATUSES } from "./callStatuses.js";
+
 export const FOLLOWUP_STATUSES = [
   { value: "open", label: "Open" },
   { value: "pending", label: "Pending — will book later" },
@@ -66,3 +68,13 @@ export const CLOSE_OUTCOMES = [
 export const REASON_MIN = 3;
 export const REASON_MAX = 300;
 export const UNREACHABLE_AFTER = 3;
+
+const NOT_FOR_REFERRALS = ["rescheduled", "cancelled", "no_call_needed"];
+
+export const FOLLOWUP_CALL_STATUSES = CALL_STATUSES.filter(
+  (s) => !NOT_FOR_REFERRALS.includes(s.value),
+);
+
+export const CALL_FILTER_ANY = "any_call";
+
+export const CALL_FILTER_VALUES = [CALL_FILTER_ANY, ...FOLLOWUP_CALL_STATUSES.map((s) => s.value)];

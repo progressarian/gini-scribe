@@ -4,11 +4,13 @@ import { History, Phone } from "lucide-react";
 import { CAPABILITIES, hasCapability } from "../../../shared/permissions.js";
 import useAuthStore from "../../stores/authStore";
 import { letterHref } from "../../queries/hooks/useGiniflowReferrals";
-import { ATTEMPT_OUTCOMES, CALL_STATUSES, callColor } from "../../../shared/callStatuses.js";
+import { ATTEMPT_OUTCOMES, callColor } from "../../../shared/callStatuses.js";
 import {
   ACTIVE_STATUSES,
   AVAILABILITY_LABEL,
   BOOKABLE_STATUSES,
+  CALL_FILTER_ANY,
+  FOLLOWUP_CALL_STATUSES,
   FOLLOWUP_STATUSES,
   FOLLOWUP_STATUS_LABEL,
   SOURCE_LABEL,
@@ -41,6 +43,7 @@ import "./careFollowups.css";
 
 const EMPTY_FILTERS = {
   status: "open",
+  call: "",
   kind: "",
   availability: "",
   specialty: "",
@@ -50,9 +53,6 @@ const EMPTY_FILTERS = {
 };
 
 const CALL_LABEL = Object.fromEntries(ATTEMPT_OUTCOMES.map((o) => [o.value, o.label]));
-
-const NOT_FOR_REFERRALS = ["rescheduled", "cancelled", "no_call_needed"];
-const CALL_OPTIONS = CALL_STATUSES.filter((s) => !NOT_FOR_REFERRALS.includes(s.value));
 
 const callHref = (phone) => `tel:${String(phone).replace(/\D/g, "")}`;
 
@@ -182,7 +182,7 @@ function CallStatusCell({ item, onLog, busy }) {
     <div className="callstat-cell">
       <Dropdown
         value={current}
-        options={CALL_OPTIONS}
+        options={FOLLOWUP_CALL_STATUSES}
         onChange={(value) => value !== "pending" && onLog(item, value)}
         variant="color"
         disabled={!active || busy}
@@ -440,6 +440,7 @@ export default function CareFollowupsPage() {
   const doctors = useGhmDoctors().data || [];
   const ids = {
     status: useId(),
+    call: useId(),
     kind: useId(),
     availability: useId(),
     specialty: useId(),
@@ -455,6 +456,7 @@ export default function CareFollowupsPage() {
     search.trim() !== "" ||
     Object.entries(EMPTY_FILTERS).some(([k, v]) => k !== "page" && filters[k] !== v);
   const counts = list.data?.counts || {};
+  const callCounts = list.data?.callCounts || {};
   const rows = list.data?.rows || [];
 
   const done = (message) => {
@@ -552,6 +554,25 @@ export default function CareFollowupsPage() {
                 </option>
               ))}
               <option value="all">All</option>
+            </select>
+          </div>
+          <div className="fset__field">
+            <label htmlFor={ids.call}>Call status</label>
+            <select
+              id={ids.call}
+              className="jb-assign"
+              value={filters.call}
+              onChange={(e) => set("call", e.target.value)}
+            >
+              <option value="">All</option>
+              <option value={CALL_FILTER_ANY}>
+                Any call made ({callCounts[CALL_FILTER_ANY] || 0})
+              </option>
+              {FOLLOWUP_CALL_STATUSES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label} ({callCounts[s.value] || 0})
+                </option>
+              ))}
             </select>
           </div>
           <div className="fset__field">
@@ -688,7 +709,7 @@ export default function CareFollowupsPage() {
           <div className="cxl-empty">
             <strong>No follow-ups found</strong>
             <span>
-              {day && !search.trim() && filters.status === EMPTY_FILTERS.status
+              {day && !search.trim() && !filters.call && filters.status === EMPTY_FILTERS.status
                 ? `No open referrals made on ${dayText(day)}.`
                 : filtered
                   ? "No follow-ups match the current filters."

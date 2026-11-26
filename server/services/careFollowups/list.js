@@ -2,6 +2,7 @@ import pool from "../../config/db.js";
 import { toLocal10 } from "../../../shared/phone.js";
 import {
   ACTIVE_STATUSES,
+  CALL_FILTER_ANY,
   FOLLOWUP_KIND_GROUPS,
   REFERRAL_KINDS,
 } from "../../../shared/careFollowups.js";
@@ -124,12 +125,22 @@ export async function listFollowups(filters = {}, db = pool) {
   const page = Math.max(1, Number(filters.page) || 1);
   params.push(statuses);
   const statusParam = `$${params.length}`;
+  params.push(filters.call || null);
+  const callParam = `$${params.length}`;
   params.push(PAGE, (page - 1) * PAGE);
   const { rows } = await db.query(
     `WITH base AS (${ITEM_SQL} ${sql}),
-          shown AS (SELECT * FROM base WHERE ${statusParam}::text[] IS NULL OR status = ANY(${statusParam}))
+          by_status AS (SELECT *, COALESCE(last_call_status, 'pending') AS call_now FROM base
+                         WHERE ${statusParam}::text[] IS NULL OR status = ANY(${statusParam})),
+          shown AS (SELECT * FROM by_status
+                     WHERE ${callParam}::text IS NULL
+                        OR (${callParam} = '${CALL_FILTER_ANY}' AND attempts > 0)
+                        OR call_now = ${callParam})
      SELECT (SELECT COALESCE(json_object_agg(status, n), '{}'::json)
                FROM (SELECT status, COUNT(*)::int AS n FROM base GROUP BY status) s) AS counts,
+            (SELECT COALESCE(json_object_agg(call_now, n), '{}'::json)
+               FROM (SELECT call_now, COUNT(*)::int AS n FROM by_status GROUP BY call_now) c) AS call_counts,
+            (SELECT COUNT(*)::int FROM by_status WHERE attempts > 0) AS called_any,
             (SELECT COUNT(*)::int FROM shown) AS total,
             (SELECT COALESCE(json_agg(x), '[]'::json) FROM (
                SELECT * FROM shown
@@ -143,6 +154,7 @@ export async function listFollowups(filters = {}, db = pool) {
     catalog.people.find((p) => p.role === "consultant" && p.specialty === specialty)?.name || null;
   return {
     counts: out.counts,
+    callCounts: { ...out.call_counts, [CALL_FILTER_ANY]: out.called_any },
     total: out.total,
     since,
     page,

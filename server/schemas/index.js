@@ -26,6 +26,7 @@ import {
 } from "../../shared/newPatientWorkup.js";
 import { ALLERGY_STATES } from "../../shared/giniflowAllergy.js";
 import {
+  CALL_FILTER_VALUES,
   CLOSE_OUTCOMES,
   FOLLOWUP_KIND_GROUPS,
   FOLLOWUP_STATUSES,
@@ -1084,6 +1085,7 @@ const followupReason = z
 
 export const careFollowupListSchema = z.object({
   status: z.enum([...FOLLOWUP_STATUSES.map((s) => s.value), "all"]).optional(),
+  call: z.enum(CALL_FILTER_VALUES).optional(),
   kind: z.enum(Object.keys(FOLLOWUP_KIND_GROUPS)).optional(),
   availability: z.enum(["in_house", "outsourced", "not_available", "unknown"]).optional(),
   specialty: z.string().trim().max(60).optional(),
