@@ -722,7 +722,7 @@ export default function TotalsAndPayment({
                 {hrProblem}
               </p>
             ) : null}
-            <p>
+            <p className="bc-hr-confirm__note">
               This clears the bill in Scribe. No money is taken here and it is not added to the cash
               drawer.{bill.status === "draft" ? " The bill is also made final." : ""}
             </p>

@@ -58,7 +58,7 @@ const COUNTER_SELECT = `
          COALESCE(a.booking_type ~* '${ONLINE_BOOKING}', FALSE) AS online,
          bs.drafts, bs.paid_drafts, bs.finals, bs.pending_claims, bs.cleared_claims, bs.due,
          bs.draft_due, bs.open_drafts, bs.pay_back, bs.refunds_pending, bs.paid_back,
-         cs.seen, cs.consultation_billed,
+         cs.seen, cs.consultation_billed, cs.healthray_consultation,
          EXISTS (SELECT 1 FROM consultant_changes cc
                   WHERE cc.visit_id = a.id AND cc.status = 'pending') AS consultant_changed,
          ts.tests_owed, ts.not_priced, ts.settled_orders, lcs.case_tests_owed,
@@ -114,7 +114,13 @@ const COUNTER_SELECT = `
                       WHERE l.visit_id = a.id AND l.is_live AND si.kind = 'consultation'
                         AND b.bill_type = 'invoice'
                         AND (b.status = 'final' OR ${PAID_DRAFT_SQL("b")}))
-               AS consultation_billed
+               AS consultation_billed,
+             EXISTS (SELECT 1 FROM giniflow_patient_bills hb
+                      CROSS JOIN LATERAL jsonb_array_elements(COALESCE(hb.items, '[]'::jsonb)) hi
+                      WHERE hb.patient_id = gv.patient_id AND hb.bill_date = gv.visit_date
+                        AND hb.status = 'billed' AND hi->>'category' = 'consultation'
+                        AND ${LIVE_BILL_ITEM_SQL("hi")})
+               AS healthray_consultation
     ) cs ON TRUE
     LEFT JOIN LATERAL (
       SELECT COUNT(t.id) FILTER (WHERE NOT o.settled AND NOT t.on_final)::int AS tests_owed,
@@ -203,9 +209,15 @@ function billState(r) {
   return { state: STATE.NONE, due: 0 };
 }
 
-function billHints(r) {
+function billHints(r, arrived) {
   return {
     consultation: Boolean(r.seen) && !r.samples_only && !r.consultation_billed,
+    healthrayConsultation:
+      arrived &&
+      !r.seen &&
+      !r.samples_only &&
+      !r.consultation_billed &&
+      Boolean(r.healthray_consultation),
     tests: (r.tests_owed || 0) + (r.case_tests_owed || 0),
     notPriced: r.not_priced || 0,
     due: paise(r.due) + paise(r.draft_due),
@@ -218,6 +230,7 @@ function groupOf(r, hints, status) {
   if (FINISHED_STATUSES.includes(status)) return COUNTER_GROUP.BILLED;
   if (
     hints.consultation ||
+    hints.healthrayConsultation ||
     hints.consultantChanged ||
     hints.tests > 0 ||
     hints.newTests > 0 ||
@@ -297,8 +310,8 @@ export async function counterPatients(visitDate, q = "", now = new Date(), db = 
   }
 
   const shaped = visible.map((r) => {
-    const hints = billHints(r);
     const arrival = shapeArrival(r, now);
+    const hints = billHints(r, !notArrived(arrival));
     return {
       ...arrival,
       online: Boolean(r.online),

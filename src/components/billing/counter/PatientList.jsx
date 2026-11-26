@@ -52,6 +52,7 @@ function hintsOf(hints) {
     hints.newTests > 0 && `${plural(hints.newTests, "new test")} after consultation`,
     hints.consultantChanged && "Consultant changed — fee to settle",
     hints.consultation && "Consultation done — not billed",
+    hints.healthrayConsultation && "Consultation paid in HealthRay — not billed",
     hints.tests > 0 && `${plural(hints.tests, "test")} ordered`,
     hints.notPriced > 0 && `${hints.notPriced} not priced`,
     hints.due > 0 && `${fromPaise(hints.due)} due`,

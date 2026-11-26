@@ -210,7 +210,10 @@ export async function arrivalConsultationIn(client, visitId, ctx, journey = null
 
 async function consultationSettled(client, visitId) {
   const { rows } = await client.query(
-    `SELECT 1 FROM bills WHERE visit_id = $1 AND bill_type = 'invoice' AND status = 'final'
+    `SELECT 1 FROM bill_lines l
+       JOIN service_items i ON i.id = l.service_item_id
+       JOIN bills b ON b.id = l.bill_id
+      WHERE l.visit_id = $1 AND l.is_live AND i.kind = 'consultation' AND b.status <> 'cancelled'
      UNION ALL
      SELECT 1 FROM bill_lines l JOIN bills b ON b.id = l.bill_id
       WHERE l.visit_id = $1 AND l.source = 'visit' AND b.status <> 'cancelled'

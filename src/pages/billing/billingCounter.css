@@ -2319,15 +2319,20 @@ body > [role="dialog"][aria-modal="true"] .bc-err {
 }
 .bc-hr-confirm__facts {
   display: grid;
-  gap: 4px;
-  margin: 0 0 10px;
+  gap: 6px;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
 }
 .bc-hr-confirm__facts > div {
   display: flex;
-  gap: 8px;
+  gap: 12px;
 }
 .bc-hr-confirm__facts dt {
-  min-width: 64px;
+  flex: none;
+  width: 64px;
   color: #64748b;
 }
 .bc-hr-confirm__facts dd {
@@ -2337,19 +2342,57 @@ body > [role="dialog"][aria-modal="true"] .bc-err {
   overflow-wrap: anywhere;
 }
 .bc-hr-confirm__mode {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  margin: 0 0 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 12px;
 }
 
 .bc-hr-confirm__mode .bc-field {
-  flex: 1 1 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   min-width: 0;
 }
 
+.bc-hr-confirm__mode .bc-field:first-child {
+  grid-column: 1 / -1;
+}
+
+.bc-hr-confirm .bc-field__lbl {
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.bc-hr-confirm .bc-field__in {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+  color: #0f172a;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+}
+
+.bc-hr-confirm .bc-field__in:focus {
+  outline: none;
+  border-color: #0d9488;
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
+}
+
+@media (max-width: 420px) {
+  .bc-hr-confirm__mode {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .bc-hr-confirm__part + .bc-hr-confirm__part {
-  padding-top: 8px;
+  padding-top: 12px;
   border-top: 1px dashed #e2e8f0;
 }
 
@@ -2382,7 +2425,7 @@ body > [role="dialog"][aria-modal="true"] .bc-err {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin: 0 0 8px;
+  margin: 0 0 12px -8px;
   padding: 5px 8px;
   font: inherit;
   font-size: 12.5px;
@@ -2411,9 +2454,20 @@ body > [role="dialog"][aria-modal="true"] .bc-err {
 }
 
 .bc-hr-confirm .bc-hr-confirm__need {
-  margin: 0 0 8px;
-  color: var(--ui-muted, #64748b);
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
   font-size: 12.5px;
+}
+
+.bc-hr-confirm .bc-hr-confirm__note {
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+  font-size: 12.5px;
+  color: #64748b;
 }
 
 .bc-hr-confirm p {
