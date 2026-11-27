@@ -224,6 +224,19 @@ function SettingsTab({ doctor, consultants, onSaved }) {
           {doctor.role === "consultant" && (
             <ToggleSetting
               doctor={doctor}
+              field="token_queue"
+              checked={doctor.token_queue === true}
+              label="Token queue at Chief Endocrinologist"
+              hint="Reception gives this consultant's patients a token number. They see the Chief Endocrinologist in token order (lowest first, earliest arrival on a tie), ahead of patients without a token."
+              successText={(on) =>
+                `${name}'s patients ${on ? "now take" : "no longer take"} a token for the Chief Endocrinologist`
+              }
+              onSaved={onSaved}
+            />
+          )}
+          {doctor.role === "consultant" && (
+            <ToggleSetting
+              doctor={doctor}
               field="direct_consult"
               checked={doctor.direct_consult === true}
               label="Runs own floor"

@@ -8,6 +8,7 @@ import { CATEGORIES as TEST_CATEGORIES } from "../services/giniflow/testCatalog.
 import { MACHINE_SAMPLE_FLOW } from "../../shared/machineStages.js";
 import { TEST_CANCEL_REASON_VALUES } from "../../shared/testCancelReasons.js";
 import { HOME_NOTE_MAX } from "../../shared/homeCollectors.js";
+import { TOKEN_MAX, TOKEN_MIN } from "../../shared/giniflowTokens.js";
 import { UPI_APPS } from "../../shared/billingVocab.js";
 import { RX_FOLLOWUP_ACTIONS, RX_FOLLOWUP_RESOLVES } from "../../shared/rxFollowups.js";
 import { HOLD_DECISIONS, HOLD_NOTE_MAX, HOLD_NOTE_MIN } from "../../shared/coordinatorHold.js";
@@ -1376,6 +1377,38 @@ export const giniflowSlaUpdateSchema = z.object({
 // The reason is optional, unlike a block's (GF-18): an urgent patient is often
 // self-evident at the desk, and a required sentence would only produce empty
 // ones. It is dropped when the priority returns to normal.
+const queryList = (item) =>
+  z.preprocess(
+    (value) =>
+      value === undefined || value === ""
+        ? undefined
+        : (Array.isArray(value) ? value : String(value).split(","))
+            .map((v) => String(v).trim())
+            .filter(Boolean),
+    z.array(item).max(50).optional(),
+  );
+
+const clockTime = z
+  .string()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Enter the time as HH:MM, for example 09:30")
+  .optional();
+
+export const giniflowTokenQuerySchema = giniflowDateQuerySchema.extend({
+  doctor: queryList(z.coerce.number().int().positive()),
+  from: clockTime,
+  to: clockTime,
+  q: z.string().trim().max(100).optional(),
+});
+
+export const giniflowTokenSchema = z.object({
+  token: z
+    .number({ invalid_type_error: "Enter the token as a whole number" })
+    .int("Enter the token as a whole number")
+    .min(TOKEN_MIN, `Enter a token from ${TOKEN_MIN} to ${TOKEN_MAX}`)
+    .max(TOKEN_MAX, `Enter a token from ${TOKEN_MIN} to ${TOKEN_MAX}`)
+    .nullable(),
+});
+
 export const giniflowPrioritySchema = z.object({
   priority: z.enum(["urgent", "high", "normal"]),
   reason: z.string().trim().max(200).nullish(),
@@ -1869,6 +1902,27 @@ export const testCancelRequestSchema = z.strictObject({
 export const testCancelApproveSchema = z.strictObject(cancelChargeFields);
 
 export const testCancelRejectSchema = z.strictObject({ note: z.string().trim().max(500) });
+
+export const reportReleaseRequestSchema = z.strictObject({
+  visit_id: z.string().uuid("Choose a valid visit"),
+  reason: z
+    .string()
+    .trim()
+    .min(1, "Write why the report should be released before payment")
+    .max(500, "Keep the reason under 500 characters"),
+});
+
+export const reportReleaseApproveSchema = z.strictObject({
+  note: z.string().trim().max(500, "Keep the note under 500 characters").optional(),
+});
+
+export const reportReleaseRejectSchema = z.strictObject({
+  note: z
+    .string()
+    .trim()
+    .min(1, "Write why the release is rejected")
+    .max(500, "Keep the note under 500 characters"),
+});
 
 export const testCancelNowSchema = z.strictObject({
   target: cancelTargetSchema,

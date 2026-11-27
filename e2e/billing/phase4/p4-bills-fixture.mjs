@@ -552,6 +552,7 @@ export async function sweepDeposits(patients, bills = []) {
       `DELETE FROM deposit_entries WHERE patient_id = ANY($1) OR bill_id = ANY($2)`,
       [patients, bills],
     );
+    await client.query(`DELETE FROM bill_revisions WHERE bill_id = ANY($1)`, [bills]);
     await client.query(`DELETE FROM payments WHERE deposit_patient_id = ANY($1)`, [patients]);
     await client.query(`DELETE FROM deposit_accounts WHERE patient_id = ANY($1)`, [patients]);
     await client.query(

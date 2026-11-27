@@ -59,6 +59,8 @@ const COLUMNS = [
   "applies_on_scheme_rate",
   "excludes_outsourced",
   "requires_all_items",
+  "membership_plan_id",
+  "tests_only",
   "allowed_roles",
   "is_active",
   "created_at",
@@ -476,8 +478,18 @@ const TARGET_LISTS = `
      LEFT JOIN patient_schemes s ON s.code = t.code
      LEFT JOIN patient_schemes p ON p.code = s.parent_code) AS categories`;
 
+function notMembership(rule) {
+  if (rule.membership_plan_id) {
+    throw httpError(
+      409,
+      "This is a membership plan's lab discount — change it from Settings, under Membership plans",
+    );
+  }
+  return rule;
+}
+
 export async function listDiscountRules({ activeOnly = false, method } = {}, db = pool) {
-  const where = [];
+  const where = ["d.membership_plan_id IS NULL"];
   const params = [];
   if (activeOnly) where.push("d.is_active");
   if (method) {
@@ -526,7 +538,7 @@ export async function updateDiscountRule(id, input, ctx, db = pool) {
   const keys = Object.keys(values);
   if (!keys.length) throw httpError(400, "Nothing to change");
   return inTransaction(async (client) => {
-    const before = shape(await lockRow(client, SPEC, id));
+    const before = notMembership(shape(await lockRow(client, SPEC, id)));
     await validate(client, { ...before, ...values }, { id, before });
     const { rows } = await client
       .query(
@@ -556,7 +568,7 @@ export async function updateDiscountRule(id, input, ctx, db = pool) {
 export async function setDiscountRuleActive(id, value, ctx, db = pool) {
   const active = cleanActive(value);
   return inTransaction(async (client) => {
-    const before = shape(await lockRow(client, SPEC, id));
+    const before = notMembership(shape(await lockRow(client, SPEC, id)));
     if (before.is_active === active) return before;
     if (active) await validate(client, { ...before, is_active: true }, { id, before });
     const { rows } = await client.query(
@@ -579,7 +591,7 @@ export async function setDiscountRuleActive(id, value, ctx, db = pool) {
 
 export async function deleteDiscountRule(id, ctx, db = pool) {
   return inTransaction(async (client) => {
-    const before = shape(await lockRow(client, SPEC, id));
+    const before = notMembership(shape(await lockRow(client, SPEC, id)));
     await client.query("SAVEPOINT billing_delete");
     try {
       await client.query(`DELETE FROM discount_rules WHERE id = $1`, [id]);
@@ -761,6 +773,7 @@ function cleanLine(line) {
     doctor_id: cleanId(line.doctor_id, "Doctor"),
     visit_type: visitType,
     is_outsourced: line.is_outsourced === true,
+    is_test: line.is_test === true,
   };
 }
 
@@ -817,10 +830,15 @@ async function matchFacts(line, context, db) {
     autoCodes: Array.isArray(context?.autoCodes)
       ? context.autoCodes.map((code) => String(code).toLowerCase())
       : [],
+    membership: context?.membership ?? null,
   };
 }
 
-function ruleMiss(rule, { line, category, patient }) {
+const membershipFits = (rule, membership) =>
+  membership?.plan_id === rule.membership_plan_id && membership.lab_eligible === true;
+
+function ruleMiss(rule, { line, category, patient, membership }) {
+  if (rule.membership_plan_id && !membershipFits(rule, membership)) return "membership";
   if (rule.scheme_codes && !rule.scheme_codes.some((c) => category.codes.includes(c))) {
     return "category";
   }
@@ -837,6 +855,7 @@ function ruleMiss(rule, { line, category, patient }) {
     return "items";
   }
   if (rule.excludes_outsourced && line.is_outsourced) return "items";
+  if (rule.tests_only && !line.is_test) return "items";
   if (rule.doctor_ids && (!rule.doctor_ids.includes(line.doctor_id) || line.removed_doctor)) {
     return "doctor";
   }

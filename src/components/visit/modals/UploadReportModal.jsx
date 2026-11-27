@@ -119,7 +119,7 @@ const UploadReportModal = memo(function UploadReportModal({ onClose, onSubmit })
           <input
             ref={fileRef}
             type="file"
-            accept=".pdf,.jpg,.jpeg,.png"
+            accept=".pdf,.jpg,.jpeg,.png,.docx"
             style={{ display: "none" }}
             onChange={(e) => handleFile(e.target.files?.[0])}
           />
@@ -134,7 +134,7 @@ const UploadReportModal = memo(function UploadReportModal({ onClose, onSubmit })
                 Drop file here or click to browse
               </div>
               <div style={{ fontSize: 10, color: "var(--t4)", marginTop: 2 }}>
-                PDF, JPG, PNG · Max 10 MB
+                PDF, DOCX, JPG, PNG · Max 10 MB
               </div>
             </>
           )}

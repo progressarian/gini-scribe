@@ -78,7 +78,10 @@ export const KINDS = {
   refund: "refund",
   deposit_refund: "deposit refund",
   test_cancel: "test cancellation",
+  report_release: "report release",
 };
+
+export const SEPARATE_TAB_KINDS_SQL = "r.kind NOT IN ('test_cancel', 'report_release')";
 const PRICE_FIELDS = ["base_price", "price", "rate", "amount", "mrp", "discount"];
 export const TEXT_MAX = 1000;
 const LIST_LIMIT = 200;
@@ -242,7 +245,7 @@ const LIST_SQL = `
          v.visit_date::text AS visit_date,
          (SELECT da.balance FROM deposit_accounts da WHERE da.patient_id = r.patient_id)
            AS deposit_balance,
-         (r.kind NOT IN ('refund', 'deposit_refund', 'test_cancel') AND r.status = 'approved'
+         (r.kind NOT IN ('refund', 'deposit_refund', 'test_cancel', 'report_release') AND r.status = 'approved'
           AND l.id IS NULL)
            AS usable
     FROM billing_requests r
@@ -296,7 +299,7 @@ export async function listRequests(filters = {}, db = pool) {
     }
     add("r.kind = ?", filters.kind);
   } else {
-    where.push("r.kind <> 'test_cancel'");
+    where.push(SEPARATE_TAB_KINDS_SQL);
   }
   params.push(cleanLimit(filters.limit));
   const { rows } = await db.query(
@@ -358,7 +361,7 @@ export async function olderWaitingCount(db, kindSql, { from, to }) {
 }
 
 export async function searchRequests(filters = {}, db = pool) {
-  const where = ["r.kind <> 'test_cancel'"];
+  const where = [SEPARATE_TAB_KINDS_SQL];
   const params = [];
   const add = (sql, value) => {
     params.push(value);
@@ -423,7 +426,7 @@ export async function searchRequests(filters = {}, db = pool) {
     total: counted[0].n,
     page,
     limit,
-    olderWaiting: await olderWaitingCount(db, "r.kind <> 'test_cancel'", range),
+    olderWaiting: await olderWaitingCount(db, SEPARATE_TAB_KINDS_SQL, range),
   };
 }
 
@@ -968,6 +971,9 @@ const DECIDED = {
 };
 
 function refuseTestCancel(before) {
+  if (before.kind === "report_release") {
+    throw httpError(409, "Answer report releases from the Report release tab");
+  }
   if (before.kind !== "test_cancel") return;
   throw httpError(409, "Answer test cancellations from the Test cancellations tab");
 }

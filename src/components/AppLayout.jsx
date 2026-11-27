@@ -422,6 +422,13 @@ const NAV_ITEMS = [
     show: (s) => !isLabDesk(s.role),
   },
   {
+    path: "/giniflow/tokens",
+    group: "flow",
+    label: "🎫 Chief Tokens",
+    cap: C["/giniflow/tokens"],
+    show: () => true,
+  },
+  {
     path: "/giniflow/reports",
     group: "flow",
     label: "📊 Flow Reports",

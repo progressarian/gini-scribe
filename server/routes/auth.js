@@ -69,7 +69,7 @@ router.post("/convert-heic", async (req, res) => {
 router.get("/doctors", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, name, short_name, specialty, qualification, role, is_chief, vitals_rest, chief_step, direct_consult, COALESCE((to_jsonb(doctors)->>'can_assign_calls')::boolean, FALSE) AS can_assign_calls, COALESCE((to_jsonb(doctors)->>'can_assign_slots')::boolean, FALSE) AS can_assign_slots, COALESCE((to_jsonb(doctors)->>'slot_booking')::boolean, FALSE) AS slot_booking, COALESCE((to_jsonb(doctors)->>'new_patient_workup')::boolean, FALSE) AS new_patient_workup, (to_jsonb(doctors)->>'assists_doctor_id')::int AS assists_doctor_id FROM doctors WHERE is_active=true ORDER BY role, name",
+      "SELECT id, name, short_name, specialty, qualification, role, is_chief, vitals_rest, chief_step, direct_consult, COALESCE((to_jsonb(doctors)->>'can_assign_calls')::boolean, FALSE) AS can_assign_calls, COALESCE((to_jsonb(doctors)->>'can_assign_slots')::boolean, FALSE) AS can_assign_slots, COALESCE((to_jsonb(doctors)->>'slot_booking')::boolean, FALSE) AS slot_booking, COALESCE((to_jsonb(doctors)->>'token_queue')::boolean, FALSE) AS token_queue, COALESCE((to_jsonb(doctors)->>'new_patient_workup')::boolean, FALSE) AS new_patient_workup, (to_jsonb(doctors)->>'assists_doctor_id')::int AS assists_doctor_id FROM doctors WHERE is_active=true ORDER BY role, name",
     );
     res.json(result.rows);
   } catch (e) {
@@ -322,6 +322,7 @@ router.post("/doctors", requireCapability(CAPABILITIES.ADMIN), async (req, res) 
 const slotBookingReady = columnReady("doctors", "slot_booking");
 const assistsReady = columnReady("doctors", "assists_doctor_id");
 const slotAccessReady = columnReady("doctors", "can_assign_slots");
+const tokenQueueReady = columnReady("doctors", "token_queue");
 const WORKUP_MIGRATION =
   "The History & Examination settings need a database update first. Ask an administrator to run the new-patient workup migration.";
 
@@ -332,6 +333,7 @@ router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, 
       qualification,
       vitals_rest,
       chief_step,
+      token_queue,
       direct_consult,
       can_assign_calls,
       can_assign_slots,
@@ -364,6 +366,19 @@ router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, 
       }
       params.push(chief_step);
       sets.push(`chief_step=$${params.length}`);
+    }
+
+    if (token_queue !== undefined) {
+      if (typeof token_queue !== "boolean") {
+        return res.status(400).json({ error: "token_queue must be a boolean" });
+      }
+      if (!(await tokenQueueReady()))
+        return res.status(409).json({
+          error:
+            "The token queue needs a database update first. Ask an administrator to run the token queue migration.",
+        });
+      params.push(token_queue);
+      sets.push(`token_queue=$${params.length}`);
     }
 
     if (direct_consult !== undefined) {
@@ -451,6 +466,7 @@ router.patch("/doctors/:id", requireCapability(CAPABILITIES.ADMIN), async (req, 
       `UPDATE doctors SET ${sets.join(", ")} WHERE id=$1
         RETURNING id, name, short_name, is_chief, qualification, vitals_rest, chief_step, direct_consult, can_assign_calls,
                   COALESCE((to_jsonb(doctors)->>'can_assign_slots')::boolean, FALSE) AS can_assign_slots,
+                  COALESCE((to_jsonb(doctors)->>'token_queue')::boolean, FALSE) AS token_queue,
                   COALESCE((to_jsonb(doctors)->>'new_patient_workup')::boolean, FALSE) AS new_patient_workup,
                   (to_jsonb(doctors)->>'assists_doctor_id')::int AS assists_doctor_id`,
       params,

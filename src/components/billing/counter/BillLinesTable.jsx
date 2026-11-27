@@ -22,7 +22,7 @@ function QuantityCell({ bill, line, locked, onBill, onError }) {
 
   useEffect(() => setValue(String(line.quantity)), [line.quantity]);
 
-  if (bill.status !== "draft" || !line.allow_quantity || locked)
+  if (!bill.editable || !line.allow_quantity || locked)
     return (
       <td data-label="Qty" className="bc-num">
         {line.quantity}
@@ -127,7 +127,7 @@ function ManualDiscountCell({ bill, line, pending, save, onBill, onError }) {
     setValue(manualValue(line));
   }, [line.manual_discount?.kind, line.manual_discount?.value]);
 
-  if (bill.status !== "draft") {
+  if (!bill.editable) {
     return (
       <td data-label="Discount" className="bc-num">
         {fromPaise(line.discount)}
@@ -415,7 +415,7 @@ export default function BillLinesTable({ bill, onBill, form }) {
   };
 
   const packageActions = (pkg) =>
-    bill.status !== "draft" || !pkg.parts.every(mayRemove)
+    !bill.editable || !pkg.parts.every(mayRemove)
       ? []
       : [
           {
@@ -431,7 +431,7 @@ export default function BillLinesTable({ bill, onBill, form }) {
         ];
 
   const actionsFor = (line, { inPackage = false } = {}) =>
-    bill.status !== "draft"
+    !bill.editable
       ? []
       : [
           !inPackage &&
@@ -468,7 +468,7 @@ export default function BillLinesTable({ bill, onBill, form }) {
           Bill Items
           <span className="bc-card__sub">{bill.bill_no || "Draft"}</span>
         </h3>
-        {bill.status === "draft" && (
+        {bill.editable && (
           <button type="button" className="bc-addbtn" onClick={() => openItemSearch(form)}>
             <Plus size={15} aria-hidden="true" />
             Add Service/Test
@@ -542,6 +542,12 @@ export default function BillLinesTable({ bill, onBill, form }) {
                                   .join(" · ")}
                           </div>
                           {line.is_outsourced && <span className="badge b-pu">Outsourced</span>}
+                          {line.membership_benefit && (
+                            <span className="badge b-grn">
+                              Covered by membership
+                              {line.membership_benefit === "dietitian" ? " (dietitian)" : ""}
+                            </span>
+                          )}
                           {line.source === "lab_case" && (
                             <span className="badge b-blu">from lab report</span>
                           )}

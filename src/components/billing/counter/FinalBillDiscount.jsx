@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ConfirmModal from "../../ui/ConfirmModal";
 import {
   useDiscountFinalBill,
@@ -10,7 +10,27 @@ import ManualDiscountFields, { discountDraft, discountProblem } from "./ManualDi
 
 const WHOLE_BILL = "";
 
-export default function FinalBillDiscount({ bill, patient, onBill }) {
+const PAYBACK = [
+  {
+    value: "cash",
+    label: "Refund in cash now",
+    hint: "Comes out of your cash drawer — open your shift first",
+  },
+  {
+    value: "deposit",
+    label: "Keep in the patient's deposit",
+    hint: "Used on their next bill, or paid back later",
+  },
+  { value: "as_paid", label: "Pay back the way they paid", hint: "Paid out later from Refunds" },
+];
+
+const DONE_TEXT = {
+  cash: (made) => ` — ${fromPaise(made.paid_in_cash)} refunded in cash.`,
+  deposit: (made) => ` — ${fromPaise(made.kept_as_deposit)} kept in the patient's deposit.`,
+  as_paid: (made) => ` — ${fromPaise(made.pay_back)} to pay back (Pay out under Refunds).`,
+};
+
+export default function FinalBillDiscount({ bill, patient, onBill, prefill = null }) {
   const preview = usePreviewFinalDiscount();
   const give = useDiscountFinalBill();
   const reread = useRereadBill();
@@ -18,8 +38,19 @@ export default function FinalBillDiscount({ bill, patient, onBill }) {
   const [checked, setChecked] = useState(null);
   const [error, setError] = useState(null);
   const [done, setDone] = useState(null);
+  const [payback, setPayback] = useState("cash");
 
-  if (bill.status !== "final" || bill.bill_type !== "invoice") return null;
+  useEffect(() => {
+    if (!prefill) return;
+    setError(null);
+    setDone(null);
+    setForm({
+      lineId: WHOLE_BILL,
+      value: { kind: prefill.kind, value: prefill.value, reason: prefill.reason ?? "" },
+    });
+  }, [prefill]);
+
+  if (bill.status !== "final" || bill.bill_type !== "invoice" || bill.editing) return null;
 
   const body = () => ({
     billId: bill.id,
@@ -28,6 +59,7 @@ export default function FinalBillDiscount({ bill, patient, onBill }) {
     value: form.value.value.trim(),
     reason: form.value.reason.trim(),
     line_id: form.lineId || null,
+    payback,
   });
 
   const review = async (event) => {
@@ -48,7 +80,7 @@ export default function FinalBillDiscount({ bill, patient, onBill }) {
       setDone(
         `Credit note ${made.credit_note_no} made for ${fromPaise(made.amount)}` +
           (made.pay_back > 0
-            ? ` — ${fromPaise(made.pay_back)} to pay back to the patient (Pay out under Refunds).`
+            ? DONE_TEXT[made.payback](made)
             : " — it came off what is still owed."),
       );
       setChecked(null);
@@ -84,8 +116,9 @@ export default function FinalBillDiscount({ bill, patient, onBill }) {
       ) : (
         <form className="bc-mdisc__form" onSubmit={review}>
           <p className="bc-hint">
-            The bill is final, so this makes a discount credit note. If the patient has already
-            paid, the discount is paid back to them the way they paid.
+            The bill is final, so this makes a discount credit note. A % sets the total discount as
+            a share of the full bill — what was already given is taken off. If the patient has
+            already paid, the difference is paid back to them the way they paid.
           </p>
           <label className="bc-field">
             <span className="bc-field__lbl">Applies to</span>
@@ -134,8 +167,8 @@ export default function FinalBillDiscount({ bill, patient, onBill }) {
         error={error}
         message={
           checked && (
-            <div className="bc-mdisc">
-              <dl className="bc-pay__mini">
+            <div className="bc-cc">
+              <dl className="bc-cc__who">
                 <div>
                   <dt>Patient</dt>
                   <dd>
@@ -151,20 +184,60 @@ export default function FinalBillDiscount({ bill, patient, onBill }) {
                   <dt>On</dt>
                   <dd>{target}</dd>
                 </div>
-                <div>
-                  <dt>Discount</dt>
+              </dl>
+              <dl className="bc-cc__money" aria-label="Discount worked out">
+                {form?.value?.kind === "percent" && (
+                  <>
+                    <div>
+                      <dt>Full amount</dt>
+                      <dd>{fromPaise(checked.gross)}</dd>
+                    </div>
+                    <div>
+                      <dt>{form.value.value}% of it</dt>
+                      <dd>{fromPaise(checked.amount + checked.already_given)}</dd>
+                    </div>
+                    <div>
+                      <dt>Already given</dt>
+                      <dd>−{fromPaise(checked.already_given)}</dd>
+                    </div>
+                  </>
+                )}
+                <div className="bc-cc__total">
+                  <dt>Discount now</dt>
                   <dd>{fromPaise(checked.amount)}</dd>
                 </div>
                 <div>
                   <dt>Comes off what is owed</dt>
                   <dd>{fromPaise(checked.off_balance)}</dd>
                 </div>
-                <div className="bc-pay__left">
+                <div className="bc-cc__total">
                   <dt>To pay back</dt>
                   <dd>{fromPaise(checked.pay_back)}</dd>
                 </div>
               </dl>
-              <p className="bc-hint">
+              {checked.pay_back > 0 && (
+                <fieldset className="bc-cc__choices">
+                  <legend className="bc-field__lbl">
+                    How {fromPaise(checked.pay_back)} goes back to the patient
+                  </legend>
+                  {PAYBACK.map((option) => (
+                    <label key={option.value} className="bc-cc__choice">
+                      <input
+                        type="radio"
+                        name="bc-final-payback"
+                        value={option.value}
+                        checked={payback === option.value}
+                        onChange={() => setPayback(option.value)}
+                      />
+                      <span>
+                        <strong>{option.label}</strong>
+                        <small>{option.hint}</small>
+                      </span>
+                    </label>
+                  ))}
+                </fieldset>
+              )}
+              <p className="bc-cc__warn">
                 A discount credit note will be made. It can't be undone; to reverse it, bill the
                 amount again.
               </p>

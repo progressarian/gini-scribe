@@ -376,7 +376,7 @@ function TestPane({
                     <input
                       ref={extraRef}
                       type="file"
-                      accept="application/pdf,image/*"
+                      accept="application/pdf,image/*,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                       multiple
                       hidden
                       onChange={(e) => {
@@ -421,7 +421,7 @@ function TestPane({
                 <input
                   ref={fileRef}
                   type="file"
-                  accept="application/pdf,image/*"
+                  accept="application/pdf,image/*,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   hidden
                   onChange={(e) => {
                     const file = e.target.files?.[0];
@@ -440,7 +440,7 @@ function TestPane({
                 >
                   <div className="ua-ico">📄</div>
                   <div className="ua-t">Tap or drop the report here</div>
-                  <div className="ua-s">PDF · JPG · PNG · Max 5MB</div>
+                  <div className="ua-s">PDF · DOCX · JPG · PNG · Max 5MB</div>
                 </button>
                 <div className="dp-hint">
                   Filing the report closes this test and tells the MO the patient is released.

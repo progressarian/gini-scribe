@@ -22,6 +22,7 @@ import {
 } from "../../queries/hooks/useGiniflowQueue";
 import LiveBadge from "../../components/giniflow/LiveBadge";
 import BillingDesk, { DESK_TABS } from "../../components/billing/counter/BillingDesk";
+import TokenQueue from "../../components/giniflow/TokenQueue";
 import { BillBadge } from "../../components/billing/counter/PatientList";
 import { approvedRefundText, useRefundsToPay } from "../../components/billing/counter/RefundsBoard";
 import { receptionBillHref } from "../../components/billing/counter/billHref";
@@ -1756,11 +1757,12 @@ function HealthraySync({ onNote }) {
 
 const TAB = {
   arrivals: "arrivals",
+  tokens: "tokens",
 };
 
 const DESK_TAB_KEYS = Object.keys(DESK_TABS);
 
-function useReceptionTab(canBill, canApprove, canCollectPharmacy) {
+function useReceptionTab(canBill, canApprove, canCollectPharmacy, canToken) {
   const [params, setParams] = useSearchParams();
   const { data: deskSettings } = useDeskSettings({ enabled: canBill });
   const requested = params.get("tab") || TAB.arrivals;
@@ -1769,7 +1771,8 @@ function useReceptionTab(canBill, canApprove, canCollectPharmacy) {
   const tab =
     (isDesk && !canBill) ||
     (requested === DESK_TABS.requests.key && !canApprove) ||
-    (requested === DESK_TABS.pharmacy.key && !canCollectPharmacy)
+    (requested === DESK_TABS.pharmacy.key && !canCollectPharmacy) ||
+    (requested === TAB.tokens && !canToken)
       ? TAB.arrivals
       : requested === DESK_TABS.dues.key && duesOff
         ? DESK_TABS.bill.key
@@ -1782,6 +1785,7 @@ function useReceptionTab(canBill, canApprove, canCollectPharmacy) {
         ...(duesOff || (!deskSettings && tab !== DESK_TABS.dues.key) ? [] : [DESK_TABS.dues]),
         DESK_TABS.shift,
         DESK_TABS.refunds,
+        DESK_TABS.memberships,
         ...(canApprove ? [DESK_TABS.requests] : []),
         ...(canCollectPharmacy ? [DESK_TABS.pharmacy] : []),
       ]
@@ -1830,6 +1834,7 @@ function ReceptionTabs({
   tab,
   setTab,
   deskTabs,
+  canToken,
   arrivalsCount,
   toMarkArrivedCount,
   refundsCount,
@@ -1857,6 +1862,17 @@ function ReceptionTabs({
           </span>
         )}
       </button>
+      {canToken && (
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === TAB.tokens}
+          className={`st-tab${tab === TAB.tokens ? " on" : ""}`}
+          onClick={() => setTab(TAB.tokens)}
+        >
+          Chief tokens
+        </button>
+      )}
       {deskTabs.map((entry) => (
         <button
           key={entry.key}
@@ -1921,7 +1937,8 @@ export default function ReceptionStationPage() {
   const approvals = useApprovalsWaiting();
   const role = useAuthStore((st) => st.currentDoctor?.role);
   const canCollectPharmacy = hasCapability(role, CAPS.PHARMACY_COLLECT);
-  const desk = useReceptionTab(canBill, approvals.any, canCollectPharmacy);
+  const canToken = hasCapability(role, CAPS.GINIFLOW_TOKEN_ASSIGN);
+  const desk = useReceptionTab(canBill, approvals.any, canCollectPharmacy, canToken);
   const { tab, setTab } = desk;
   const onDesk = DESK_TAB_KEYS.includes(tab);
   const sentPatient = useLocation().state?.duePatient ?? null;
@@ -2041,6 +2058,7 @@ export default function ReceptionStationPage() {
       tab={tab}
       setTab={setTab}
       deskTabs={desk.deskTabs}
+      canToken={canToken}
       arrivalsCount={counts.expected}
       toMarkArrivedCount={
         [
@@ -2129,19 +2147,23 @@ export default function ReceptionStationPage() {
               </div>
             ) : null}
 
-            <ArrivalsTab
-              onCheckedIn={onCheckedIn}
-              onFailed={(e) => failed(e, "Could not check this patient in — nothing was changed")}
-              onNote={showToast}
-              search={search}
-              setSearch={setSearch}
-              data={arrivals}
-              isLoading={arrivalsLoading}
-              onAct={onAct}
-              onPauseToggle={onPauseToggle}
-              breakBusy={pauseVisit.isPending || resumeVisit.isPending}
-              busy={arrivalAction.isPending}
-            />
+            {tab === TAB.tokens ? (
+              <TokenQueue />
+            ) : (
+              <ArrivalsTab
+                onCheckedIn={onCheckedIn}
+                onFailed={(e) => failed(e, "Could not check this patient in — nothing was changed")}
+                onNote={showToast}
+                search={search}
+                setSearch={setSearch}
+                data={arrivals}
+                isLoading={arrivalsLoading}
+                onAct={onAct}
+                onPauseToggle={onPauseToggle}
+                breakBusy={pauseVisit.isPending || resumeVisit.isPending}
+                busy={arrivalAction.isPending}
+              />
+            )}
           </div>
         </div>
       )}

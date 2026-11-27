@@ -14,6 +14,9 @@ const DETAILS = [
   "items",
   "rules",
   "problems",
+  "code",
+  "collected",
+  "wanted_payable",
 ];
 
 export function sendFailure(context, res, e) {

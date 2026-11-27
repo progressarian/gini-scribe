@@ -47,6 +47,7 @@ import { enrichMedWithDays } from "../services/medication/daysOfWeek.js";
 import { blockWriteGuard } from "../middleware/blockWriteGuard.js";
 import { datedFollowUp } from "../../shared/followUp.js";
 import { syncReferralHold } from "../services/giniflow/coordinatorHold.js";
+import { asViewableUpload } from "../services/officeToPdf.js";
 
 const require = createRequire(import.meta.url);
 // Outbound Genie sync removed 2026-05-01 — dual-DB routing replaces it.
@@ -2158,8 +2159,17 @@ router.post("/visit/:patientId/document", async (req, res) => {
   const pid = Number(req.params.patientId);
   if (!pid) return res.status(400).json({ error: "Invalid patient ID" });
   try {
-    const { doc_type, doc_date, source, notes, base64, fileName } = req.body;
+    const { doc_type, doc_date, source, notes } = req.body;
     if (!doc_type) return res.status(400).json({ error: "doc_type is required" });
+    const upload =
+      req.body.base64 && req.body.fileName
+        ? await asViewableUpload({
+            buffer: Buffer.from(req.body.base64, "base64"),
+            fileName: req.body.fileName,
+          })
+        : null;
+    const fileName = upload?.fileName ?? req.body.fileName;
+    const base64 = upload?.converted ? upload.buffer.toString("base64") : req.body.base64;
     // Insert document metadata
     const r = await pool.query(
       `INSERT INTO documents (patient_id, doc_type, title, doc_date, source, notes)
@@ -2186,7 +2196,7 @@ router.post("/visit/:patientId/document", async (req, res) => {
             : "application/octet-stream";
       const safeName = sanitizeForStorageKey(fileName);
       const storagePath = `patients/${pid}/${doc_type}/${Date.now()}_${safeName}`;
-      const fileBuffer = Buffer.from(base64, "base64");
+      const fileBuffer = upload.buffer;
       const uploadResp = await fetch(
         `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`,
         {

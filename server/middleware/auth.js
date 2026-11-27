@@ -113,7 +113,15 @@ const ROUTE_CAPABILITIES = [
   ["/api/billing/reports", CAP.BILLING_REPORTS],
   ["/api/billing/dues-register", CAP.BILLING_DUES],
   ["/api/billing/audit", CAP.BILLING_AUDIT],
-  ["/api/approvals", [CAP.BILLING_MASTER, CAP.GINIFLOW_TEST_CANCEL_DECIDE, CAP.BOOKING_APPROVE]],
+  [
+    "/api/approvals",
+    [
+      CAP.BILLING_MASTER,
+      CAP.GINIFLOW_TEST_CANCEL_DECIDE,
+      CAP.BOOKING_APPROVE,
+      CAP.LAB_REPORT_RELEASE_DECIDE,
+    ],
+  ],
   ["/api/home-stats", null],
   ["/api/reports", CAP.ANALYTICS],
   ["/api/reports/opd", CAP.OPD_SUMMARY],

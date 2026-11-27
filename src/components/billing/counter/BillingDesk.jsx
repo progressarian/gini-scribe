@@ -3,6 +3,7 @@ import { useBlocker } from "react-router-dom";
 import {
   useCounterPatients,
   useDeposit,
+  useDiscardBillEdit,
   useDiscardDraft,
   useOpenDraft,
   usePatientSchemeList,
@@ -29,6 +30,8 @@ import ScannedReportLines from "./ScannedReportLines";
 import DiscountCodeBox from "./DiscountCodeBox";
 import TotalsAndPayment from "./TotalsAndPayment";
 import BillActions from "./BillActions";
+import MembershipBox from "./MembershipBox";
+import MembershipsPanel from "./MembershipsPanel";
 import PriceChanges from "./PriceChanges";
 import BillRefunds from "./BillRefunds";
 import DepositPanel from "./DepositPanel";
@@ -56,6 +59,12 @@ export const DESK_TABS = {
     label: "Refunds",
     tabId: "bc-tab-refunds",
     panelId: "bc-panel-refunds",
+  },
+  memberships: {
+    key: "memberships",
+    label: "Memberships",
+    tabId: "bc-tab-memberships",
+    panelId: "bc-panel-memberships",
   },
   requests: {
     key: "requests",
@@ -153,8 +162,10 @@ function useLeaveGuard(bill) {
   const [leaving, setLeaving] = useState(null);
   const saveDraft = useSaveDraft();
   const discardDraft = useDiscardDraft();
+  const discardEdit = useDiscardBillEdit();
   const isDraft = bill?.status === "draft";
-  const edited = isDraft && baseline !== null && bill.version !== baseline;
+  const editingFinal = Boolean(bill?.editing);
+  const edited = editingFinal || (isDraft && baseline !== null && bill.version !== baseline);
   const held = useRef(false);
   held.current = edited;
 
@@ -184,7 +195,13 @@ function useLeaveGuard(bill) {
   const settle = (mutation, message) => async () => {
     setLeaving({ busy: true, error: null });
     try {
-      await mutation.mutateAsync({ billId: bill.id, visitId: bill.visit_id });
+      if (mutation) {
+        await mutation.mutateAsync({
+          billId: bill.id,
+          visitId: bill.visit_id,
+          version: bill.version,
+        });
+      }
       setLeaving(null);
       blocker.proceed?.();
     } catch (e) {
@@ -195,10 +212,15 @@ function useLeaveGuard(bill) {
   const dialog = leaving && (
     <LeaveDraftDialog
       saved={bill?.saved}
+      editing={editingFinal ? bill.bill_no : null}
       busy={leaving.busy}
       error={leaving.error}
-      onSave={settle(saveDraft, "This draft could not be saved")}
-      onDiscard={settle(discardDraft, "This draft could not be discarded")}
+      onSave={editingFinal ? settle(null, "") : settle(saveDraft, "This draft could not be saved")}
+      onDiscard={
+        editingFinal
+          ? settle(discardEdit, "The edit could not be discarded")
+          : settle(discardDraft, "This draft could not be discarded")
+      }
       onStay={() => {
         setLeaving(null);
         blocker.reset?.();
@@ -673,6 +695,7 @@ export default function BillingDesk({
                               />
                             }
                           />
+                          <MembershipBox bill={bill} onBill={setBill} />
                           <BillActions
                             bill={bill}
                             onBill={setBill}
@@ -683,6 +706,9 @@ export default function BillingDesk({
                             }}
                             onRefunded={refreshBill}
                             onPricesChanged={() => reopenVisit(bill.visit_id)}
+                            patientName={
+                              (selected || duePatient || feePatient || sentPatient)?.name
+                            }
                             schemes={schemes || []}
                             needsCategory={needsCategory}
                             opening={openDraft.isPending}
@@ -728,6 +754,12 @@ export default function BillingDesk({
           {tab === DESK_TABS.refunds.key && (
             <Panel tab={DESK_TABS.refunds}>
               <RefundsBoard onOpen={takePaymentOn} />
+            </Panel>
+          )}
+
+          {tab === DESK_TABS.memberships.key && (
+            <Panel tab={DESK_TABS.memberships}>
+              <MembershipsPanel />
             </Panel>
           )}
 

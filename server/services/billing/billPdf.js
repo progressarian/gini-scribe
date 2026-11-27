@@ -425,6 +425,15 @@ export async function billView(billId, db = pool) {
   ]);
   const byLine = new Map(taxes.rows.map((row) => [row.id, row]));
   const visit = visits.rows[0] ?? {};
+  const membership = bill.membership_card_id
+    ? (
+        await db.query(
+          `SELECT card_no, consult_left, dietitian_left, dietitian_total FROM membership_cards
+            WHERE id = $1`,
+          [bill.membership_card_id],
+        )
+      ).rows[0]
+    : null;
   return {
     bill: {
       ...bill,
@@ -451,6 +460,7 @@ export async function billView(billId, db = pool) {
     credited: Math.round(Number(visit.credited ?? 0) * 100),
     healthray_paid: Math.round(Number(visit.healthray_paid ?? 0) * 100),
     prepaid_paid: Math.round(Number(visit.prepaid_paid ?? 0) * 100),
+    membership: membership ?? null,
     hospital: marks.hospital,
     logo: marks.logo,
   };
@@ -478,6 +488,36 @@ const BANNER = {
     note: "This bill was cancelled and is not payable.",
   },
 };
+
+export function revisionBannerHtml(bill) {
+  if (isCreditNote(bill) || bill?.status !== "final") return "";
+  if (bill.editing) {
+    return `<div class="bp-banner bp-draft">BEING EDITED — NOT FINAL
+    <span class="bp-banner-note">This bill is being changed at the counter. Print it again once the change is saved.</span>
+  </div>`;
+  }
+  if (!bill.revision_no) return "";
+  const when = bill.revised_at ? ` on ${momentText(bill.revised_at)}` : "";
+  return `<div class="bp-banner">${escapeHtml(`Revised bill — revision ${bill.revision_no}${when}`)}
+    <span class="bp-banner-note">${escapeHtml("This copy replaces every earlier print of this bill number.")}</span>
+  </div>`;
+}
+
+export function membershipHtml(view) {
+  const card = view?.membership;
+  if (!card || isCreditNote(view.bill)) return "";
+  const left = [
+    `${card.consult_left} consultation${card.consult_left === 1 ? "" : "s"} left`,
+    card.dietitian_total
+      ? `${card.dietitian_left} dietitian visit${card.dietitian_left === 1 ? "" : "s"} left`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return `<div class="bp-banner">${escapeHtml(`Membership card ${card.card_no}`)}
+    <span class="bp-banner-note">${escapeHtml(left)}</span>
+  </div>`;
+}
 
 export function creditBannerHtml(view) {
   if (!isCreditNote(view?.bill)) return "";
@@ -721,6 +761,8 @@ export function buildBillHtml(view) {
   ${titleHtml(documentTitle(bill, gst))}
   ${creditBannerHtml(view)}
   ${bannerHtml(bill)}
+  ${revisionBannerHtml(bill)}
+  ${membershipHtml(view)}
   ${infoHtml(view)}
   ${itemsTableHtml(view, gst, closing)}
 </div>`;

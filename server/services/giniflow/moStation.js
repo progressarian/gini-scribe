@@ -31,7 +31,12 @@ import { machineForTest } from "../../../shared/machineStages.js";
 import { ALLERGY_NOT_ASKED } from "../../../shared/giniflowAllergy.js";
 import { LAB_ONLY_DOCTOR, labOnlyPredicate } from "./labOnlyVisits.js";
 import { TESTS_HOLD_SQL, chiefWaitClock } from "./testsHold.js";
-import { CHECKED_IN_SQL } from "./stepSql.js";
+import {
+  CHECKED_IN_SQL,
+  PATIENT_SEARCH_SQL,
+  QUEUE_TOKEN_SQL,
+  patientSearchParams,
+} from "./stepSql.js";
 
 export const CLOSEABLE_CATEGORY = "in_control";
 
@@ -102,6 +107,7 @@ const QUEUE_SQL = `
          a.pre_visit_compliance,
          first_ev.occurred_at AS checked_in_at,
          last_ev.occurred_at  AS status_since,
+         ${QUEUE_TOKEN_SQL("v", "doc")} AS queue_token,
          hold.tests_pending,
          hold.tests_ready_at,
          (SELECT count(*)::int FROM giniflow_lab_orders o
@@ -125,18 +131,11 @@ const QUEUE_SQL = `
          -- MO can see is only part of the day, and a phone number is never sent
          -- to the client at all, so it is unsearchable anywhere else. Digits are
          -- compared to digits so "98765 43210" finds "+91-9876543210".
-         ($3::text IS NULL
-          OR p.name ILIKE '%' || $3 || '%'
-          OR p.file_no ILIKE '%' || $3 || '%'
-          OR ($4::text <> '' AND (
-               regexp_replace(COALESCE(p.phone, ''), '\\D', '', 'g') LIKE '%' || $4 || '%'
-               OR EXISTS (
-                    SELECT 1 FROM unnest(COALESCE(p.alt_phone, '{}'::text[])) ap
-                     WHERE regexp_replace(ap, '\\D', '', 'g') LIKE '%' || $4 || '%')))
-         ) AS matches
+         ${PATIENT_SEARCH_SQL("p", "$3", "$4")} AS matches
     FROM giniflow_visits v
     JOIN patients p ON p.id = v.patient_id
     LEFT JOIN doctors sd ON sd.id = v.assigned_sd_id
+    LEFT JOIN doctors doc ON doc.id = v.assigned_doctor_id
     LEFT JOIN appointments a ON a.id = v.appointment_id
     LEFT JOIN LATERAL (
       SELECT COUNT(*)::int + 1 AS visit_number FROM appointments pa
@@ -160,7 +159,11 @@ const QUEUE_SQL = `
      -- Samples-only patients belong to the lab track, not the MO's queue. See
      -- the same clause in doctorStation.js.
      AND NOT ${labOnlyPredicate("v", "$5")}
-   ORDER BY v.appointment_time NULLS LAST, first_ev.occurred_at NULLS LAST`;
+   ORDER BY ${QUEUE_TOKEN_SQL("v", "doc")} IS NULL,
+            ${QUEUE_TOKEN_SQL("v", "doc")},
+            CASE WHEN ${QUEUE_TOKEN_SQL("v", "doc")} IS NOT NULL THEN first_ev.occurred_at END,
+            v.appointment_time NULLS LAST,
+            first_ev.occurred_at NULLS LAST`;
 
 const waitMinutes = (row, now) => {
   const { since } = chiefWaitClock(row);
@@ -203,10 +206,7 @@ export async function getMoQueue(
   db = pool,
   { rxMoId = null, chiefId = null } = {},
 ) {
-  // A typed % or _ is a character the MO meant, not a wildcard.
-  const raw = typeof q === "string" && q.trim() ? q.trim() : null;
-  const term = raw ? raw.replace(/[%_\\]/g, "\\$&") : null;
-  const digits = raw ? raw.replace(/\D/g, "") : "";
+  const { raw, term, digits } = patientSearchParams(q);
   const [{ rows }, sla] = await Promise.all([
     db.query(QUEUE_SQL, [
       visitDate,
@@ -250,6 +250,7 @@ export async function getMoQueue(
       sdName: r.sd_name,
       assignedSdId: r.assigned_sd_id,
       appointmentTime: (r.appointment_time || "").slice(0, 5) || null,
+      token: r.queue_token ?? null,
       slot: null,
       checkedInAt: r.checked_in_at ? new Date(r.checked_in_at).toISOString() : null,
       statusSince: waitSince ? new Date(waitSince).toISOString() : null,

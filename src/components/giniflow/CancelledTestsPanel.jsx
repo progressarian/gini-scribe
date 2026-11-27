@@ -61,7 +61,7 @@ function UploadReport({ row, onUpload, busy }) {
       <input
         ref={input}
         type="file"
-        accept="application/pdf,image/*"
+        accept="application/pdf,image/*,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         hidden
         aria-label={`Report file for ${row.patient.name}`}
         onChange={(e) => {

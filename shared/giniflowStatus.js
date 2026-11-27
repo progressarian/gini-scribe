@@ -432,6 +432,23 @@ export const compareQueue = (a, b) => {
   return (b.statusMinutes ?? 0) - (a.statusMinutes ?? 0);
 };
 
+export const TOKEN_QUEUE_COLUMN = "sd";
+
+const arrivalTime = (card) => (card.arrivedAt ? new Date(card.arrivedAt).getTime() : Infinity);
+
+export const compareTokenQueue = (a, b) => {
+  const at = a.token ?? null;
+  const bt = b.token ?? null;
+  if (at === null && bt === null) return compareQueue(a, b);
+  if (at === null) return 1;
+  if (bt === null) return -1;
+  if (at !== bt) return at - bt;
+  return arrivalTime(a) - arrivalTime(b);
+};
+
+export const queueComparator = (columnKey) =>
+  columnKey === TOKEN_QUEUE_COLUMN ? compareTokenQueue : compareQueue;
+
 export const CATEGORY_META = {
   worse_out_of_range: {
     icon: "🔴",

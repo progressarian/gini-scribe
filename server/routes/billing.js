@@ -12,6 +12,12 @@ import {
   BILLING_DESK_LABELS,
   BILLING_PRICING_LABELS,
   billingCancelSchema,
+  billingBillMembershipSchema,
+  billingMembershipDietitianSchema,
+  billingMembershipReverseSchema,
+  billingMembershipSearchQuerySchema,
+  billingEditSaveSchema,
+  billingEditVersionSchema,
   billingCategorySetSchema,
   billingConsultantSetSchema,
   billingPaymentModeSchema,
@@ -74,6 +80,9 @@ import { generateBillPdf, generateCreditNotePdf } from "../services/billing/bill
 import { generateReceiptPdf, generateRefundReceiptPdf } from "../services/billing/receiptPdf.js";
 import * as creditNotes from "../services/billing/creditNotes.js";
 import * as bills from "../services/billing/bills.js";
+import * as billEdit from "../services/billing/billEdit.js";
+import * as memberships from "../services/billing/membershipCards.js";
+import { listPlans } from "../services/billing/membershipPlans.js";
 import * as payments from "../services/billing/payments.js";
 import * as consultantChange from "../services/billing/consultantChange.js";
 import {
@@ -115,6 +124,7 @@ const router = Router();
 const BASE = "/billing";
 const desk = requireCapability(CAP.BILLING_DESK);
 const master = requireCapability(CAP.BILLING_MASTER);
+const editFinal = requireCapability(CAP.BILLING_EDIT_FINAL);
 
 const run = billingRoute;
 
@@ -492,6 +502,89 @@ router.post(
   validate(billingLinePriceSchema, BILLING_DESK_LABELS),
   run("Set this patient's price", 200, (req) =>
     bills.setLinePrice(req.params.billId, req.params.lineId, req.body, ctx(req)),
+  ),
+);
+
+router.get(
+  `${BASE}/memberships/plans`,
+  desk,
+  run("Membership plans on sale", 200, () => listPlans({ activeOnly: true })),
+);
+
+router.get(
+  `${BASE}/memberships/search`,
+  desk,
+  validateQuery(billingMembershipSearchQuerySchema, BILLING_DESK_LABELS),
+  run("Search membership cards", 200, (req) => memberships.searchCards(req.query)),
+);
+
+router.get(
+  `${BASE}/patients/:patientId/memberships`,
+  desk,
+  run("Patient membership cards", 200, (req) => memberships.cardsOfPatient(req.params.patientId)),
+);
+
+router.get(
+  `${BASE}/memberships/:cardId`,
+  desk,
+  run("Membership card", 200, (req) => memberships.cardDetail(req.params.cardId)),
+);
+
+router.post(
+  `${BASE}/memberships/:cardId/dietitian`,
+  desk,
+  validate(billingMembershipDietitianSchema, BILLING_DESK_LABELS),
+  run("Use a dietitian visit", 201, (req) =>
+    memberships.useDietitianManually(req.params.cardId, req.body, ctx(req)),
+  ),
+);
+
+router.post(
+  `${BASE}/memberships/uses/:useId/reverse`,
+  desk,
+  validate(billingMembershipReverseSchema, BILLING_DESK_LABELS),
+  run("Reverse a card use", 200, (req) =>
+    memberships.reverseUse(req.params.useId, req.body, ctx(req)),
+  ),
+);
+
+router.put(
+  `${BASE}/bills/:billId/membership`,
+  desk,
+  validate(billingBillMembershipSchema, BILLING_DESK_LABELS),
+  run("Apply a membership card", 200, (req) =>
+    bills.setMembershipCard(req.params.billId, req.body, ctx(req)),
+  ),
+);
+
+router.post(
+  `${BASE}/bills/:billId/edit/start`,
+  editFinal,
+  validate(billingEditVersionSchema, BILLING_DESK_LABELS),
+  run("Start editing a final bill", 200, (req) =>
+    billEdit.startEdit(req.params.billId, req.body, ctx(req)),
+  ),
+);
+
+router.get(
+  `${BASE}/bills/:billId/edit/preview`,
+  editFinal,
+  run("Preview a bill edit", 200, (req) => billEdit.previewEdit(req.params.billId)),
+);
+
+router.post(
+  `${BASE}/bills/:billId/edit/save`,
+  editFinal,
+  validate(billingEditSaveSchema, BILLING_DESK_LABELS),
+  run("Save a bill edit", 200, (req) => billEdit.saveEdit(req.params.billId, req.body, ctx(req))),
+);
+
+router.post(
+  `${BASE}/bills/:billId/edit/discard`,
+  editFinal,
+  validate(billingEditVersionSchema, BILLING_DESK_LABELS),
+  run("Discard a bill edit", 200, (req) =>
+    billEdit.discardEdit(req.params.billId, req.body, ctx(req)),
   ),
 );
 

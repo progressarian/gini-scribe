@@ -21,10 +21,11 @@ export function discountNote(discount) {
     .join(" · ");
 }
 
-export const discountProblem = ({ kind, value }) => {
+export const discountProblem = ({ kind, value }, { allowZero = false } = {}) => {
   const number = Number(value);
   if (!value.trim()) return "Enter the discount";
-  if (!(number > 0)) return "The discount must be more than 0";
+  if (allowZero && number === 0) return null;
+  if (!(number > 0)) return allowZero ? "Enter 0 or more" : "The discount must be more than 0";
   if (kind === "percent" && number > 100) return "A percent discount can't be more than 100%";
   return null;
 };

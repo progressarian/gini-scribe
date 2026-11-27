@@ -41,6 +41,7 @@
     "heic2any": "^0.0.4",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.32.0",
+    "mammoth": "^1.13.0",
     "pdfjs-dist": "^4.10.38",
     "pdfkit": "^0.18.0",
     "pg": "^8.11.3",

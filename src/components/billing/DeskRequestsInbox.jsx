@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import DeskRequestsPage from "../../pages/billing/DeskRequestsPage";
 import TestCancellationsPage from "../../pages/billing/TestCancellationsPage";
 import BookingApprovalsPage from "../../pages/BookingApprovalsPage";
+import ReportReleasesPage from "../../pages/billing/ReportReleasesPage";
 import useDeskRequestsLive from "../../queries/hooks/useDeskRequestsLive";
 import { useApprovalsWaiting } from "../../queries/hooks/useApprovals";
 import { useRequestFilters } from "./RequestFilters";
@@ -13,6 +14,7 @@ export const INBOX_TABS = {
   desk: { key: "desk", label: "Billing requests" },
   tests: { key: "tests", label: "Test cancellations" },
   bookings: { key: "bookings", label: "Booking limits" },
+  releases: { key: "releases", label: "Report release" },
 };
 
 export default function DeskRequestsInbox({ param = "tab", live = true, defaultStatus }) {
@@ -26,6 +28,7 @@ export default function DeskRequestsInbox({ param = "tab", live = true, defaultS
     waiting.desk && { ...INBOX_TABS.desk, count: waiting.deskCount },
     waiting.tests && { ...INBOX_TABS.tests, count: waiting.testsCount },
     waiting.bookings && { ...INBOX_TABS.bookings, count: waiting.bookingsCount },
+    waiting.releases && { ...INBOX_TABS.releases, count: waiting.releasesCount },
   ].filter(Boolean);
   if (!tabs.length) return null;
   const requested = params.get(param);
@@ -56,6 +59,8 @@ export default function DeskRequestsInbox({ param = "tab", live = true, defaultS
   const page =
     current.key === INBOX_TABS.bookings.key ? (
       <BookingApprovalsPage />
+    ) : current.key === INBOX_TABS.releases.key ? (
+      <ReportReleasesPage live={false} filters={filters} canDecide />
     ) : current.key === INBOX_TABS.tests.key ? (
       <TestCancellationsPage live={false} filters={filters} />
     ) : (

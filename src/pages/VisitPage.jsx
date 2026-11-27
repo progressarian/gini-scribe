@@ -2323,7 +2323,7 @@ export default function VisitPage() {
             if (!r.success) return;
             closeModal();
             // For lab reports with a file, extract and show review modal
-            if (d.doc_type === "lab_report" && d.base64) {
+            if (d.doc_type === "lab_report" && d.base64 && !/\.docx$/i.test(d.fileName || "")) {
               setExtracting(true);
               try {
                 const mediaType = d.fileName?.match(/\.pdf$/i)

@@ -34,6 +34,7 @@ import {
   extractFromFile,
 } from "../services/healthray/prescriptionExtractor.js";
 import { extractWithRetry, detectMediaType } from "../services/extraction.js";
+import { asViewableUpload } from "../services/officeToPdf.js";
 import {
   stripFormPrefix,
   canonicalMedKey,
@@ -368,9 +369,17 @@ export { sanitizeForStorageKey };
 // Upload file to Supabase Storage
 router.post("/documents/:id/upload-file", validate(fileUploadSchema), async (req, res) => {
   try {
-    const { base64, mediaType, fileName } = req.body;
     if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY)
       return res.status(400).json({ error: "Storage not configured" });
+    const {
+      buffer: fileBuffer,
+      fileName,
+      mediaType,
+    } = await asViewableUpload({
+      buffer: Buffer.from(req.body.base64, "base64"),
+      fileName: req.body.fileName,
+      mediaType: req.body.mediaType,
+    });
 
     const docId = req.params.id;
     const UUID_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -400,7 +409,6 @@ router.post("/documents/:id/upload-file", validate(fileUploadSchema), async (req
     const safeName = sanitizeForStorageKey(fileName);
     const storagePath = `patients/${patientId}/${docType}/${ts}_${safeName}`;
 
-    const fileBuffer = Buffer.from(base64, "base64");
     const uploadResp = await fetch(
       `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`,
       {

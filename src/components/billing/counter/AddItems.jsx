@@ -162,7 +162,7 @@ export default function AddItems({ bill, onBill, form }) {
     setProposed({ ...BLANK_PROPOSAL, name: search.trim() });
   };
 
-  if (bill.status !== "draft") return null;
+  if (!bill.editable) return null;
 
   return (
     <section className="bc-card bc-additems" aria-label="Add items">

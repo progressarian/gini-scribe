@@ -3,7 +3,7 @@ import api from "../../services/api";
 import {
   COLUMN_ENTRY_STATUS,
   STATUS_LABEL,
-  compareQueue,
+  queueComparator,
   slaKeyForStatus,
   SIDE_TRACK_COLUMNS,
 } from "../../../shared/giniflowStatus";
@@ -33,7 +33,7 @@ const restore = (queryClient, date, previous) => {
 const resort = (column) =>
   column.key === "done" || SIDE_TRACK_COLUMNS.includes(column.key)
     ? column.cards
-    : [...column.cards].sort(compareQueue);
+    : [...column.cards].sort(queueComparator(column.key));
 
 const withCards = (column, cards) => ({
   ...column,

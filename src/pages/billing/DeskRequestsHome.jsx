@@ -10,8 +10,8 @@ export default function DeskRequestsHome() {
       <header className="dri-home__head">
         <h1 className="dri-home__title">Desk requests</h1>
         <p className="dri-home__sub">
-          Refunds, items to add, repeat billing, test cancellations and bookings over a slot's
-          patient limit, waiting for an admin.
+          Refunds, items to add, repeat billing, test cancellations, bookings over a slot's patient
+          limit and home-collection reports to release before payment, waiting for an admin.
         </p>
       </header>
       <DeskRequestsInbox />

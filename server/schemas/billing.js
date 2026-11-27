@@ -729,6 +729,58 @@ export const billingConsultantFeeCopySchema = z.strictObject({
   date: date.refine(realDate, "must be a date like 2026-10-01").optional(),
 });
 
+const planCount = z
+  .number()
+  .int("must be a whole number")
+  .min(0, "must be 0 or more")
+  .max(1000, "can be at most 1000");
+
+const planFields = {
+  code: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z0-9_-]{2,30}$/, "must be 2 to 30 letters, digits, - or _"),
+  name: z.string().trim().min(1, "can't be blank").max(120),
+  price: z
+    .number()
+    .nonnegative("must be 0 or more")
+    .refine(twoDecimals, "can have at most 2 decimals (paise)")
+    .refine(withinMoney, TOO_MUCH),
+  consult_count: planCount,
+  dietitian_count: planCount,
+  lab_discount_pct: z.number().min(0).max(100).refine(twoDecimals, "can have at most 2 decimals"),
+  lab_excludes_outsourced: flag,
+};
+
+export const billingMembershipPlanCreateSchema = z
+  .strictObject(planFields)
+  .refine(
+    (plan) => plan.consult_count + plan.dietitian_count > 0,
+    "A plan must include at least one consultation or dietitian visit",
+  );
+
+export const billingMembershipPlanUpdateSchema = atLeastOne(z.strictObject(planFields).partial());
+
+export const billingMembershipSettingsSchema = z.strictObject({ dietitian_item_id: id.nullable() });
+
+const cardId = z.string().trim().regex(UUID_TEXT, "must be a membership card");
+
+export const billingBillMembershipSchema = z.strictObject({ card_id: cardId.nullable() });
+
+export const billingMembershipSearchQuerySchema = z.strictObject({
+  q: z.string().trim().min(2, "type at least 2 letters or digits").max(60),
+});
+
+export const billingMembershipDietitianSchema = z.strictObject({
+  patient_id: id,
+  note: z.string().trim().min(1, "can't be blank").max(500),
+});
+
+export const billingMembershipReverseSchema = z.strictObject({
+  reason: z.string().trim().min(1, "can't be blank").max(500),
+});
+
 export const BILLING_FIELD_LABELS = {
   code: "Code",
   name: "Name",
@@ -1005,6 +1057,7 @@ export const billingFinalDiscountSchema = deskObject(
     value: numberValue,
     reason: z.union([reason, z.null(), z.literal("")]).optional(),
     line_id: optionalUuid.optional(),
+    payback: z.enum(["as_paid", "cash", "deposit"]).optional(),
   },
   objectOnly('Send the discount as an object, like { kind: "percent", value: 10 }'),
 );
@@ -1069,6 +1122,10 @@ export const billingFinaliseSchema = deskObject({
 });
 
 export const billingCancelSchema = deskObject({ reason });
+
+export const billingEditVersionSchema = deskObject({ version: whole });
+
+export const billingEditSaveSchema = deskObject({ version: whole, reason });
 
 const paymentAmount = z.union([
   z

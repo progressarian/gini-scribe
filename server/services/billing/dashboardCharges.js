@@ -22,6 +22,7 @@ export const PHARMACY_LIVE_COLUMN = {
 };
 
 export const LINE_KIND = `CASE WHEN si.kind = 'consultation' THEN 'consultation'
+       WHEN lower(l.group_code) = 'membership' THEN 'consultation'
        WHEN l.lab_order_id IS NOT NULL OR si.kind = 'test' THEN 'test'
        ELSE 'other' END`;
 

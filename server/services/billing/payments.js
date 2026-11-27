@@ -814,7 +814,7 @@ function creditNoteRow(row) {
 async function refundOf(db, creditNoteId) {
   const { rows } = await db.query(
     `SELECT r.id, r.reason, r.requested_mode, r.approved_mode, r.mode_reason, r.decision_note,
-            b.credit_kind, b.manual_discount_reason
+            b.credit_kind, b.manual_discount_reason, b.payback_mode
        FROM bills b LEFT JOIN billing_requests r ON r.credit_note_id = b.id
       WHERE b.id = $1`,
     [creditNoteId],
@@ -836,8 +836,8 @@ async function refundOf(db, creditNoteId) {
   return {
     id: null,
     reason: row.manual_discount_reason ?? "Discount after the bill was final",
-    requested_mode: AS_PAID,
-    approved_mode: AS_PAID,
+    requested_mode: row.payback_mode ?? AS_PAID,
+    approved_mode: row.payback_mode ?? AS_PAID,
     mode_reason: null,
     decision_note: null,
   };

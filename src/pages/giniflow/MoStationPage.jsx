@@ -48,6 +48,7 @@ import LiveBadge from "../../components/giniflow/LiveBadge";
 import ReportsList from "../../components/giniflow/ReportsList";
 import "../../styles/giniflow-station.css";
 import StabilityChip from "../../components/giniflow/StabilityChip";
+import TokenChip from "../../components/giniflow/TokenChip";
 import StationNotice from "../../components/giniflow/StationNotice";
 import PrintRxButton from "../../components/giniflow/PrintRxButton";
 
@@ -381,6 +382,7 @@ function QueueRow({ card, active, onOpen, readOnly, viewOnly, now }) {
       <div className="si-slot">{card.slot}</div>
       <div className="si-name">
         {card.name}
+        <TokenChip token={card.token} className="si-token" />
         {viewOnly && <span className="si-viewonly">View only</span>}
       </div>
       <RowDetail card={card} now={now} />

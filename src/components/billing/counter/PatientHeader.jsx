@@ -4,7 +4,9 @@ import {
   useDeposit,
   usePatientSchemeList,
   useSetBillCategory,
+  usePatientMemberships,
 } from "../../../queries/hooks/useBilling";
+import { cardBalanceText } from "./MembershipBox";
 import { errorOf, fromPaise } from "../format";
 import LoadingCard from "./LoadingCard";
 import BillConsultant from "./BillConsultant";
@@ -95,6 +97,10 @@ export default function PatientHeader({
 }) {
   const { data: schemes } = usePatientSchemeList();
   const { data: deposit } = useDeposit(bill.patient_id);
+  const { data: memberCards = [] } = usePatientMemberships(
+    bill.patient_id,
+    `${bill.id}:${bill.status}`,
+  );
   const setCategory = useSetBillCategory();
   const current = bill.category || "";
   const chosen = form.value.chosen ?? current;
@@ -212,6 +218,19 @@ export default function PatientHeader({
         </span>
         {patient?.statusLabel && <span className="bc-head__state">{patient.statusLabel}</span>}
         {bill.payer_name && <span className="bc-head__payer">Payer: {bill.payer_name}</span>}
+        {memberCards
+          .filter((card) => card.status === "active")
+          .slice(0, 2)
+          .map((card) => (
+            <span
+              key={card.id}
+              className="bc-head__member"
+              title={`${card.plan.name} — ${cardBalanceText(card)}`}
+            >
+              Member {card.card_no} · {card.consult_left} consultation
+              {card.consult_left === 1 ? "" : "s"} left
+            </span>
+          ))}
         {deposit?.balance > 0 && (
           <button
             type="button"

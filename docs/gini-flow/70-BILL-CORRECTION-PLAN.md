@@ -1,6 +1,6 @@
 # 70 — Correcting a final bill (credit and re-issue)
 
-Status: **decided 17 Oct 2026** (§9). Not built yet.
+Status: **decided 17 Oct 2026** (§9). Not built — superseded for counter corrections by `98-BILL-EDIT-IN-PLACE-PLAN.md` (edit in place, same number).
 
 ## 1. The problem
 

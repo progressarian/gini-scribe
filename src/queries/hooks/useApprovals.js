@@ -12,7 +12,8 @@ export function useApprovalAccess() {
   const desk = hasCapability(doctor, CAP.BILLING_MASTER);
   const tests = hasCapability(doctor, CAP.GINIFLOW_TEST_CANCEL_DECIDE);
   const bookings = hasCapability(doctor, CAP.BOOKING_APPROVE);
-  return { desk, tests, bookings, any: desk || tests || bookings };
+  const releases = hasCapability(doctor, CAP.LAB_REPORT_RELEASE_DECIDE);
+  return { desk, tests, bookings, releases, any: desk || tests || bookings || releases };
 }
 
 export function useApprovalsWaiting() {
@@ -28,12 +29,14 @@ export function useApprovalsWaiting() {
   const desk = data?.deskRequests ?? 0;
   const tests = data?.testCancellations ?? 0;
   const bookings = data?.bookingApprovals ?? 0;
+  const releases = data?.reportReleases ?? 0;
   return {
     ...access,
     deskCount: desk,
     testsCount: tests,
     bookingsCount: bookings,
-    total: desk + tests + bookings,
+    releasesCount: releases,
+    total: desk + tests + bookings + releases,
     loaded: !!data,
   };
 }

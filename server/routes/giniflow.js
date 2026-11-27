@@ -14,9 +14,12 @@ import {
   giniflowMoveSchema,
   giniflowNoticeSchema,
   giniflowBehindQuerySchema,
+  giniflowTokenQuerySchema,
+  giniflowTokenSchema,
 } from "../schemas/index.js";
 import { CAPABILITIES as CAP } from "../../shared/permissions.js";
 import { STATUS_LABEL } from "../../shared/giniflowStatus.js";
+import { isUuid } from "../../shared/crmReferralRules.js";
 import { publishNotice, realtimeStatus } from "../services/giniflow/realtimeBus.js";
 import { getStationTimes, pauseVisit, resumeVisit } from "../services/giniflow/statusEngine.js";
 import {
@@ -41,6 +44,7 @@ import {
   getLabTrack,
 } from "../services/giniflow/labOnlyVisits.js";
 import { setPriority, reorderColumn, moveToColumn } from "../services/giniflow/queue.js";
+import { listTokenQueue, setToken, TokenError } from "../services/giniflow/token.js";
 import { seedDemoDay, cleanDemoDay, demoAllowed } from "../services/giniflow/demo.js";
 import { addClient, removeClient, hubStatus } from "../services/giniflow/eventHub.js";
 import { trackByToken } from "../services/giniflow/journey.js";
@@ -519,6 +523,44 @@ const queueError = (res, e, label) => {
   }
   return handleError(res, e, label);
 };
+
+router.get(
+  "/giniflow/tokens",
+  requireCapability(CAP.GINIFLOW_TOKEN_ASSIGN),
+  validateQuery(giniflowTokenQuerySchema),
+  async (req, res) => {
+    try {
+      const { doctor, from, to, q } = req.query;
+      res.json(
+        await listTokenQueue({
+          date: await resolveDate(req.query.date),
+          doctorIds: doctor,
+          from,
+          to,
+          q,
+        }),
+      );
+    } catch (e) {
+      handleError(res, e, "Gini Flow token queue");
+    }
+  },
+);
+
+router.patch(
+  "/giniflow/visits/:id/token",
+  requireCapability(CAP.GINIFLOW_TOKEN_ASSIGN),
+  validate(giniflowTokenSchema),
+  async (req, res) => {
+    if (!isUuid(req.params.id))
+      return res.status(400).json({ error: "This visit link is not valid. Refresh the list." });
+    try {
+      res.json(await setToken(req.params.id, req.body.token, req.doctor?.doctor_id ?? null));
+    } catch (e) {
+      if (e instanceof TokenError) return res.status(e.status).json({ error: e.message });
+      handleError(res, e, "Gini Flow set token");
+    }
+  },
+);
 
 router.patch(
   "/giniflow/visits/:id/priority",

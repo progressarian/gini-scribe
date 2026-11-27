@@ -31,6 +31,8 @@ export const billingKeys = {
     activeOnly ? "active" : "all",
   ],
   discounts: (filters) => ["billing", "discounts", filters ?? {}],
+  membershipPlans: () => ["billing", "membership-plans"],
+  membershipSettings: () => ["billing", "membership-settings"],
   consultantFees: (filters) => ["billing", "consultant-fees", filters ?? {}],
   consultantFeesNotPriced: (filters) => ["billing", "consultant-fees-not-priced", filters ?? {}],
   usage: (kind, key) => ["billing", "usage", kind, key],
@@ -629,4 +631,43 @@ export function useBillingImportFailedRows() {
       };
     },
   });
+}
+
+export function useMembershipPlans() {
+  return useQuery({
+    queryKey: billingKeys.membershipPlans(),
+    queryFn: () => read(`${MASTER}/membership-plans`),
+  });
+}
+
+export function useCreateMembershipPlan() {
+  return useBillingMutation(
+    async (body) => (await api.post(`${MASTER}/membership-plans`, body)).data,
+  );
+}
+
+export function useUpdateMembershipPlan() {
+  return useBillingMutation(
+    async ({ id, ...body }) => (await api.put(`${MASTER}/membership-plans/${id}`, body)).data,
+  );
+}
+
+export function useSetMembershipPlanActive() {
+  return useBillingMutation(
+    async ({ id, is_active }) =>
+      (await api.put(`${MASTER}/membership-plans/${id}/active`, { is_active })).data,
+  );
+}
+
+export function useMembershipSettings() {
+  return useQuery({
+    queryKey: billingKeys.membershipSettings(),
+    queryFn: () => read(`${MASTER}/membership-settings`),
+  });
+}
+
+export function useSaveMembershipSettings() {
+  return useBillingMutation(
+    async (body) => (await api.put(`${MASTER}/membership-settings`, body)).data,
+  );
 }

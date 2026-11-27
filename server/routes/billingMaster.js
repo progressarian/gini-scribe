@@ -26,6 +26,9 @@ import {
   billingItemCreateSchema,
   billingItemListQuerySchema,
   billingItemUpdateSchema,
+  billingMembershipPlanCreateSchema,
+  billingMembershipPlanUpdateSchema,
+  billingMembershipSettingsSchema,
   billingListQuerySchema,
   billingPaymentRuleCreateSchema,
   billingPaymentRuleUpdateSchema,
@@ -44,6 +47,7 @@ import * as rules from "../services/billing/categoryRules.js";
 import * as rates from "../services/billing/categoryRates.js";
 import * as paymentRules from "../services/billing/paymentRules.js";
 import * as discounts from "../services/billing/discountRules.js";
+import * as plans from "../services/billing/membershipPlans.js";
 import * as consultantFees from "../services/billing/consultantFees.js";
 import { listTaxCodes } from "../services/billing/taxCodes.js";
 import {
@@ -387,6 +391,42 @@ router.patch(
   run("Billing discount update", 200, (req) =>
     discounts.updateDiscountRule(idParam(req), req.body, ctx(req)),
   ),
+);
+router.get(
+  `${BASE}/membership-plans`,
+  master,
+  run("Membership plans", 200, () => plans.listPlans()),
+);
+router.post(
+  `${BASE}/membership-plans`,
+  master,
+  validate(billingMembershipPlanCreateSchema, BILLING_FIELD_LABELS),
+  run("Membership plan create", 201, (req) => plans.createPlan(req.body, ctx(req))),
+);
+router.put(
+  `${BASE}/membership-plans/:id`,
+  master,
+  validate(billingMembershipPlanUpdateSchema, BILLING_FIELD_LABELS),
+  run("Membership plan update", 200, (req) => plans.updatePlan(idParam(req), req.body, ctx(req))),
+);
+router.put(
+  `${BASE}/membership-plans/:id/active`,
+  master,
+  validate(billingActiveSchema, BILLING_FIELD_LABELS),
+  run("Membership plan active", 200, (req) =>
+    plans.setPlanActive(idParam(req), req.body.is_active, ctx(req)),
+  ),
+);
+router.get(
+  `${BASE}/membership-settings`,
+  master,
+  run("Membership settings", 200, () => plans.membershipSettings()),
+);
+router.put(
+  `${BASE}/membership-settings`,
+  master,
+  validate(billingMembershipSettingsSchema, BILLING_FIELD_LABELS),
+  run("Membership settings update", 200, (req) => plans.setMembershipSettings(req.body, ctx(req))),
 );
 router.put(
   `${BASE}/discounts/:id/active`,

@@ -609,6 +609,7 @@ export async function priceBill(input = {}, source = pool) {
     settings,
     draftRule,
     autoCodes,
+    membership: input.membership ?? null,
   };
   const lineManuals = lineList.map((line, index) =>
     cleanManualDiscount(line.manualDiscount, `Line ${index + 1}'s discount`),
@@ -622,6 +623,9 @@ export async function priceBill(input = {}, source = pool) {
     doctorId: line.doctorId ?? doctorId,
     kept: line.kept === true,
     agreedRate: line.agreedRate ?? null,
+    fixedRate: line.fixedRate ?? null,
+    fixedSource: line.fixedSource ?? null,
+    membershipBenefit: line.membershipBenefit ?? null,
   }));
   await primeLineItems(lineInputs, db);
   const context = {
@@ -631,6 +635,7 @@ export async function priceBill(input = {}, source = pool) {
     role: input.role,
     codesOnBill: 0,
     autoCodes,
+    membership: input.membership ?? null,
   };
   const { admitted, refused, priced, lineCodes } = await admitCodes(
     { codes, context, lineInputs, settings },

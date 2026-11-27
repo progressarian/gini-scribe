@@ -3,11 +3,14 @@ import { Sparkles } from "lucide-react";
 import {
   useAddCode,
   useRemoveCode,
+  useDiscardBillEdit,
   useSetBillDiscount,
   useSuggestedCodes,
 } from "../../../queries/hooks/useBilling";
 import { codeTyped, errorOf, fromPaise } from "../format";
 import { HOME_COLLECTION_CODE } from "../../../../shared/billingVocab.js";
+
+const TAKEN_ABOVE_BILL = "taken_above_bill";
 import FinalBillDiscount from "./FinalBillDiscount";
 import ManualDiscountFields, {
   discountDraft,
@@ -22,16 +25,20 @@ export default function DiscountCodeBox({ bill, onBill, form, patient }) {
   const [accepted, setAccepted] = useState(null);
   const [refused, setRefused] = useState(null);
   const setBillDiscount = useSetBillDiscount();
+  const discardEdit = useDiscardBillEdit();
+  const [overPaid, setOverPaid] = useState(null);
+  const [prefill, setPrefill] = useState(null);
   const [extra, setExtra] = useState(null);
   const [extraError, setExtraError] = useState(null);
   const [confirmHome, setConfirmHome] = useState(false);
   const isHome = (entered) => entered.toLowerCase() === HOME_COLLECTION_CODE.toLowerCase();
   const manual = bill.manual_discount;
+  const extraRules = { allowZero: Boolean(manual) };
   const manualTotal = (bill.discounts || [])
     .filter((entry) => entry.method === "manual")
     .reduce((sum, entry) => sum + entry.amount, 0);
 
-  const draft = bill.status === "draft";
+  const draft = bill.editable;
   const { data: suggested, isLoading: findingCodes } = useSuggestedCodes(bill.id, bill.version, {
     enabled: draft && bill.lines.length > 0,
   });
@@ -52,12 +59,27 @@ export default function DiscountCodeBox({ bill, onBill, form, patient }) {
   const applyCode = async (wanted, typed) => {
     setAccepted(null);
     setRefused(null);
+    setOverPaid(null);
     if (!wanted) return;
     try {
       onBill(await addCode.mutateAsync({ billId: bill.id, visitId: bill.visit_id, code: wanted }));
       setAccepted(`${wanted} applied`);
       if (typed) form.drop("code");
     } catch (e) {
+      const data = e?.response?.data;
+      if (bill.editing && data?.code === TAKEN_ABOVE_BILL) {
+        setOverPaid({
+          collected: data.collected,
+          wanted: data.wanted_payable,
+          by: `the code ${wanted}`,
+          discount: {
+            kind: "flat",
+            value: String((data.collected - data.wanted_payable) / 100),
+            reason: `Code ${wanted}`,
+          },
+        });
+        return;
+      }
       setRefused(errorOf(e, `The code ${wanted} could not be used on this bill`));
     }
   };
@@ -67,8 +89,27 @@ export default function DiscountCodeBox({ bill, onBill, form, patient }) {
     applyCode(code.trim(), true);
   };
 
+  const giveAsCreditNote = async () => {
+    setExtraError(null);
+    try {
+      onBill(
+        await discardEdit.mutateAsync({
+          billId: bill.id,
+          visitId: bill.visit_id,
+          version: bill.version,
+        }),
+      );
+      setPrefill({ ...overPaid.discount, at: Date.now() });
+      setOverPaid(null);
+      setExtra(null);
+    } catch (e) {
+      setExtraError(errorOf(e, "The edit could not be closed"));
+    }
+  };
+
   const saveExtra = async (cleared) => {
     setExtraError(null);
+    setOverPaid(null);
     const value = cleared ? null : extra;
     try {
       onBill(
@@ -82,6 +123,16 @@ export default function DiscountCodeBox({ bill, onBill, form, patient }) {
       );
       setExtra(null);
     } catch (e) {
+      const data = e?.response?.data;
+      if (bill.editing && data?.code === TAKEN_ABOVE_BILL && value) {
+        setOverPaid({
+          collected: data.collected,
+          wanted: data.wanted_payable,
+          by: "this discount",
+          discount: { kind: value.kind, value: value.value.trim(), reason: value.reason.trim() },
+        });
+        return;
+      }
       setExtraError(errorOf(e, "The bill discount could not be saved"));
     }
   };
@@ -103,7 +154,7 @@ export default function DiscountCodeBox({ bill, onBill, form, patient }) {
     <section className="bc-card bc-disc" aria-label="Discount codes">
       <h3 className="bc-card__heading">Discounts</h3>
 
-      {bill.status === "draft" && (
+      {draft && (
         <form className="bc-disc__row" onSubmit={apply}>
           <label className="bc-disc__field">
             <span className="sr-only">Discount code</span>
@@ -173,7 +224,7 @@ export default function DiscountCodeBox({ bill, onBill, form, patient }) {
           {codes.map((entered) => (
             <li key={entered} className="bc-chip">
               <span>{chipText(entered)}</span>
-              {bill.status === "draft" && (
+              {draft && (
                 <button
                   type="button"
                   className="bc-chip__x"
@@ -280,7 +331,7 @@ export default function DiscountCodeBox({ bill, onBill, form, patient }) {
             className="bc-mdisc__form"
             onSubmit={(event) => {
               event.preventDefault();
-              if (!discountProblem(extra)) saveExtra(false);
+              if (!discountProblem(extra, extraRules)) saveExtra(Number(extra.value) === 0);
             }}
           >
             <p className="bc-hint">
@@ -291,7 +342,7 @@ export default function DiscountCodeBox({ bill, onBill, form, patient }) {
               <button
                 type="submit"
                 className="st-btn st-btn-grn"
-                disabled={Boolean(discountProblem(extra)) || setBillDiscount.isPending}
+                disabled={Boolean(discountProblem(extra, extraRules)) || setBillDiscount.isPending}
               >
                 {setBillDiscount.isPending ? "Saving…" : "Apply discount"}
               </button>
@@ -301,14 +352,42 @@ export default function DiscountCodeBox({ bill, onBill, form, patient }) {
             </div>
           </form>
         )}
+        {overPaid && (
+          <div className="bc-unfinal-banner" role="alert">
+            <p>
+              The patient has paid <strong>{fromPaise(overPaid.collected)}</strong>. With{" "}
+              {overPaid.by} the bill comes to <strong>{fromPaise(overPaid.wanted)}</strong>, so{" "}
+              <strong>{fromPaise(overPaid.collected - overPaid.wanted)}</strong> must go back to
+              them. A paid bill gives money back through a discount credit note.
+            </p>
+            <div className="bc-head__row">
+              <button
+                type="button"
+                className="st-btn st-btn-grn"
+                disabled={discardEdit.isPending}
+                onClick={giveAsCreditNote}
+              >
+                {discardEdit.isPending ? "Opening…" : "Give it as a credit note…"}
+              </button>
+              <button type="button" className="st-btn st-btn-g" onClick={() => setOverPaid(null)}>
+                Keep editing
+              </button>
+            </div>
+            <p className="bc-hint">
+              This closes the edit without saving other changes, then opens the discount with your{" "}
+              {overPaid.discount.kind === "percent"
+                ? `${overPaid.discount.value}%`
+                : fromPaise(overPaid.collected - overPaid.wanted)}{" "}
+              filled in. You choose: refund in cash now, or keep it in the patient&apos;s deposit.
+            </p>
+          </div>
+        )}
         {extraError && <div className="bc-err">{extraError}</div>}
       </div>
 
-      <FinalBillDiscount bill={bill} patient={patient} onBill={onBill} />
+      <FinalBillDiscount bill={bill} patient={patient} onBill={onBill} prefill={prefill} />
 
-      {bill.status !== "draft" && nothing && (
-        <div className="bc-disc__none">No discount applied</div>
-      )}
+      {!draft && nothing && <div className="bc-disc__none">No discount applied</div>}
     </section>
   );
 }

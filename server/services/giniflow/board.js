@@ -6,7 +6,7 @@ import {
   BOARD_COLUMNS,
   BACK_FOR_TESTS,
   OFF_BOARD_STATUSES,
-  compareQueue,
+  queueComparator,
   columnForStatus,
   STATUS_LABEL,
   slaKeyForStatus,
@@ -37,7 +37,7 @@ import {
   chiefWaitClock,
 } from "./testsHold.js";
 import { getMachines } from "./machineCatalog.js";
-import { JOURNEY_STEPS_SQL } from "./stepSql.js";
+import { JOURNEY_STEPS_SQL, QUEUE_TOKEN_SQL, FIRST_CHECK_IN_SQL } from "./stepSql.js";
 import { holdsForVisits } from "./coordinatorHold.js";
 import { journeyProgress } from "../../../shared/journeyOrder.js";
 import { machineForTest } from "../../../shared/machineStages.js";
@@ -191,6 +191,9 @@ const BOARD_SQL = `
          v.priority_reason,
          v.queue_position,
          v.queue_column,
+         ${QUEUE_TOKEN_SQL("v", "doc")}           AS queue_token,
+         CASE WHEN ${QUEUE_TOKEN_SQL("v", "doc")} IS NOT NULL
+              THEN ${FIRST_CHECK_IN_SQL("v")} END AS arrived_at,
          v.healthray_status,
          v.healthray_status_at,
          v.behind_station,
@@ -1233,6 +1236,8 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       pausedMinutes: Math.round(Number(row.paused_ms_total || 0) / 60000),
       priority: row.priority,
       priorityReason: row.priority_reason,
+      token: row.queue_token ?? null,
+      arrivedAt: row.arrived_at ? new Date(row.arrived_at).toISOString() : null,
       queuePosition:
         row.queue_column && row.queue_column === columnForStatus(row.current_status)
           ? row.queue_position
@@ -1410,7 +1415,7 @@ export async function getDayBoard(visitDate, slaConfig, now = boardClock(visitDa
       cards:
         col.key === "done" || SIDE_TRACK_COLUMNS.includes(col.key)
           ? items
-          : [...items].sort(compareQueue),
+          : [...items].sort(queueComparator(col.key)),
     };
   });
 

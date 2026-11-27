@@ -263,14 +263,17 @@ async function revenueConsultants(filters, db) {
     `WITH base AS (
        SELECT ${LINE_CONSULTANT} AS consultant, ${LINE_AMOUNTS},
               CASE WHEN si.kind = 'consultation' THEN 'consultation'
+                   WHEN lower(l.group_code) = 'membership' THEN 'consultation'
                    WHEN l.lab_order_id IS NOT NULL OR si.kind = 'test' THEN 'test'
-                   ELSE 'other' END AS kind
+                   ELSE 'other' END AS kind,
+              lower(l.group_code) = 'membership' AS membership
          FROM ${LINES_FROM}
          LEFT JOIN service_items si ON si.id = l.service_item_id
         WHERE ${FINAL} AND ${scope.sql}
      ), rolled AS (
        SELECT consultant, ${rolledFlags(dims)}, ${LINE_SUMS},
               SUM(actual) FILTER (WHERE kind = 'consultation') AS consultations,
+              SUM(actual) FILTER (WHERE membership) AS memberships,
               SUM(actual) FILTER (WHERE kind = 'test') AS tests,
               SUM(actual) FILTER (WHERE kind = 'other') AS other
          FROM base
@@ -290,6 +293,7 @@ async function revenueConsultants(filters, db) {
         col("label", "Consultant", "text"),
         col("lines", "Lines", "count"),
         col("consultations", "Consultations"),
+        col("memberships", "of which Membership"),
         col("tests", "Tests"),
         col("other", "Other items"),
         ...LINE_MONEY,

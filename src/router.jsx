@@ -117,6 +117,7 @@ const ServicesSettingsPage = lazyWithRetry(() => import("./pages/billing/Service
 const CategoryRatesPage = lazyWithRetry(() => import("./pages/billing/CategoryRatesPage"));
 const ConsultantFeesPage = lazyWithRetry(() => import("./pages/billing/ConsultantFeesPage"));
 const DiscountsSettingsPage = lazyWithRetry(() => import("./pages/billing/DiscountsSettingsPage"));
+const MembershipPlansPage = lazyWithRetry(() => import("./pages/billing/MembershipPlansPage"));
 const DeskRequestsHome = lazyWithRetry(() => import("./pages/billing/DeskRequestsHome"));
 const BillingSettingsPage = lazyWithRetry(() => import("./pages/billing/BillingSettingsPage"));
 const BillingImportPage = lazyWithRetry(() => import("./pages/billing/BillingImportPage"));
@@ -138,6 +139,7 @@ const SettingsLayout = lazyWithRetry(() => import("./pages/SettingsLayout"));
 const MedicineCollectionPage = lazyWithRetry(() => import("./pages/MedicineCollectionPage"));
 const GiniFlowManagerPage = lazyWithRetry(() => import("./pages/giniflow/FlowManagerPage"));
 const GiniFlowReportsPage = lazyWithRetry(() => import("./pages/giniflow/FlowReportsPage"));
+const GiniFlowTokensPage = lazyWithRetry(() => import("./pages/giniflow/TokenQueuePage"));
 const GiniFlowStationsPage = lazyWithRetry(() => import("./pages/giniflow/StationsLauncherPage"));
 const GiniFlowTriagePage = lazyWithRetry(() => import("./pages/giniflow/TriageBoardPage"));
 const GiniFlowVitalsPage = lazyWithRetry(() => import("./pages/giniflow/VitalsStationPage"));
@@ -316,6 +318,7 @@ const router = createBrowserRouter([
                   { path: "category-rates", element: lazyEl(CategoryRatesPage) },
                   { path: "consultant-fees", element: lazyEl(ConsultantFeesPage) },
                   { path: "discounts", element: lazyEl(DiscountsSettingsPage) },
+                  { path: "membership-plans", element: lazyEl(MembershipPlansPage) },
                   { path: "desk-requests", element: <Navigate to="/desk-requests" replace /> },
                   {
                     path: "test-cancellations",
@@ -342,6 +345,7 @@ const router = createBrowserRouter([
               { path: "/giniflow/stations", element: lazyEl(GiniFlowStationsPage) },
               { path: "/giniflow/manager", element: lazyEl(GiniFlowManagerPage) },
               { path: "/giniflow/reports", element: lazyEl(GiniFlowReportsPage) },
+              { path: "/giniflow/tokens", element: lazyEl(GiniFlowTokensPage) },
               { path: "/giniflow/triage", element: lazyEl(GiniFlowTriagePage) },
               { path: "/giniflow/station/vitals", element: lazyEl(GiniFlowVitalsPage) },
               { path: "/giniflow/station/reception", element: lazyEl(GiniFlowReceptionPage) },

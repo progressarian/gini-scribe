@@ -7,6 +7,9 @@ import { advanceMachineTest } from "./machineStation.js";
 import { machineForTest } from "../../../shared/machineStages.js";
 import { getMachines } from "./machineCatalog.js";
 import { opensLabGate } from "../../../shared/labPayment.js";
+import { ORDER_HOME_COLLECTED_SQL } from "./homeCollection.js";
+import { RELEASE_APPROVED_SQL } from "./reportRelease.js";
+import { RELEASE_PAYMENT_PENDING } from "../../../shared/reportRelease.js";
 import { syncBiomarkersFromLatestLabs } from "../healthray/db.js";
 import { catalogRowsFor, catalogTestsByIds, patientFor } from "./labCatalog.js";
 import {
@@ -30,6 +33,8 @@ const trimmed = (v, max = 200) =>
 const orderContext = async (orderId, db) => {
   const { rows } = await db.query(
     `SELECT o.id, o.kind, o.sample_status, o.report_file_url, o.payment_status,
+            ${ORDER_HOME_COLLECTED_SQL("o")} AS home_collected,
+            ${RELEASE_APPROVED_SQL("o.visit_id")} AS released,
             v.id AS visit_id, v.visit_date::text AS visit_date,
             v.patient_id, v.appointment_id,
             COALESCE(json_agg(t.test_name ORDER BY t.test_name)
@@ -475,11 +480,13 @@ export async function saveResults(
 
   const order = await orderContext(orderId, db);
   await assertNotHeld(db, { orderId });
-  if (!opensLabGate(order.payment_status)) {
+  if (!opensLabGate(order.payment_status) && !(order.home_collected && order.released)) {
     throw bad(
-      order.payment_status === "insurance_claim"
-        ? "The insurance claim is not approved yet — results cannot be recorded against this order"
-        : "Payment is not cleared for this order",
+      order.home_collected
+        ? RELEASE_PAYMENT_PENDING
+        : order.payment_status === "insurance_claim"
+          ? "The insurance claim is not approved yet — results cannot be recorded against this order"
+          : "Payment is not cleared for this order",
       409,
     );
   }

@@ -39,10 +39,17 @@ function ReplacedBy({ bill, bills }) {
   return <div className="bc-head__meta">Replaced by {by?.bill_no ?? "a corrected bill"}</div>;
 }
 
+const isEmptyDraft = (b) =>
+  b.status === "draft" &&
+  !b.bill_no &&
+  !(b.lines?.length ?? 0) &&
+  b.totals.actual === 0 &&
+  b.totals.paid === 0;
+
 export default function PreviousBills({ bills, onOpen }) {
   const [refunding, setRefunding] = useState(null);
   const [showReplaced, setShowReplaced] = useState(false);
-  const invoices = bills.filter((b) => b.bill_type !== "credit_note");
+  const invoices = bills.filter((b) => b.bill_type !== "credit_note" && !isEmptyDraft(b));
   const replaced = invoices.filter((b) => b.replaced_by_bill_id).length;
   const shown = showReplaced ? invoices : invoices.filter((b) => !b.replaced_by_bill_id);
   if (!invoices.length) return null;
@@ -85,6 +92,10 @@ export default function PreviousBills({ bills, onOpen }) {
                   {(b.finalised_at || b.cancelled_at) && (
                     <div className="bc-head__meta">{when(b.finalised_at || b.cancelled_at)}</div>
                   )}
+                  {b.editing && <span className="badge b-amb">Being edited</span>}
+                  {!b.editing && b.revision_no > 0 && (
+                    <span className="badge b-blu">Revision {b.revision_no}</span>
+                  )}
                   <ReplacedBy bill={b} bills={bills} />
                   <Credits bill={b} />
                 </td>
@@ -104,16 +115,18 @@ export default function PreviousBills({ bills, onOpen }) {
                       Open
                     </button>
                   )}
-                  {b.status === "final" && b.credits?.request?.status !== "pending" && (
-                    <button
-                      type="button"
-                      className="st-btn st-btn-g"
-                      aria-label={`Refund on bill ${b.bill_no}`}
-                      onClick={() => setRefunding(b)}
-                    >
-                      Refund…
-                    </button>
-                  )}
+                  {b.status === "final" &&
+                    !b.editing &&
+                    b.credits?.request?.status !== "pending" && (
+                      <button
+                        type="button"
+                        className="st-btn st-btn-g"
+                        aria-label={`Refund on bill ${b.bill_no}`}
+                        onClick={() => setRefunding(b)}
+                      >
+                        Refund…
+                      </button>
+                    )}
                   <PdfButton
                     className="st-btn"
                     href={billPdfHref(b.id)}

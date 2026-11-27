@@ -10197,3 +10197,33 @@
   border-radius: 999px;
   vertical-align: middle;
 }
+
+.gf .rel-panel {
+  border-left: 3px solid var(--amb);
+  background: var(--amb-l);
+  border-radius: 6px;
+  padding: 12px 14px;
+}
+.gf .rel-panel--wait {
+  border-left-color: var(--amb);
+}
+.gf .rel-panel--ok {
+  border-left-color: var(--grn);
+  background: var(--grn-l);
+}
+.gf .rel-panel__text {
+  margin: 4px 0 8px;
+  font-size: 13px;
+  color: var(--ink2);
+}
+.gf .rel-panel__meta {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--ink3);
+  overflow-wrap: anywhere;
+}
+
+.gf .si-token {
+  margin-left: 6px;
+  vertical-align: middle;
+}

@@ -3373,3 +3373,79 @@ body > [role="dialog"][aria-modal="true"] .bc-cc__warn {
     overflow-x: visible;
   }
 }
+.bc-edit-summary {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0;
+}
+.bc-edit-summary ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.bc-edit-totals {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 16px;
+  margin: 0;
+}
+.bc-edit-totals dt {
+  margin: 0;
+}
+.bc-edit-totals dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.gf .bc-member {
+  display: grid;
+  gap: 10px;
+}
+.gf .bc-member__list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.gf .bc-member__choice,
+.gf .bc-member__applied {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--bd);
+  border-radius: var(--r, 8px);
+}
+.gf .bc-member__card {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.gf .bc-member__sell {
+  display: grid;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--bd);
+}
+.gf .bc-head__member {
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--blu, #1d4ed8);
+  background: var(--blu-l, #eff6ff);
+  border: 1px solid currentColor;
+  border-radius: 999px;
+}
+.bc-radio {
+  display: block;
+  margin: 6px 0;
+  cursor: pointer;
+}
+.bc-radio input:focus-visible {
+  outline: 2px solid var(--tl, #0f766e);
+  outline-offset: 2px;
+}

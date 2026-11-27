@@ -17,6 +17,7 @@ import {
   revertStart,
 } from "./stationLock.js";
 import { publish } from "./eventHub.js";
+import { asViewableUpload } from "../officeToPdf.js";
 import { CHECKED_IN_SQL, assertCheckedIn } from "./stepSql.js";
 import { outsourcedTestNames } from "../billing/testMatch.js";
 import { t as clipText } from "../../utils/helpers.js";
@@ -25,7 +26,6 @@ import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config
 import { advanceStatus, cancelPauseTx, pauseVisitTx, resumeVisitTx } from "./statusEngine.js";
 import { advanceMachineTest } from "./machineStation.js";
 import {
-  HOME_PAYMENT_PENDING,
   HOME_RELEASE_STEP,
   opensLabGate,
   opensLabGateFor,
@@ -39,6 +39,8 @@ import {
   homeVisit,
   refuseSiteForNonHome,
 } from "./homeCollection.js";
+import { RELEASE_APPROVED_SQL, RELEASE_STATE_SQL, releaseApproved } from "./reportRelease.js";
+import { RELEASE_PAYMENT_PENDING } from "../../../shared/reportRelease.js";
 import {
   BOARD_COLUMNS,
   STATUS_LABEL,
@@ -163,6 +165,8 @@ const unifiedFromOrder = (o) => ({
   collectedAtSite: o.collectedAtSite,
   collectedBy: o.collectedBy,
   collectedAt: o.collectedAt,
+  homePaymentPending: o.homeCollected && !o.paid,
+  releaseRequest: o.releaseRequest,
 });
 
 const unifiedFromCase = (r) => ({
@@ -191,6 +195,8 @@ const unifiedFromCase = (r) => ({
   collectedAtSite: r.collectedAtSite,
   collectedBy: r.collectedBy,
   collectedAt: r.collectedAt,
+  homePaymentPending: r.homePaymentPending,
+  releaseRequest: r.releaseRequest,
 });
 
 export const LAB_GROUPS = FILTER_TO_TARGETS;
@@ -308,6 +314,7 @@ export async function getLabQueue(
             ${HELD_ORDER_SQL("o")} AS cancel_held,
             ${HOME_COLLECTION_SQL("v")} AS home_collection,
             ${ORDER_COLLECTED_SQL("o")} AS collected_info,
+            ${RELEASE_STATE_SQL("o.visit_id")} AS release_request,
             COALESCE((SELECT json_agg(json_build_object('caseNo', lc.case_no, 'tests', lc.test_names)
                                       ORDER BY lc.case_no)
                         FROM lab_cases lc
@@ -413,9 +420,10 @@ export async function getLabQueue(
     const elsewhere = busyElsewhere(busy, r.visit_id, LAB_STATION);
     const collected = r.collected_info || null;
     const homeCollected = collected?.site === "home";
+    const released = homeCollected && r.release_request?.status === "approved";
     const moving = opensLabGateFor(r.payment_status, { homeCollected });
     const offered = moving ? orderAction(r, room) : null;
-    const next = paid || offered?.to !== HOME_RELEASE_STEP ? offered : null;
+    const next = paid || released || offered?.to !== HOME_RELEASE_STEP ? offered : null;
     const homeCollectable =
       !!r.home_collection &&
       HOME_FROM_STATUSES.includes(r.sample_status) &&
@@ -439,17 +447,24 @@ export async function getLabQueue(
       paymentStatus: r.payment_status,
       sampleStatus: r.sample_status,
       paid,
+      released,
+      homeCollected,
+      releaseRequest: homeCollected ? r.release_request || null : null,
       bucket: SAMPLE_STATUS_TO_BUCKET[r.sample_status] || "pending",
       steps: stepsFor(r.sample_status, paid, moving),
       nextAction: startHeld ? null : next,
       blockedReason: !paid
-        ? homeCollected
-          ? `Payment pending — ₹${outstandingOf(r)}; the report is held until reception records it`
-          : r.home_collection
-            ? `Payment pending — collect ₹${outstandingOf(r)} at the home and tell reception`
-            : r.payment_status === "insurance_claim"
-              ? `Insurance claim submitted — waiting for approval (₹${outstandingOf(r)} outstanding)`
-              : `Waiting for reception to clear payment — ₹${outstandingOf(r)} outstanding`
+        ? released
+          ? `Payment pending — ₹${outstandingOf(r)}; admin approved releasing the report`
+          : homeCollected
+            ? r.release_request?.status === "pending"
+              ? `Payment pending — ₹${outstandingOf(r)}; waiting for admin to approve the report release`
+              : `Payment pending — ₹${outstandingOf(r)}; the report is held until it is paid or an admin approves the release`
+            : r.home_collection
+              ? `Payment pending — collect ₹${outstandingOf(r)} at the home and tell reception`
+              : r.payment_status === "insurance_claim"
+                ? `Insurance claim submitted — waiting for approval (₹${outstandingOf(r)} outstanding)`
+                : `Waiting for reception to clear payment — ₹${outstandingOf(r)} outstanding`
         : startHeld
           ? busyReason(elsewhere)
           : null,
@@ -674,6 +689,9 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
             -- day), so bool_or reads it without widening the GROUP BY.
             bool_or(${labOnlyPredicate("v", "$3")}) AS lab_only,
             bool_or(${HOME_COLLECTION_SQL("v")}) AS home_collection,
+            ${RELEASE_STATE_SQL("v.id")} AS release_request,
+            (SELECT ls.status FROM giniflow_visit_steps ls
+              WHERE ls.visit_id = v.id AND ls.step_catalog_id = 'lab_billing') AS lab_billing_status,
             count(*)::int AS cases,
             count(*) FILTER (WHERE NOT c.results_synced)::int AS pending,
             count(*) FILTER (WHERE c.results_synced
@@ -827,6 +845,9 @@ async function getHealthrayCases(visitDate, q = null, db = pool, room = null) {
         (!room || room === LAB_ROOMS.COLLECTION) &&
         cases.some((c) => !c.cancelHeld && stageIndex(c) < stageIndexOf("drawing")),
       collectedAtSite: taken?.site ?? null,
+      homePaymentPending:
+        taken?.site === "home" && !!r.lab_billing_status && r.lab_billing_status !== "done",
+      releaseRequest: taken?.site === "home" ? r.release_request || null : null,
       collectedBy: taken?.by ?? null,
       collectedAt: taken ? taken.collectedAt || taken.at : null,
       patientId: r.patient_id,
@@ -1105,11 +1126,14 @@ export async function advanceSample(
         status: 409,
       });
     }
-    if (!opensLabGateFor(payment, { homeCollected, to })) {
+    if (
+      !opensLabGateFor(payment, { homeCollected, to }) &&
+      !(homeCollected && to === HOME_RELEASE_STEP && (await releaseApproved(client, visitId)))
+    ) {
       throw Object.assign(
         new Error(
           homeCollected
-            ? HOME_PAYMENT_PENDING
+            ? RELEASE_PAYMENT_PENDING
             : payment === "insurance_claim"
               ? "Insurance claim is not approved yet — the sample cannot be collected"
               : "Payment is not cleared — reception must take payment before the sample",
@@ -1268,20 +1292,25 @@ export async function storeReportObject({
   patientId,
   folder = `giniflow/${kind === "machine" ? "machine" : "lab"}`,
 }) {
-  const buffer = Buffer.from(base64, "base64");
+  const original = Buffer.from(base64, "base64");
   const MAX_BYTES = 5 * 1024 * 1024;
-  if (buffer.length > MAX_BYTES) {
+  if (original.length > MAX_BYTES) {
     throw Object.assign(new Error("Report is larger than 5 MB"), { status: 413 });
   }
+  const {
+    buffer,
+    fileName: storedName,
+    mediaType: storedType,
+  } = await asViewableUpload({ buffer: original, fileName, mediaType });
 
-  const safeName = String(fileName || "report.pdf").replace(/[^a-zA-Z0-9._-]/g, "_");
+  const safeName = String(storedName || "report.pdf").replace(/[^a-zA-Z0-9._-]/g, "_");
   const storagePath = `${folder}/${patientId}/${Date.now()}_${safeName}`;
 
   const resp = await fetch(`${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-      "Content-Type": mediaType,
+      "Content-Type": storedType || "application/pdf",
       "x-upsert": "true",
     },
     body: buffer,
@@ -1291,7 +1320,7 @@ export async function storeReportObject({
   }
 
   const url = `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${storagePath}`;
-  return { url, storagePath, safeName, bytes: buffer.length };
+  return { url, storagePath, safeName, mediaType: storedType, bytes: buffer.length };
 }
 
 export async function uploadReport(
@@ -1313,7 +1342,8 @@ export async function uploadReport(
 
   const { rows } = await db.query(
     `SELECT o.id, o.visit_id, o.payment_status, o.sample_status, o.report_file_url, o.uploaded_at,
-            o.kind, v.patient_id
+            o.kind, v.patient_id, ${ORDER_HOME_COLLECTED_SQL("o")} AS home_collected,
+            ${RELEASE_APPROVED_SQL("o.visit_id")} AS released
        FROM giniflow_lab_orders o
        JOIN giniflow_visits v ON v.id = o.visit_id
       WHERE o.id = $1`,
@@ -1321,11 +1351,16 @@ export async function uploadReport(
   );
   if (!rows.length) throw Object.assign(new Error("Order not found"), { status: 404 });
   await assertCheckedIn(db, rows[0].visit_id);
-  if (!opensLabGate(rows[0].payment_status)) {
-    throw Object.assign(new Error("Payment is not cleared for this order"), { status: 409 });
+  if (!opensLabGate(rows[0].payment_status) && !(rows[0].home_collected && rows[0].released)) {
+    throw Object.assign(
+      new Error(
+        rows[0].home_collected ? RELEASE_PAYMENT_PENDING : "Payment is not cleared for this order",
+      ),
+      { status: 409, ...(rows[0].home_collected ? { code: "release_needed" } : {}) },
+    );
   }
   assertSampleDrawn(rows[0]);
-  if (rows[0].report_file_url && rows[0].kind === "lab" && (replace || confirmAdditional)) {
+  if (rows[0].report_file_url && (replace || confirmAdditional)) {
     return replaceOrderReport(rows[0], { base64, fileName, mediaType, actorId }, db);
   }
   if (rows[0].report_file_url && !confirmAdditional) {
@@ -1371,8 +1406,8 @@ async function replaceOrderReport(order, { base64, fileName, mediaType, actorId 
   );
   await db.query(
     `INSERT INTO giniflow_lab_order_events (lab_order_id, track, status, actor_role, actor_id)
-     VALUES ($1, 'sample', 'report_replaced', 'lab', $2)`,
-    [order.id, actorId],
+     VALUES ($1, 'sample', 'report_replaced', $3, $2)`,
+    [order.id, actorId, order.kind === "machine" ? "machine" : "lab"],
   );
   await promoteLabReport(order.id, db);
   const oldPath = String(order.report_file_url || "").split(`/${STORAGE_BUCKET}/`)[1];
@@ -1525,13 +1560,17 @@ async function caseCollectedAtHome(db, caseNo) {
 }
 
 async function assertHomePaymentCleared(db, visitId) {
+  if (await releaseApproved(db, visitId)) return;
   const { rows } = await db.query(
     `SELECT s.status FROM giniflow_visit_steps s
       WHERE s.visit_id = $1 AND s.step_catalog_id = 'lab_billing'`,
     [visitId],
   );
   if (rows[0]?.status !== "done") {
-    throw Object.assign(new Error(HOME_PAYMENT_PENDING), { status: 409 });
+    throw Object.assign(new Error(RELEASE_PAYMENT_PENDING), {
+      status: 409,
+      code: "release_needed",
+    });
   }
 }
 
@@ -1771,9 +1810,8 @@ export async function markLabCaseAction(
   refuseSiteForNonHome(site, visit);
   if (!undo) await assertCheckedIn(db, resolvedVisitId);
 
-  if (action === "report_uploaded" && !undo && (await caseCollectedAtHome(db, caseNo))) {
-    await assertHomePaymentCleared(db, resolvedVisitId);
-  }
+  const homeCase = action === "report_uploaded" && !undo && (await caseCollectedAtHome(db, caseNo));
+  if (homeCase) await assertHomePaymentCleared(db, resolvedVisitId);
 
   if ((action === "sample_taken" || action === "drawing_started") && !undo && !drawnAtBench) {
     const what = action === "drawing_started" ? "start the collection" : "collect the sample";
@@ -1783,7 +1821,12 @@ export async function markLabCaseAction(
     }
   }
 
-  if (action === "report_uploaded" && !undo && (await isLabOnlyVisit(db, resolvedVisitId))) {
+  if (
+    action === "report_uploaded" &&
+    !undo &&
+    !homeCase &&
+    (await isLabOnlyVisit(db, resolvedVisitId))
+  ) {
     await assertLabBillingCleared(db, resolvedVisitId, "the report");
   }
 
@@ -2067,7 +2110,9 @@ export async function uploadLabCaseReport(
   }
   const visitId = await resolveVisitForCase(db, caseNo);
   await assertCheckedIn(db, visitId);
-  if (await isLabOnlyVisit(db, visitId)) {
+  if (await caseCollectedAtHome(db, caseNo)) {
+    await assertHomePaymentCleared(db, visitId);
+  } else if (await isLabOnlyVisit(db, visitId)) {
     await assertLabBillingCleared(db, visitId, "the report");
   }
   if (c.pdf_storage_path && !confirmAdditional) {
@@ -2078,11 +2123,15 @@ export async function uploadLabCaseReport(
     });
   }
 
-  const buffer = Buffer.from(base64, "base64");
+  const original = Buffer.from(base64, "base64");
   const MAX_BYTES = 5 * 1024 * 1024;
-  if (buffer.length > MAX_BYTES) {
+  if (original.length > MAX_BYTES) {
     throw Object.assign(new Error("Report is larger than 5 MB"), { status: 413 });
   }
+  const viewable = await asViewableUpload({ buffer: original, fileName, mediaType });
+  const { buffer } = viewable;
+  fileName = viewable.fileName;
+  mediaType = viewable.mediaType;
 
   const ext = mediaType === "image/jpeg" ? "jpg" : mediaType === "image/png" ? "png" : "pdf";
   const safeName = String(fileName || `lab_case_${caseNo}.${ext}`).replace(/[^a-zA-Z0-9._-]/g, "_");

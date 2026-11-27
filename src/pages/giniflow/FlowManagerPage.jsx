@@ -15,7 +15,7 @@ import {
   PRIORITY_LABEL,
   PRIORITY_ICON,
   canDropInColumn,
-  compareQueue,
+  queueComparator,
   CATEGORIES,
   CATEGORY_META,
   STATION_STATUSES,
@@ -52,6 +52,8 @@ import LiveBadge from "../../components/giniflow/LiveBadge";
 import { dayClock } from "../../lib/giniflowTime";
 import useDebounced from "../../hooks/useDebounced";
 import StabilityChip from "../../components/giniflow/StabilityChip";
+import TokenChip from "../../components/giniflow/TokenChip";
+import TokenQueue from "../../components/giniflow/TokenQueue";
 import "../../styles/giniflow.css";
 import { homeSampleText } from "../../../shared/homeCollection.js";
 
@@ -522,6 +524,7 @@ function PatientCard({
             {initials(card.name)}
           </div>
           <div className="pc-name">{card.name}</div>
+          <TokenChip token={card.token} />
           {card.priority && card.priority !== "normal" && (
             <span
               className={`pc-pri pri-${card.priority}`}
@@ -915,7 +918,8 @@ function Column({
   const bodyRef = useRef(null);
   const [dropIndex, setDropIndex] = useState(null);
   const cards = useMemo(
-    () => (ORDERABLE(column.key) ? [...column.cards].sort(compareQueue) : column.cards),
+    () =>
+      ORDERABLE(column.key) ? [...column.cards].sort(queueComparator(column.key)) : column.cards,
     [column.cards, column.key],
   );
   const sameColumn = drag?.column === column.key;
@@ -1018,6 +1022,34 @@ function Column({
         ))}
         {accepts && sameColumn && dropIndex === cards.length && <div className="drop-line" />}
       </div>
+    </div>
+  );
+}
+
+function TokenDrawer({ open, date, onClose }) {
+  const panelRef = useRef(null);
+  useDismissable(open, onClose, panelRef);
+  return (
+    <div
+      className={`drawer tq-drawer${open ? " open" : ""}`}
+      ref={panelRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="tq-drawer-title"
+      aria-hidden={!open}
+    >
+      <div className="dr-hd tq-drawer__hd">
+        <div>
+          <div className="dr-title" id="tq-drawer-title">
+            Chief Endocrinologist tokens
+          </div>
+          <div className="dr-sub">Lowest token is seen first; the same token goes by arrival</div>
+        </div>
+        <button type="button" className="tq-drawer__close" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      <div className="dr-body">{open && <TokenQueue date={date} compact />}</div>
     </div>
   );
 }
@@ -1682,6 +1714,7 @@ export default function FlowManagerPage() {
   const role = useAuthStore((s) => s.currentDoctor?.role);
   const canEditSla = hasCapability(role, CAP.GINIFLOW_SLA_ADMIN);
   const canManageQueue = hasCapability(role, CAP.GINIFLOW_MANAGE_QUEUE);
+  const canToken = hasCapability(role, CAP.GINIFLOW_TOKEN_ASSIGN);
   // Reassigning is the coordinator's triage capability, not the queue one: a
   // lab tech holding GINIFLOW_BOARD reads this board too, and moving a patient
   // onto a consultant's list is the same decision the triage board gates.
@@ -1690,6 +1723,7 @@ export default function FlowManagerPage() {
   const queryClient = useQueryClient();
   const now = useTick();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [tokensOpen, setTokensOpen] = useState(false);
   const [statFilter, setStatFilter] = useState(null);
   const [openVisit, setOpenVisit] = useState(null);
   const [slaError, setSlaError] = useState("");
@@ -2006,6 +2040,16 @@ export default function FlowManagerPage() {
               📊 Day report
             </a>
           )}
+          {canToken && (
+            <button
+              type="button"
+              className="rbtn"
+              data-gf-toggle
+              onClick={() => setTokensOpen(true)}
+            >
+              🎫 Chief tokens
+            </button>
+          )}
           <button className="rbtn" data-gf-toggle onClick={() => setDrawerOpen(true)}>
             ⚙ Time budgets
           </button>
@@ -2268,6 +2312,10 @@ export default function FlowManagerPage() {
       </div>
 
       {drawerOpen && <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)} />}
+      {tokensOpen && <div className="drawer-backdrop" onClick={() => setTokensOpen(false)} />}
+      {canToken && (
+        <TokenDrawer open={tokensOpen} date={date || istDay} onClose={() => setTokensOpen(false)} />
+      )}
       <SlaDrawer
         open={drawerOpen}
         slaConfig={slaConfig}

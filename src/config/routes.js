@@ -141,7 +141,13 @@ export const PAGE_CAPABILITIES = {
   "/settings/category-rates": CAP.BILLING_MASTER,
   "/settings/consultant-fees": CAP.BILLING_MASTER,
   "/settings/discounts": CAP.BILLING_MASTER,
-  "/desk-requests": [CAP.BILLING_MASTER, CAP.GINIFLOW_TEST_CANCEL_DECIDE, CAP.BOOKING_APPROVE],
+  "/settings/membership-plans": CAP.BILLING_MASTER,
+  "/desk-requests": [
+    CAP.BILLING_MASTER,
+    CAP.GINIFLOW_TEST_CANCEL_DECIDE,
+    CAP.BOOKING_APPROVE,
+    CAP.LAB_REPORT_RELEASE_DECIDE,
+  ],
   "/settings/desk-requests": CAP.BILLING_MASTER,
   "/settings/test-cancellations": CAP.GINIFLOW_TEST_CANCEL_DECIDE,
   "/settings/bulk-import": CAP.BILLING_MASTER,
@@ -168,6 +174,7 @@ export const PAGE_CAPABILITIES = {
   // the floor board.
   "/giniflow/manager": CAP.GINIFLOW_BOARD,
   "/giniflow/reports": CAP.GINIFLOW_REPORTS,
+  "/giniflow/tokens": CAP.GINIFLOW_TOKEN_ASSIGN,
   // The pre-OPD triage board writes the clinical category, so it is narrower
   // than the read-only board above: coordinator and admin.
   "/giniflow/triage": CAP.GINIFLOW_TRIAGE,

@@ -76,7 +76,18 @@ function cleanAgreedRate(value) {
   return paise(rate);
 }
 
-function rateFor(row, agreed, packageRate = null) {
+const FIXED_SOURCES = ["frozen", "membership"];
+
+function cleanFixedRate(value, source) {
+  if (value === undefined || value === null) return null;
+  if (!Number.isSafeInteger(value) || value < 0 || !FIXED_SOURCES.includes(source)) {
+    throw httpError(400, "A fixed line price must be paise, 0 or more, with a known source");
+  }
+  return { value, source };
+}
+
+function rateFor(row, agreed, packageRate = null, fixed = null) {
+  if (fixed !== null) return fixed;
   if (packageRate !== null) return { value: packageRate, source: "package" };
   const categoryRate = pick(
     row.own_rate === null ? null : paise(row.own_rate),
@@ -151,7 +162,18 @@ export async function primeLineItems(inputs, db) {
 }
 
 export async function lineActual(
-  { item, quantity, category, date, kept, agreedRate, packageRate } = {},
+  {
+    item,
+    quantity,
+    category,
+    date,
+    kept,
+    agreedRate,
+    packageRate,
+    fixedRate,
+    fixedSource,
+    membershipBenefit,
+  } = {},
   db = pool,
 ) {
   const itemId = cleanItem(item);
@@ -167,12 +189,13 @@ export async function lineActual(
       `${row.name} can't be billed`,
     );
   }
-  if (!row.is_active && !(kept && row.doctor_removed)) {
+  const fixed = cleanFixedRate(fixedRate, fixedSource);
+  if (!row.is_active && !(kept && row.doctor_removed) && fixed?.source !== "frozen") {
     throw httpError(409, `${row.name} is deactivated`);
   }
   checkQuantity(row, count);
   if (code) await checkBillable(db, code);
-  const rate = rateFor(row, cleanAgreedRate(agreedRate), cleanAgreedRate(packageRate));
+  const rate = rateFor(row, cleanAgreedRate(agreedRate), cleanAgreedRate(packageRate), fixed);
   const billName = pick(row.own_bill_name, row.parent_bill_name, row.name);
   const billCode = pick(row.own_bill_code, row.parent_bill_code, null);
   const actual = count * rate.value;
@@ -198,6 +221,7 @@ export async function lineActual(
     base_price: paise(row.base_price),
     rate: rate.value,
     rate_source: rate.source,
+    membership_benefit: rate.source === "membership" ? (membershipBenefit ?? null) : null,
     price_per_patient: row.price_per_patient,
     price_missing: row.price_per_patient && rate.source === "base",
     bill_name: billName.value,
@@ -271,6 +295,7 @@ async function lineDiscountRules(line, context, codes, payment, db) {
     doctor_id: line.doctor_id,
     visit_type: line.visit_type,
     is_outsourced: line.is_outsourced,
+    is_test: line.kind === "test",
   };
   const fullPay = payment.patient_pays === "full";
   const fits = (rule) => fullPay || rule.applies_on_scheme_rate;
@@ -333,6 +358,7 @@ export async function priceLine(input = {}, db = pool) {
     role: input.role,
     codesOnBill,
     autoCodes: input.autoCodes ?? [],
+    membership: input.membership ?? null,
   };
   const fullPay = payment.patient_pays === "full";
   const { rules, refused } = await lineDiscountRules(

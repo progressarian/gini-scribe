@@ -9,11 +9,15 @@ import { auditFields, lockRow, readNumber } from "./common.js";
 import { ISSUED_GST_COLUMNS, issuedGstReady } from "./issuedGst.js";
 import {
   moneyOn,
+  noteDue,
+  payOut,
   refundLegs,
   refundPlan,
   releaseTestOrders,
   restoreDepositLegs,
 } from "./payments.js";
+import { assertNotEditing } from "./editLock.js";
+import { syncMemberships } from "./membershipCards.js";
 import { httpError, inTransaction } from "./transaction.js";
 import { cleanManualDiscount, manualAmount } from "./manualDiscounts.js";
 import { allocate } from "./priceBill.js";
@@ -67,7 +71,8 @@ const CREDITED = ["quantity", ...PARTS];
 const LINES_SQL = `
   SELECT l.id, l.line_no, l.is_live, l.quantity, ${[...COPIED, ...PARTS].map((key) => `l.${key}`).join(", ")},
          o.id AS order_id, o.sample_status, pk.name AS package_name,
-         ${CREDITED.map((key) => `c.${key} AS credited_${key}`).join(", ")}
+         ${CREDITED.map((key) => `c.${key} AS credited_${key}`).join(", ")},
+         dc.given AS discount_credited
     FROM bill_lines l
     LEFT JOIN giniflow_lab_orders o ON o.id = l.lab_order_id
     LEFT JOIN service_items pk ON pk.id = l.package_item_id
@@ -75,6 +80,11 @@ const LINES_SQL = `
       SELECT ${CREDITED.map((key) => `COALESCE(SUM(x.${key}), 0) AS ${key}`).join(", ")}
         FROM bill_lines x WHERE x.credited_line_id = l.id
     ) c ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(SUM(x.patient_payable), 0) AS given
+        FROM bill_lines x JOIN bills n ON n.id = x.bill_id
+       WHERE x.credited_line_id = l.id AND n.credit_kind = 'discount'
+    ) dc ON TRUE
    WHERE l.bill_id = $1
    ORDER BY l.line_no, l.id`;
 
@@ -173,6 +183,7 @@ function lineOf(row) {
     credited_quantity: hundredths(row.credited_quantity),
     original: amountsOf(row, ""),
     credited: amountsOf(row, "credited_"),
+    discount_credited: paise(row.discount_credited ?? 0),
     order: row.order_id
       ? { id: row.order_id, done: !UNDRAWN_SAMPLE_STATUSES.includes(row.sample_status) }
       : null,
@@ -206,6 +217,7 @@ async function loadCredit(db, billId, { lock }) {
     bill = rows[0];
   }
   assertCreditable(bill);
+  await assertNotEditing(db, bill.id, "refunding it");
   const { rows } = await db.query(LINES_SQL, [bill.id]);
   const { rows: prior } = await db.query(
     `SELECT COALESCE(SUM(round_off), 0) AS round_off, COALESCE(SUM(claim_amount), 0) AS claim
@@ -602,6 +614,7 @@ export async function creditNoteIn(client, input, ctx) {
         WHERE id = ANY($1::uuid[]) AND is_live`,
       [freed, ctx?.actorId ?? null],
     );
+    await syncMemberships(client, bill.id, ctx);
   }
   const claimGone =
     bill.claim_status === "pending" &&
@@ -871,13 +884,36 @@ const ONLY_PAYABLE = (share) => ({
   listed_actual: 0,
 });
 
+export const PAYBACK_MODES = [AS_PAID, "cash", "deposit"];
+
 function cleanFinalDiscount(input) {
   const discount = cleanManualDiscount({ kind: input?.kind, value: input?.value }, "The discount");
   if (!discount) throw httpError(400, "Enter the discount");
   const text = typeof input?.reason === "string" ? input.reason.trim() : "";
   if (text.length > 1000) throw httpError(400, "The reason can be at most 1000 characters");
   const lineId = input?.line_id ? cleanUuid(input.line_id, "line") : null;
-  return { discount, reason: text || null, lineId };
+  const payback = input?.payback ?? AS_PAID;
+  if (!PAYBACK_MODES.includes(payback)) {
+    throw httpError(400, "Choose how the money goes back: cash, deposit or the way it was paid");
+  }
+  return { discount, reason: text || null, lineId, payback };
+}
+
+function wholeBillDiscount(lines, lineId) {
+  return lines
+    .filter((line) => !lineId || line.id === lineId)
+    .filter((line) => line.quantity > line.credited_quantity)
+    .reduce(
+      (sum, line) => {
+        const left = line.quantity - line.credited_quantity;
+        return {
+          gross: sum.gross + share(line.original.actual_amount, left, line.quantity),
+          given:
+            sum.given + share(line.original.discount, left, line.quantity) + line.discount_credited,
+        };
+      },
+      { gross: 0, given: 0 },
+    );
 }
 
 function planDiscount(loaded, { discount, lineId }) {
@@ -893,7 +929,18 @@ function planDiscount(loaded, { discount, lineId }) {
     .map((line) => ({ line, left: line.original.patient_payable - line.credited.patient_payable }))
     .filter((entry) => entry.left > 0);
   const base = open.reduce((sum, entry) => sum + entry.left, 0);
-  const amount = manualAmount(discount, base);
+  const whole = wholeBillDiscount(lines, lineId);
+  const amount =
+    discount.kind === "percent"
+      ? Math.min(base, Math.max(0, manualAmount(discount, whole.gross) - whole.given))
+      : manualAmount(discount, base);
+  if (!amount && discount.kind === "percent" && whole.given > 0) {
+    throw httpError(
+      409,
+      `${billLabel(bill)} already has ₹${rupees(whole.given)} off its ₹${rupees(whole.gross)}, which is ${discount.value}% or more — nothing more to give`,
+      { gross: whole.gross, given: whole.given },
+    );
+  }
   if (!amount) {
     throw httpError(
       409,
@@ -908,6 +955,7 @@ function planDiscount(loaded, { discount, lineId }) {
     open.map((entry) => entry.left),
   );
   return {
+    whole,
     lines: shares.map(({ index, share }) => ({
       line: open[index].line,
       quantity: 0,
@@ -946,6 +994,8 @@ export async function previewFinalDiscount(billId, input, db = pool) {
       bill_name: entry.line.name,
       amount: entry.piece.patient_payable,
     })),
+    gross: plan.whole.gross,
+    already_given: plan.whole.given,
     ...(await discountOutcome(db, loaded.bill.id, plan.totals.payable)),
   };
 }
@@ -963,7 +1013,7 @@ export async function discountFinalBill(billId, input, ctx, db = pool) {
     const { rows: marked } = await client.query(
       `UPDATE bills SET credit_kind = 'discount', manual_discount_kind = $2,
           manual_discount_value = $3, manual_discount_reason = $4, manual_discount_by = $5,
-          manual_discount_at = NOW()
+          manual_discount_at = NOW(), payback_mode = $6
         WHERE id = $1 RETURNING ${BILL_COLUMNS}`,
       [
         inserted.id,
@@ -971,6 +1021,7 @@ export async function discountFinalBill(billId, input, ctx, db = pool) {
         wanted.discount.value,
         wanted.reason,
         ctx?.actorId ?? null,
+        wanted.payback === AS_PAID ? null : wanted.payback,
       ],
     );
     const note = marked[0];
@@ -1009,13 +1060,32 @@ export async function discountFinalBill(billId, input, ctx, db = pool) {
       ...auditFields(ctx),
     });
     const kept = await restoreDepositLegs(client, note.id, ctx);
+    const paidCash = wanted.payback === "cash" ? await payCashNow(client, note.id, ctx) : 0;
     return {
       credit_note_id: note.id,
       credit_note_no: note.bill_no,
       ...outcome,
+      payback: wanted.payback,
       kept_as_deposit: kept,
+      paid_in_cash: paidCash,
     };
   }, db);
+}
+
+async function payCashNow(client, noteId, ctx) {
+  const { rows } = await client.query(
+    `SELECT version, patient_payable, paid_amount, original_bill_id FROM bills WHERE id = $1`,
+    [noteId],
+  );
+  const due = noteDue(rows[0], await moneyOn(client, rows[0].original_bill_id));
+  if (!due) return 0;
+  await payOut(
+    noteId,
+    { version: rows[0].version, payments: [{ mode: "cash", amount: rupees(due) }] },
+    ctx,
+    client,
+  );
+  return due;
 }
 
 export async function chargeKeptCreditIn(client, { billId, credits }, ctx) {

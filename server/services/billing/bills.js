@@ -54,6 +54,8 @@ import {
   wholeNumber,
 } from "./common.js";
 import { markDraftSaved } from "./draftSaves.js";
+import { assertNotEditing } from "./editLock.js";
+import { assertCardUsable, membershipPricing, syncMemberships } from "./membershipCards.js";
 import { carrySchemeToUpcoming } from "../patientSchemes.js";
 import { billCredits } from "./creditNotes.js";
 import { lockVisitOrders, orderToLink, SETTLED_AT_RECEPTION } from "./orderLinks.js";
@@ -65,7 +67,7 @@ import {
 } from "./receptionOrders.js";
 import { BILL_DISCOUNT_NAME, cleanManualDiscount, manualOf } from "./manualDiscounts.js";
 
-const BILL_COLUMNS = `id, bill_no, series, fy, bill_type, original_bill_id, patient_id, visit_id,
+export const BILL_COLUMNS = `id, bill_no, series, fy, bill_type, original_bill_id, patient_id, visit_id,
   appointment_id,
   bill_date::text AS bill_date, status, scheme_code, scheme_label, payer_name,
   scheme_ref_enc, referral_no_enc, referral_doc_id, patient_age, pay_later,
@@ -73,7 +75,8 @@ const BILL_COLUMNS = `id, bill_no, series, fy, bill_type, original_bill_id, pati
   adjustment_amount, round_off, paid_amount, claim_status, version,
   finalised_by, finalised_at, cancelled_by, cancelled_at, cancel_reason, created_at, saved_at,
   manual_discount_kind, manual_discount_value, manual_discount_reason,
-  manual_discount_by, manual_discount_at, consultant_id, replaced_by_bill_id`;
+  manual_discount_by, manual_discount_at, consultant_id, replaced_by_bill_id,
+  edit_started_at, edit_started_by, revision_no, revised_at, membership_card_id`;
 
 const SPEC = { table: "bills", noun: "bill", columns: BILL_COLUMNS };
 
@@ -83,7 +86,7 @@ const LINE_COLUMNS = `id, bill_id, visit_id, line_no, service_item_id, source, l
   payable_discount, bill_discount, tax_code, sac_hsn, tax_rate_pct, taxable, cgst, sgst,
   payment_rule_id, payment_rule, patient_payable, claim_amount, adjustment_amount,
   agreed_rate, agreed_by, agreed_at, created_by, manual_discount_kind, manual_discount_value, manual_discount_reason,
-  manual_discount_by, manual_discount_at, package_item_id`;
+  manual_discount_by, manual_discount_at, package_item_id, membership_benefit`;
 
 export const LINE_SOURCES = ["visit", "lab_order", "added", "lab_case", "ordered"];
 
@@ -187,6 +190,7 @@ function shapeLine(row) {
     is_live: row.is_live,
     repeat_request_id: row.repeat_request_id,
     credited_line_id: row.credited_line_id,
+    membership_benefit: row.membership_benefit ?? null,
     group_code: row.group_code,
     group_name: row.group_name ?? null,
     item_kind: row.item_kind ?? null,
@@ -279,6 +283,13 @@ function shapeBill(row, lines = [], extra = {}) {
     cancelled_at: row.cancelled_at,
     cancel_reason: row.cancel_reason,
     replaced_by_bill_id: row.replaced_by_bill_id ?? null,
+    revision_no: row.revision_no ?? 0,
+    membership_card_id: row.membership_card_id ?? null,
+    revised_at: row.revised_at ?? null,
+    editing: isEditing(row)
+      ? { started_at: row.edit_started_at, started_by: row.edit_started_by }
+      : null,
+    editable: row.status === "draft" || isEditing(row),
     lines: lines.map(shapeLine),
     manual_discount: shapeManual(row),
     ...extra,
@@ -366,7 +377,7 @@ async function categoryRules(client, code) {
   return rows[0];
 }
 
-async function liveLines(client, billId, { all = false } = {}) {
+export async function liveLines(client, billId, { all = false } = {}) {
   const { rows } = await client.query(
     `SELECT ${LINE_COLUMNS.split(/,\s*/)
       .map((column) => `l.${column}`)
@@ -408,7 +419,7 @@ async function shownLines(client, billId, options) {
   }));
 }
 
-async function billCodes(client, billId) {
+export async function billCodes(client, billId) {
   const { rows } = await client.query(
     `SELECT DISTINCT ON (lower(d.code)) d.code
        FROM bill_line_discounts d JOIN bill_lines l ON l.id = d.bill_line_id
@@ -448,6 +459,7 @@ const LINE_VALUES = (line, lineNo) => ({
   claim_amount: rupees(line.claim),
   adjustment_amount: rupees(line.adjustment),
   package_item_id: line.package_item_id ?? null,
+  membership_benefit: line.membership_benefit ?? null,
 });
 
 async function saveLines(client, saved, ctx, billManualBy = null) {
@@ -495,7 +507,7 @@ async function saveLines(client, saved, ctx, billManualBy = null) {
 
 export const TAKEN_ABOVE_BILL = "taken_above_bill";
 
-async function takenOn(client, billId) {
+export async function takenOn(client, billId) {
   const { rows } = await client.query(
     `SELECT GREATEST(b.paid_amount, COALESCE(SUM(p.amount), 0)) AS taken
        FROM bills b LEFT JOIN payments p ON p.bill_id = b.id
@@ -507,6 +519,24 @@ async function takenOn(client, billId) {
 
 async function saveTotals(client, bill, totals, ctx) {
   const taken = await takenOn(client, bill.id);
+  if (totals.payable < taken && isEditing(bill)) {
+    throw httpError(
+      409,
+      `₹${rupees(taken)} has already been collected on ${billLabel(bill)}, so its own total can't go below that (this change makes it ₹${rupees(totals.payable)}). Give the difference back as a credit note instead`,
+      {
+        code: TAKEN_ABOVE_BILL,
+        bill_id: bill.id,
+        collected: taken,
+        wanted_payable: totals.payable,
+      },
+    );
+  }
+  if (bill.claim_status === "cleared" && totals.claim === 0) {
+    throw httpError(
+      409,
+      `The payer has already paid the claim on ${billLabel(bill)}, so it must keep at least one claimed line`,
+    );
+  }
   if (totals.payable < taken) {
     throw httpError(
       409,
@@ -518,6 +548,10 @@ async function saveTotals(client, bill, totals, ctx) {
     `UPDATE bills
         SET actual_amount = $2, discount_amount = $3, tax_amount = $4, patient_payable = $5,
             claim_amount = $6, adjustment_amount = $7, round_off = $8,
+            claim_status = CASE
+              WHEN status <> 'final' OR claim_status = 'cleared' THEN claim_status
+              WHEN $6::numeric > 0 THEN 'pending'
+              ELSE 'none' END,
             version = version + 1, updated_at = NOW(), updated_by = $9
       WHERE id = $1
       RETURNING ${BILL_COLUMNS}`,
@@ -562,7 +596,35 @@ async function homeCodeRemoved(db, billId) {
   return !!rows[0]?.removed_at;
 }
 
-const pricingInput = (bill, lines, codes, ctx, { removed = false } = {}) => ({
+async function homeCodeNewToEdit(db, bill) {
+  if (!isEditing(bill)) return false;
+  const { rows } = await db.query(
+    `SELECT NOT EXISTS (
+              SELECT 1 FROM bills b, jsonb_array_elements(b.edit_snapshot->'discounts') d
+               WHERE b.id = $1 AND lower(d->>'code') = lower($2)
+            ) AS missing`,
+    [bill.id, HOME_COLLECTION_CODE],
+  );
+  return rows[0].missing;
+}
+
+const homeCodeOff = async (db, bill) =>
+  (await homeCodeRemoved(db, bill.id)) || (await homeCodeNewToEdit(db, bill));
+
+const fixedFor = (line, frozen, membership) => {
+  const benefit = membership?.cover.get(line.id);
+  if (benefit) return { fixedRate: 0, fixedSource: "membership", membershipBenefit: benefit };
+  if (frozen?.has(line.id)) return { fixedRate: frozen.get(line.id), fixedSource: "frozen" };
+  return {};
+};
+
+const pricingInput = (
+  bill,
+  lines,
+  codes,
+  ctx,
+  { removed = false, frozen = null, membership = null } = {},
+) => ({
   patientId: bill.patient_id,
   ...(bill.visit_id ? { visitId: bill.visit_id, homeCodeRemoved: removed } : {}),
   ...(bill.appointment_id ? { appointmentId: bill.appointment_id } : {}),
@@ -577,17 +639,69 @@ const pricingInput = (bill, lines, codes, ctx, { removed = false } = {}) => ({
     kept: true,
     agreedRate: line.agreed_rate,
     manualDiscount: manualOf(line),
+    ...fixedFor(line, frozen, membership),
   })),
   manualDiscount: manualOf(bill),
+  membership: membership?.context ?? null,
 });
 
-async function reprice(client, bill, codes, ctx) {
+async function frozenRates(client, bill) {
+  if (!isEditing(bill)) return null;
+  const { rows } = await client.query(
+    `SELECT line->>'id' AS id, (line->>'rate')::numeric AS rate
+       FROM bills b, jsonb_array_elements(b.edit_snapshot->'lines') line
+      WHERE b.id = $1`,
+    [bill.id],
+  );
+  return new Map(rows.map((row) => [row.id, paise(row.rate)]));
+}
+
+const roundToRupee = (amount) => Math.floor((amount + 50) / 100) * 100;
+
+async function creditedLineTotals(client, bill) {
+  if (!isEditing(bill)) return null;
+  const { rows } = await client.query(
+    `SELECT COALESCE(SUM(actual_amount), 0) AS actual, COALESCE(SUM(discount), 0) AS discount,
+            COALESCE(SUM(cgst + sgst), 0) AS tax, COALESCE(SUM(patient_payable), 0) AS payable,
+            COALESCE(SUM(claim_amount), 0) AS claim,
+            COALESCE(SUM(adjustment_amount), 0) AS adjustment
+       FROM bill_lines WHERE bill_id = $1 AND NOT is_live`,
+    [bill.id],
+  );
+  return Object.fromEntries(Object.entries(rows[0]).map(([key, value]) => [key, paise(value)]));
+}
+
+function withCreditedLines(totals, credited) {
+  if (!credited) return totals;
+  const linePayable = (totals.patient_payable ?? 0) + credited.payable;
+  const payable = roundToRupee(linePayable);
+  return {
+    ...totals,
+    actual: totals.actual + credited.actual,
+    discount: totals.discount + credited.discount,
+    tax: totals.tax + credited.tax,
+    patient_payable: linePayable,
+    claim: totals.claim + credited.claim,
+    adjustment: totals.adjustment + credited.adjustment,
+    round_off: payable - linePayable,
+    payable,
+  };
+}
+
+export async function reprice(client, bill, codes, ctx) {
   const lines = await liveLines(client, bill.id);
+  const credited = await creditedLineTotals(client, bill);
   if (!lines.length) {
-    return { priced: null, lines: [], bill: await saveTotals(client, bill, ZERO_TOTALS, ctx) };
+    const totals = withCreditedLines({ ...ZERO_TOTALS, patient_payable: 0 }, credited);
+    return { priced: null, lines: [], bill: await saveTotals(client, bill, totals, ctx) };
   }
-  const removed = await homeCodeRemoved(client, bill.id);
-  const priced = await priceBill(pricingInput(bill, lines, codes, ctx, { removed }), client);
+  const removed = await homeCodeOff(client, bill);
+  const frozen = await frozenRates(client, bill);
+  const membership = await membershipPricing(client, bill, lines);
+  const priced = await priceBill(
+    pricingInput(bill, lines, codes, ctx, { removed, frozen, membership }),
+    client,
+  );
   priced.lines.forEach(assertBillLineBalances);
   const { rows: highest } = await client.query(
     `SELECT COALESCE(MAX(line_no), 0) AS top FROM bill_lines WHERE bill_id = $1`,
@@ -622,7 +736,11 @@ async function reprice(client, bill, codes, ctx) {
       ...auditFields(ctx),
     });
   }
-  return { priced, lines, bill: await saveTotals(client, bill, priced.totals, ctx) };
+  return {
+    priced,
+    lines,
+    bill: await saveTotals(client, bill, withCreditedLines(priced.totals, credited), ctx),
+  };
 }
 
 async function billDiscounts(client, billId) {
@@ -654,7 +772,7 @@ async function billManualOf(client, row) {
   return shapeManual(row, rows[0]?.name ?? null);
 }
 
-async function withLines(client, row, extra = {}) {
+export async function withLines(client, row, extra = {}) {
   const [lines, discounts, manualDiscount, consultant, homeRemoved] = await Promise.all([
     shownLines(client, row.id, { all: showsEveryLine(row) }),
     billDiscounts(client, row.id),
@@ -671,6 +789,18 @@ async function withLines(client, row, extra = {}) {
   });
 }
 
+export const isEditing = (bill) => bill.status === "final" && Boolean(bill.edit_started_at);
+
+export function assertEditable(bill) {
+  if (isEditing(bill)) return bill;
+  if (bill.status === "final") {
+    throw httpError(409, `${billLabel(bill)} is already final — choose Edit bill to change it`, {
+      code: "bill_final",
+    });
+  }
+  return assertDraft(bill);
+}
+
 function assertDraft(bill) {
   if (bill.status === "draft") return bill;
   throw httpError(
@@ -681,7 +811,7 @@ function assertDraft(bill) {
   );
 }
 
-async function lockBill(client, billId) {
+export async function lockBill(client, billId) {
   return lockRow(client, SPEC, cleanUuid(billId, "bill"));
 }
 
@@ -1062,7 +1192,7 @@ const cleanCustomLineName = (value) => {
 };
 
 async function insertLineIn(client, bill, input, ctx, { locked = false, lineNo = null } = {}) {
-  assertDraft(bill);
+  assertEditable(bill);
   const itemId = cleanItemId(input?.item_id ?? input?.item);
   const doctorId = wholeNumber(input?.doctor_id, "Doctor", { min: 1 }) ?? null;
   const found = await itemRow(client, itemId);
@@ -1332,7 +1462,7 @@ export async function changeQuantity(billId, lineId, input, ctx, db = pool) {
   const quantity = wholeNumber(input?.quantity, "Quantity", { min: 1 });
   if (quantity === undefined) throw httpError(400, "Quantity must be a whole number, 1 or more");
   return inTransaction(async (client) => {
-    const bill = assertDraft(await lockBill(client, billId));
+    const bill = assertEditable(await lockBill(client, billId));
     const before = await lineOf(client, bill, lineId);
     if (!mayChangeOrderedLine(before, ctx)) {
       throw httpError(
@@ -1346,6 +1476,14 @@ export async function changeQuantity(billId, lineId, input, ctx, db = pool) {
     }
     if (item.max_quantity !== null && quantity > item.max_quantity) {
       throw httpError(400, `${item.name} can be billed at most ${item.max_quantity} on one line`);
+    }
+    const credited = await creditedOf(client, before.id);
+    if (quantity < credited.quantity) {
+      throw httpError(
+        409,
+        `${credited.quantity} of ${before.bill_name} was refunded on credit note ${credited.noteNo}, so the quantity can't go below ${credited.quantity}`,
+        { code: "line_credited" },
+      );
     }
     await client.query(
       `UPDATE bill_lines SET quantity = $2, listed_actual = ROUND($2 * rate, 2),
@@ -1367,7 +1505,25 @@ export async function changeQuantity(billId, lineId, input, ctx, db = pool) {
   }, db);
 }
 
-async function dropLineIn(client, bill, before, after, ctx) {
+async function creditedOf(client, lineId) {
+  const { rows } = await client.query(
+    `SELECT COALESCE(SUM(c.quantity), 0)::numeric AS quantity, MIN(n.bill_no) AS note_no
+       FROM bill_lines c JOIN bills n ON n.id = c.bill_id
+      WHERE c.credited_line_id = $1`,
+    [lineId],
+  );
+  return { quantity: Number(rows[0].quantity), noteNo: rows[0].note_no };
+}
+
+export async function dropLineIn(client, bill, before, after, ctx) {
+  const credited = await creditedOf(client, before.id);
+  if (credited.noteNo) {
+    throw httpError(
+      409,
+      `${before.bill_name} was refunded on credit note ${credited.noteNo}, so it can't be removed from the bill`,
+      { code: "line_credited" },
+    );
+  }
   if (await lastLineOfOrder(client, before)) {
     await releaseTestOrders(client, bill, ctx, [before.lab_order_id]);
   }
@@ -1419,7 +1575,7 @@ export async function swapAutoConsultationIn(client, visitId, item, ctx) {
 export async function removeLine(billId, lineId, input, ctx, db = pool) {
   const reason = optionalReason(input?.reason, "The reason for removing this line");
   return inTransaction(async (client) => {
-    const bill = assertDraft(await lockBill(client, billId));
+    const bill = assertEditable(await lockBill(client, billId));
     const before = await lineOf(client, bill, lineId);
     if (!mayChangeOrderedLine(before, ctx)) {
       throw httpError(
@@ -1574,7 +1730,7 @@ const manualValues = (discount, reason, ctx) =>
 export async function setLineDiscount(billId, lineId, input, ctx, db = pool) {
   const reason = optionalReason(input?.reason, "The reason for this discount");
   return inTransaction(async (client) => {
-    const bill = assertDraft(await lockBill(client, billId));
+    const bill = assertEditable(await lockBill(client, billId));
     const before = await lineOf(client, bill, lineId);
     const discount = readManualInput(input, `${before.bill_name}'s discount`);
     const { rows } = await client.query(
@@ -1616,7 +1772,7 @@ async function packageLinesOf(client, bill, packageItemId) {
 export async function removePackage(billId, packageItemId, input, ctx, db = pool) {
   const reason = optionalReason(input?.reason, "The reason for removing this package");
   return inTransaction(async (client) => {
-    const bill = assertDraft(await lockBill(client, billId));
+    const bill = assertEditable(await lockBill(client, billId));
     const lines = await packageLinesOf(client, bill, packageItemId);
     const locked = lines.find((line) => !mayChangeOrderedLine(line, ctx));
     if (locked) {
@@ -1655,7 +1811,7 @@ const packageShares = (discount, lines) => {
 export async function setPackageDiscount(billId, packageItemId, input, ctx, db = pool) {
   const reason = optionalReason(input?.reason, "The reason for this discount");
   return inTransaction(async (client) => {
-    const bill = assertDraft(await lockBill(client, billId));
+    const bill = assertEditable(await lockBill(client, billId));
     const lines = await packageLinesOf(client, bill, packageItemId);
     const discount = readManualInput(input, "The package's discount");
     const shares = packageShares(discount, lines);
@@ -1688,7 +1844,7 @@ export async function setBillDiscount(billId, input, ctx, db = pool) {
   const reason = optionalReason(input?.reason, "The reason for this discount");
   const discount = readManualInput(input, "The bill's discount");
   return inTransaction(async (client) => {
-    const bill = assertDraft(await lockBill(client, billId));
+    const bill = assertEditable(await lockBill(client, billId));
     const { rows } = await client.query(
       `UPDATE bills SET ${SET_MANUAL}, updated_at = NOW(), updated_by = $6
         WHERE id = $1 RETURNING ${BILL_COLUMNS}`,
@@ -1717,12 +1873,45 @@ export async function setBillDiscount(billId, input, ctx, db = pool) {
   }, db);
 }
 
+export async function setMembershipCard(billId, input, ctx, db = pool) {
+  const wanted = input?.card_id ?? null;
+  return inTransaction(async (client) => {
+    const bill = assertEditable(await lockBill(client, billId));
+    if (bill.bill_type !== "invoice") throw httpError(409, "A membership card goes on a bill");
+    const card = wanted === null ? null : await assertCardUsable(client, wanted);
+    if ((card?.id ?? null) === (bill.membership_card_id ?? null)) {
+      return withLines(client, bill, { codes: await billCodes(client, bill.id) });
+    }
+    const { rows } = await client.query(
+      `UPDATE bills SET membership_card_id = $2, updated_at = NOW(), updated_by = $3
+        WHERE id = $1 RETURNING ${BILL_COLUMNS}`,
+      [bill.id, card?.id ?? null, ctx?.actorId ?? null],
+    );
+    const saved = await reprice(client, rows[0], await billCodes(client, bill.id), ctx);
+    await resettleTestOrders(client, saved.bill, ctx);
+    await writeAudit(client, {
+      entity: SPEC.table,
+      entityId: bill.id,
+      action: "update",
+      before: { membership_card_id: bill.membership_card_id ?? null },
+      after: {
+        membership_card_id: card?.id ?? null,
+        card_no: card?.card_no ?? null,
+        holder_patient_id: card?.holder.id ?? null,
+        patient_payable: saved.bill.patient_payable,
+      },
+      ...auditFields(ctx),
+    });
+    return withLines(client, saved.bill, { codes: await billCodes(client, bill.id) });
+  }, db);
+}
+
 export async function setLinePrice(billId, lineId, input, ctx, db = pool) {
   const rate = cleanAgreedRate(input?.agreed_rate);
   if (rate === null) throw httpError(400, "Enter this patient's price");
   const reason = cleanReason(input?.reason, "Say why the price is being changed");
   return inTransaction(async (client) => {
-    const bill = assertDraft(await lockBill(client, billId));
+    const bill = assertEditable(await lockBill(client, billId));
     const before = await lineOf(client, bill, lineId);
     const item = await itemFor(client, before.service_item_id);
     if (!takesPatientPrice(item)) {
@@ -1772,7 +1961,7 @@ function refusedCode(priced, code) {
 export async function addCode(billId, input, ctx, db = pool) {
   const code = cleanCodeText(input?.code ?? input);
   return inTransaction(async (client) => {
-    const bill = assertDraft(await lockBill(client, billId));
+    const bill = assertEditable(await lockBill(client, billId));
     const codes = await billCodes(client, bill.id);
     if (codes.some((entered) => sameCode(entered, code))) {
       throw httpError(409, `The code ${code} is already on this bill`);
@@ -1811,7 +2000,7 @@ export async function suggestCodes(billId, ctx, db = pool) {
   const { rows } = await db.query(`SELECT ${BILL_COLUMNS} FROM bills WHERE id = $1`, [id]);
   if (!rows.length) throw httpError(404, "That bill no longer exists");
   const bill = rows[0];
-  if (bill.status !== "draft") return { codes: [] };
+  if (bill.status !== "draft" && !isEditing(bill)) return { codes: [] };
   const lines = await liveLines(db, id);
   if (!lines.length) return { codes: [] };
   const onBill = await billCodes(db, id);
@@ -1827,7 +2016,7 @@ export async function suggestCodes(billId, ctx, db = pool) {
     [bill.bill_date, onBill.map((code) => code.toLowerCase()), HOME_COLLECTION_CODE],
   );
   if (!rules.length) return { codes: [] };
-  const removed = await homeCodeRemoved(db, id);
+  const removed = await homeCodeOff(db, bill);
   const base = await priceBill(pricingInput(bill, lines, onBill, ctx, { removed }), db);
   const found = [];
   for (const { code } of rules) {
@@ -1894,7 +2083,7 @@ function reasonsOf(rule) {
 export async function removeCode(billId, input, ctx, db = pool) {
   const code = cleanCodeText(input?.code ?? input);
   return inTransaction(async (client) => {
-    const bill = assertDraft(await lockBill(client, billId));
+    const bill = assertEditable(await lockBill(client, billId));
     const codes = await billCodes(client, bill.id);
     if (!codes.some((entered) => sameCode(entered, code))) {
       throw httpError(404, `The code ${code} isn't on this bill`);
@@ -2268,6 +2457,7 @@ export async function finaliseBill(billId, input, ctx, db = pool) {
         ...snapshot,
       ],
     );
+    await syncMemberships(client, bill.id, ctx);
     await settleTestOrders(client, rows[0], ctx);
     await syncLabSteps(client, rows[0].visit_id);
     await writeAudit(client, {
@@ -2359,6 +2549,7 @@ export async function cancelBill(billId, input, ctx, db = pool) {
     }
     if (bill.status === "cancelled") throw httpError(409, "That bill is already cancelled");
     if (bill.claim_status === "cleared") throw httpError(409, "Already paid by CGHS");
+    await assertNotEditing(client, bill.id, "cancelling it");
     const { rows: credits } = await client.query(
       `SELECT bill_no FROM bills WHERE original_bill_id = $1 ORDER BY created_at LIMIT 1`,
       [bill.id],
@@ -2385,6 +2576,7 @@ export async function cancelBill(billId, input, ctx, db = pool) {
         RETURNING ${BILL_COLUMNS}`,
       [bill.id, reason, ctx?.actorId ?? null],
     );
+    await syncMemberships(client, bill.id, ctx);
     await releaseTestOrders(client, bill, ctx);
     await writeAudit(client, {
       entity: SPEC.table,

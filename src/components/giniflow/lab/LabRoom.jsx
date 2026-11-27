@@ -35,6 +35,9 @@ import useAuthStore from "../../../stores/authStore";
 import UrgentCancelControl, { CancelHeldBadge } from "../UrgentCancelControl";
 import { CAPABILITIES as CAP, hasCapability } from "../../../../shared/permissions.js";
 import { refundOnTestCancel } from "../../../../shared/labPayment.js";
+import ReleaseRequestPanel from "./ReleaseRequestPanel";
+import ReportReleasesPage from "../../../pages/billing/ReportReleasesPage";
+import { useReleaseRequests } from "../../../queries/hooks/useReportReleases";
 import { testCancelReasonLabel } from "../../../../shared/testCancelReasons.js";
 import { OutsourcedTag, TestNames } from "../OutsourcedTests.jsx";
 import {
@@ -405,7 +408,7 @@ function LabCard({ order, group, onAdvance, onUpload, onOpen, onHomeCollect, bus
             <input
               ref={fileRef}
               type="file"
-              accept="application/pdf,image/*"
+              accept="application/pdf,image/*,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               hidden
               onChange={(e) => {
                 const file = e.target.files?.[0];
@@ -512,6 +515,7 @@ function LabDetailPane({
   onReplaceReport,
   onRemoveReport,
   removingReport,
+  onToast,
   busy,
 }) {
   // Same rule as the hospital-case pane: results belong to the analyzer bench.
@@ -527,10 +531,11 @@ function LabDetailPane({
   // 'uploaded' included: typing the values finishes the order, and the whole
   // point of having both is that the scan can still be attached afterwards —
   // which the upload zone disappearing would have quietly prevented.
+  const cleared = order.paid || order.released;
   const canUpload =
-    (atTheBench && atLeast(order.sampleStatus, "results") && order.paid) ||
-    (order.outsourced && order.paid && OUTSIDE_UPLOADABLE.includes(order.sampleStatus));
-  const canEnterResults = atTheBench && atLeast(order.sampleStatus, "processing") && order.paid;
+    (atTheBench && atLeast(order.sampleStatus, "results") && cleared) ||
+    (order.outsourced && cleared && OUTSIDE_UPLOADABLE.includes(order.sampleStatus));
+  const canEnterResults = atTheBench && atLeast(order.sampleStatus, "processing") && cleared;
 
   // Refuse an oversized file here rather than spending a minute base64-encoding
   // it only for the service to reject it. The limit is the one the zone states.
@@ -582,6 +587,14 @@ function LabDetailPane({
         <div className="dp-scroll">
           <div className="dp-inner">
             {order.visitId && <LabSiteControl visitId={order.visitId} />}
+            {order.homeCollected && !order.paid ? (
+              <ReleaseRequestPanel
+                visitId={order.visitId}
+                patient={{ name: order.name, file_no: order.fileNo }}
+                request={order.releaseRequest}
+                onToast={onToast}
+              />
+            ) : null}
             <div className="dp-sec">
               <div className="dp-sec-title">Tests ordered</div>
               {order.tests.map((t) => (
@@ -744,7 +757,7 @@ function LabDetailPane({
                 <input
                   ref={fileRef}
                   type="file"
-                  accept="application/pdf,image/jpeg,image/png"
+                  accept="application/pdf,image/jpeg,image/png,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   hidden
                   onChange={(e) => {
                     take(e.target.files?.[0]);
@@ -771,7 +784,7 @@ function LabDetailPane({
                   <div className="ua-t">
                     {busy ? "Uploading…" : "Tap or drop the lab report here"}
                   </div>
-                  <div className="ua-s">PDF · JPG · PNG accepted · Max 5MB</div>
+                  <div className="ua-s">PDF · DOCX · JPG · PNG accepted · Max 5MB</div>
                 </button>
                 <p className="dp-trigger">
                   <span className="wn-ico" aria-hidden="true">
@@ -823,7 +836,7 @@ function LabDetailPane({
                       <input
                         ref={replaceRef}
                         type="file"
-                        accept="application/pdf,image/jpeg,image/png"
+                        accept="application/pdf,image/jpeg,image/png,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                         hidden
                         onChange={(e) => {
                           takeReplacement(e.target.files?.[0]);
@@ -1106,6 +1119,7 @@ function HealthrayCasePane({
   onCancelCaseTest,
   canCancelTest,
   onHomeCollect,
+  onToast,
   busy,
   room,
   date,
@@ -1152,7 +1166,7 @@ function HealthrayCasePane({
         <input
           ref={caseFileRef}
           type="file"
-          accept="application/pdf,image/*"
+          accept="application/pdf,image/*,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           hidden
           onChange={(e) => {
             const file = e.target.files?.[0];
@@ -1164,6 +1178,14 @@ function HealthrayCasePane({
         <div className="dp-scroll">
           <div className="dp-inner">
             {row.visitId && <LabSiteControl visitId={row.visitId} />}
+            {row.homePaymentPending ? (
+              <ReleaseRequestPanel
+                visitId={row.visitId}
+                patient={{ name: row.name, file_no: row.fileNo }}
+                request={row.releaseRequest}
+                onToast={onToast}
+              />
+            ) : null}
             <div className="dp-sec">
               <div className="dp-sec-title">Where this patient is</div>
               <div className="dp-hint">
@@ -1551,7 +1573,7 @@ function HealthrayCasePane({
                       >
                         <div className="ua-ico">📄</div>
                         <div className="ua-t">Tap to upload lab report PDF</div>
-                        <div className="ua-s">PDF · JPG · PNG accepted · Max 5MB</div>
+                        <div className="ua-s">PDF · DOCX · JPG · PNG accepted · Max 5MB</div>
                       </button>
                       <div className="dp-hint">
                         Stored on the patient&apos;s chart, where the doctor and the patient app
@@ -1575,7 +1597,7 @@ export default function LabRoom({ room = null }) {
   const [toast, setToast] = useState("");
   const [params, setParams] = useSearchParams();
   const asked = params.get("view");
-  const view = asked === "cancelled" || asked === "outside" ? asked : "queue";
+  const view = ["cancelled", "outside", "releases"].includes(asked) ? asked : "queue";
   const setView = (next) =>
     setParams(
       (current) => {
@@ -1587,6 +1609,15 @@ export default function LabRoom({ room = null }) {
       { replace: true },
     );
   const outsideCount = useOutsidePendingCount().data?.pending;
+  const canSeeReleases = hasCapability(
+    useAuthStore((st) => st.currentDoctor?.role),
+    CAP.LAB_REPORT_RELEASE_REQUEST,
+  );
+  const canDecideReleases = hasCapability(
+    useAuthStore((st) => st.currentDoctor?.role),
+    CAP.LAB_REPORT_RELEASE_DECIDE,
+  );
+  const releaseWaiting = useReleaseRequests({ limit: 1, enabled: canSeeReleases }).data?.waiting;
   const cancelled = useCancelledTests("lab").data;
   const cancelledCount = cancelled ? cancelled.filter((row) => !row.restoredAt).length : null;
   const [confirmUpload, setConfirmUpload] = useState(null);
@@ -2134,6 +2165,17 @@ export default function LabRoom({ room = null }) {
             >
               Cancelled <span className="st-tab-n">{cancelledCount ?? "…"}</span>
             </button>
+            {canSeeReleases ? (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === "releases"}
+                className={`st-tab${view === "releases" ? " on" : ""}`}
+                onClick={() => setView("releases")}
+              >
+                🔓 Report release <span className="st-tab-n">{releaseWaiting ?? "…"}</span>
+              </button>
+            ) : null}
           </div>
           {view === "outside" ? (
             <OutsidePendingPanel
@@ -2148,6 +2190,8 @@ export default function LabRoom({ room = null }) {
                 })
               }
             />
+          ) : view === "releases" && canSeeReleases ? (
+            <ReportReleasesPage live={false} canDecide={canDecideReleases} />
           ) : view === "cancelled" ? (
             <CancelledTestsPanel
               station="lab"
@@ -2574,6 +2618,7 @@ export default function LabRoom({ room = null }) {
         onCancelCaseTest={onCancelCaseTest}
         canCancelTest={canCancelTest}
         onHomeCollect={openHomeForCase}
+        onToast={showToast}
         date={data?.date}
         busy={caseAction.isPending || caseUpload.isPending || cancelLabCase.isPending}
       />
@@ -2600,6 +2645,7 @@ export default function LabRoom({ room = null }) {
         onReplaceReport={onReplaceReport}
         onRemoveReport={onRemoveReport}
         removingReport={removeReport.isPending}
+        onToast={showToast}
       />
 
       {homeTarget && (

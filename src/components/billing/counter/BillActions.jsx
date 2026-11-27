@@ -5,7 +5,11 @@ import {
   useCancelBill,
   useDeleteDraft,
   useSaveDraft,
+  useStartBillEdit,
 } from "../../../queries/hooks/useBilling";
+import useAuthStore from "../../../stores/authStore";
+import { CAPABILITIES, hasCapability } from "../../../../shared/permissions";
+import BillEditBar from "./BillEditBar";
 import { errorOf } from "../format";
 import { claimBadgeText } from "./lineText";
 import { balanceOf, finaliseBlockers } from "./finaliseChecks";
@@ -25,8 +29,12 @@ export default function BillActions({
   opening = false,
   form,
   stillOnFloor = false,
+  patientName,
 }) {
   const final = useMakeFinal({ onBill, onPricesChanged, form });
+  const role = useAuthStore((s) => s.currentDoctor?.role);
+  const startEdit = useStartBillEdit();
+  const [reprint, setReprint] = useState(null);
   const cancel = useCancelBill();
   const deleteDraft = useDeleteDraft();
   const saveDraft = useSaveDraft();
@@ -59,6 +67,28 @@ export default function BillActions({
     setOfferFinalise(false);
   }, [offerFinalise, paidInFull]);
   const badge = claimBadgeText(bill.claim_status, bill.claim_cleared_on);
+  const editing = Boolean(bill.editing);
+  const mayEdit =
+    hasCapability(role, CAPABILITIES.BILLING_EDIT_FINAL) &&
+    bill.status === "final" &&
+    bill.bill_type === "invoice" &&
+    !editing;
+
+  const edit = async () => {
+    setError(null);
+    setNote(null);
+    try {
+      onBill(
+        await startEdit.mutateAsync({
+          billId: bill.id,
+          visitId: bill.visit_id,
+          version: bill.version,
+        }),
+      );
+    } catch (e) {
+      setError(errorOf(e, "This bill could not be opened for editing"));
+    }
+  };
 
   const save = async () => {
     setError(null);
@@ -132,8 +162,32 @@ export default function BillActions({
           {!!blockers.length && <p>Can&apos;t finalise yet: {blockers.join(" ")}</p>}
         </div>
       )}
+      {editing && (
+        <BillEditBar
+          bill={bill}
+          patientName={patientName}
+          onBill={(saved) => {
+            onBill(saved);
+            if (!saved.editing && saved.revision_no !== bill.revision_no) {
+              setNote(`Bill ${saved.bill_no} updated — revision ${saved.revision_no}.`);
+            }
+          }}
+          onPrint={setReprint}
+        />
+      )}
       <div className="bc-head__row">
         {badge && <span className="badge b-amb">{badge}</span>}
+
+        {mayEdit && (
+          <button
+            type="button"
+            className="st-btn st-btn-g"
+            disabled={startEdit.isPending}
+            onClick={edit}
+          >
+            {startEdit.isPending ? "Opening…" : "Edit bill"}
+          </button>
+        )}
 
         {bill.status === "draft" && (
           <button
@@ -198,7 +252,7 @@ export default function BillActions({
           </PdfButton>
         )}
 
-        {bill.status === "final" && bill.bill_type === "invoice" && !refundWaiting && (
+        {bill.status === "final" && bill.bill_type === "invoice" && !refundWaiting && !editing && (
           <button
             type="button"
             className="st-btn st-btn-g"
@@ -212,7 +266,7 @@ export default function BillActions({
           </button>
         )}
 
-        {bill.status === "final" && bill.totals.paid === 0 && !credited && (
+        {bill.status === "final" && bill.totals.paid === 0 && !credited && !editing && (
           <button
             type="button"
             className="st-btn st-btn-red"
@@ -243,6 +297,7 @@ export default function BillActions({
       {final.error && <div className="bc-err">{final.error}</div>}
 
       <PdfViewer pdf={final.printing} onClose={final.closePrinting} />
+      <PdfViewer pdf={reprint} onClose={() => setReprint(null)} />
 
       {refunding && (
         <RefundDialog

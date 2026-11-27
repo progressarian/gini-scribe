@@ -6,6 +6,8 @@ import { setLiveConnected } from "./giniflowPolling";
 import { createLiveConnection } from "./giniflowLiveConnection";
 import { billingKeys } from "./useBillingMaster";
 import { APPROVALS_WAITING_KEY } from "./useApprovals";
+import { REPORT_RELEASE_KEY } from "./useReportReleases";
+import { REPORT_RELEASE_KIND } from "../../../shared/reportRelease.js";
 
 // One connection per screen, not one per query.
 //
@@ -46,6 +48,7 @@ const INVALIDATES = {
     // read `current_status`.
     //
     ["giniflow", "triage"],
+    ["giniflow", "tokens"],
     ["care-followups", "on-floor"],
   ],
   // The coordinator's own writes, from giniflow_triage_events. Its own kind
@@ -76,6 +79,7 @@ const INVALIDATES = {
     ["giniflow", "board"],
   ],
   billing_request: BILLING_REQUEST_KEYS,
+  [REPORT_RELEASE_KIND]: [REPORT_RELEASE_KEY, ["giniflow", "lab"], APPROVALS_WAITING_KEY],
 };
 
 const ALL = [

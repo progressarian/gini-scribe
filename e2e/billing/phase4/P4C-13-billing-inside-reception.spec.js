@@ -141,6 +141,7 @@ test.describe.serial("P4C-13 the billing counter inside the reception station", 
         "Dues",
         "Shift",
         /^Refunds/,
+        "Memberships",
         ...(role === "reception_admin" ? [/^Requests/] : []),
       ]);
       await expect(arrivalsTab(page)).toHaveAttribute("aria-selected", "true");

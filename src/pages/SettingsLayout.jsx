@@ -53,6 +53,10 @@ export const SETTINGS_TABS = [
     label: "Discounts",
   },
   {
+    to: "/settings/membership-plans",
+    label: "Membership plans",
+  },
+  {
     to: "/settings/bulk-import",
     label: "Bulk import",
   },

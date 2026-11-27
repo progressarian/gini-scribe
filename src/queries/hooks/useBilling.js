@@ -426,6 +426,35 @@ export function useDiscardDraft() {
   );
 }
 
+export function useStartBillEdit() {
+  return useVisitMutation(
+    async ({ billId, version }) =>
+      (await api.post(`${DESK}/bills/${billId}/edit/start`, { version })).data,
+  );
+}
+
+export function useBillEditPreview(billId, version, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: ["billing", "bills", billId, "edit-preview", version],
+    queryFn: () => read(`${DESK}/bills/${billId}/edit/preview`),
+    enabled: Boolean(billId) && enabled,
+  });
+}
+
+export function useSaveBillEdit() {
+  return useVisitMutation(
+    async ({ billId, version, reason }) =>
+      (await api.post(`${DESK}/bills/${billId}/edit/save`, { version, reason })).data,
+  );
+}
+
+export function useDiscardBillEdit() {
+  return useVisitMutation(
+    async ({ billId, version }) =>
+      (await api.post(`${DESK}/bills/${billId}/edit/discard`, { version })).data,
+  );
+}
+
 export const depositKey = (patientId) => ["billing", "deposit", patientId];
 
 export function useDeposit(patientId) {
@@ -787,5 +816,82 @@ export function usePayOut() {
   return useRefundMutation(
     async ({ creditNoteId, version, payments }) =>
       (await api.post(`${DESK}/credit-notes/${creditNoteId}/pay-out`, { version, payments })).data,
+  );
+}
+
+const MEMBERSHIPS = ["billing", "memberships"];
+
+function useMembershipMutation(mutationFn) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: (_result, variables) => {
+      queryClient.invalidateQueries({ queryKey: MEMBERSHIPS });
+      if (variables?.visitId) {
+        queryClient.invalidateQueries({ queryKey: billingKeys.visitBills(variables.visitId) });
+        queryClient.invalidateQueries({ queryKey: COUNTER_PATIENTS });
+      }
+    },
+  });
+}
+
+export function usePlansOnSale({ enabled = true } = {}) {
+  return useQuery({
+    queryKey: [...MEMBERSHIPS, "plans"],
+    queryFn: () => read(`${DESK}/memberships/plans`),
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
+export function useMembershipSearch(q) {
+  const text = q.trim();
+  return useQuery({
+    queryKey: [...MEMBERSHIPS, "search", text],
+    queryFn: () => read(`${DESK}/memberships/search`, { q: text }),
+    enabled: text.length >= 2,
+    placeholderData: (prev) => prev,
+  });
+}
+
+export function usePatientMemberships(patientId, stamp = null) {
+  return useQuery({
+    queryKey: [...MEMBERSHIPS, "patient", patientId, stamp],
+    queryFn: () => read(`${DESK}/patients/${patientId}/memberships`),
+    enabled: Boolean(patientId),
+  });
+}
+
+export function useMembershipCard(cardId, stamp = null) {
+  return useQuery({
+    queryKey: [...MEMBERSHIPS, "card", cardId, stamp],
+    queryFn: () => read(`${DESK}/memberships/${cardId}`),
+    enabled: Boolean(cardId),
+  });
+}
+
+export function useApplyMembershipCard() {
+  return useMembershipMutation(
+    async ({ billId, cardId }) =>
+      (await api.put(`${DESK}/bills/${billId}/membership`, { card_id: cardId })).data,
+  );
+}
+
+export function useUseDietitianVisit() {
+  return useMembershipMutation(
+    async ({ cardId, patientId, note }) =>
+      (
+        await api.post(`${DESK}/memberships/${cardId}/dietitian`, {
+          patient_id: patientId,
+          note,
+        })
+      ).data,
+  );
+}
+
+export function useReverseCardUse() {
+  return useMembershipMutation(
+    async ({ useId, reason }) =>
+      (await api.post(`${DESK}/memberships/uses/${useId}/reverse`, { reason })).data,
   );
 }

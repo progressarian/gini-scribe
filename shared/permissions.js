@@ -146,6 +146,7 @@ export const CAPABILITIES = {
   // defeated the cap (33-PATIENT-SCHEME-PLAN.md §6). Tagging a patient with a
   // scheme is a different, wider power and stays on RECEPTION_OPS / OBT_OPS.
   SCHEME_ADMIN: "SCHEME_ADMIN",
+  GINIFLOW_TOKEN_ASSIGN: "GINIFLOW_TOKEN_ASSIGN",
   GINIFLOW_MANAGE_QUEUE: "GINIFLOW_MANAGE_QUEUE", // reorder, prioritise and move patients on the board
   GINIFLOW_STATION_VITALS: "GINIFLOW_STATION_VITALS", // record vitals at the Gini Flow station
   GINIFLOW_STATION_RECEPTION: "GINIFLOW_STATION_RECEPTION", // clear lab payments
@@ -177,6 +178,8 @@ export const CAPABILITIES = {
   GINIFLOW_XRAY_REPORT_REMOVE: "GINIFLOW_XRAY_REPORT_REMOVE",
   GINIFLOW_TEST_CANCEL: "GINIFLOW_TEST_CANCEL",
   GINIFLOW_TEST_CANCEL_DECIDE: "GINIFLOW_TEST_CANCEL_DECIDE",
+  LAB_REPORT_RELEASE_REQUEST: "LAB_REPORT_RELEASE_REQUEST",
+  LAB_REPORT_RELEASE_DECIDE: "LAB_REPORT_RELEASE_DECIDE",
   GINIFLOW_OUTSIDE_REMOVE: "GINIFLOW_OUTSIDE_REMOVE",
   GINIFLOW_STATION_DOCTOR: "GINIFLOW_STATION_DOCTOR", // the consultant's queue and consult screen
   GINIFLOW_MO_CLOSE: "GINIFLOW_MO_CLOSE", // end a visit without the consultant, prescription and all
@@ -209,6 +212,7 @@ export const CAPABILITIES = {
   OBT_ASSIGN: "OBT_ASSIGN",
   GHM_SLOT_ASSIGN: "GHM_SLOT_ASSIGN",
   BILLING_DESK: "BILLING_DESK",
+  BILLING_EDIT_FINAL: "BILLING_EDIT_FINAL",
   BILLING_MASTER: "BILLING_MASTER",
   BILLING_SETTINGS: "BILLING_SETTINGS",
   BILLING_CLAIMS: "BILLING_CLAIMS",
@@ -257,8 +261,10 @@ const RECEPTION_CAPABILITIES = [
   // The payment desk clearing a lab bill has no reason to be able to move any
   // patient to any station, and no plan asked for it (BQ-10).
   C.GINIFLOW_STATION_RECEPTION,
+  C.GINIFLOW_TOKEN_ASSIGN,
   C.GINIFLOW_PRINT_RX,
   C.BILLING_DESK,
+  C.BILLING_EDIT_FINAL,
   C.GINIFLOW_TEST_CANCEL,
   C.PHARMACY_COLLECT,
 ];
@@ -375,6 +381,7 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_STATION_LAB,
     C.GINIFLOW_STATION_LAB_COLLECT,
     C.GINIFLOW_TEST_CANCEL,
+    C.LAB_REPORT_RELEASE_REQUEST,
   ],
   // The analyzer bench. Everything `lab` has, minus the collection room and plus
   // the processing room — the split is the point, so this role deliberately
@@ -401,6 +408,8 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_TEST_CANCEL,
     C.LAB_TEST_CATALOG,
     C.GINIFLOW_OUTSIDE_REMOVE,
+    C.LAB_REPORT_RELEASE_REQUEST,
+    C.LAB_REPORT_RELEASE_DECIDE,
   ],
   // The machine room — ABI, VPT, Fundus, TMT and ECG. Modelled on the lab role,
   // because the shape of the job is the same: one desk, one queue, reports that
