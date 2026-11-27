@@ -2489,9 +2489,21 @@
   min-width: 140px;
   width: auto;
 }
-.gf .mo-prop-form input:focus {
+.gf .mo-prop-form input:focus,
+.gf .mo-prop-form select:focus {
   outline: none;
   border-color: var(--blu);
+}
+.gf .mo-prop-form select {
+  border: 1px solid var(--bd);
+  border-radius: var(--r);
+  padding: 7px 9px;
+  font-family: var(--fb);
+  font-size: 12px;
+  background: var(--white);
+}
+.gf .mo-dx-form {
+  margin-top: 8px;
 }
 
 /* Already ordered and not yet collected: the server refuses a repeat, so the
@@ -3572,6 +3584,37 @@
   width: 18px;
   flex-shrink: 0;
 }
+.gf .rx-move {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+.gf .rx-move button {
+  width: 18px;
+  height: 16px;
+  padding: 0;
+  font-size: 8px;
+  line-height: 1;
+  color: var(--ink3);
+  background: var(--white);
+  border: 1px solid var(--bd);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+.gf .rx-move button:hover:not(:disabled) {
+  background: var(--tl-l);
+  color: var(--tl);
+}
+.gf .rx-move button:focus-visible {
+  outline: 2px solid var(--tl);
+  outline-offset: 1px;
+}
+.gf .rx-move button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
 .gf .rx-main {
   flex: 1;
   min-width: 0;
@@ -3619,16 +3662,6 @@
   color: var(--red);
 }
 
-/* Stock: three states and a fourth for "unknown", which must never look like
-   "in stock". */
-.gf .rx-stock {
-  font-size: 10px;
-  font-family: var(--fm);
-  white-space: nowrap;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
 .gf .rx-ok {
   color: var(--grn);
 }
@@ -3649,7 +3682,6 @@
 
 .gf .rx-edit,
 .gf .rx-add,
-.gf .rx-alts,
 .gf .rx-seed {
   margin-top: 8px;
   padding: 9px 10px;
@@ -3739,25 +3771,6 @@
   font-size: 9px;
   color: var(--ink4);
   flex: 1;
-}
-.gf .rx-alt {
-  display: block;
-  width: 100%;
-  text-align: left;
-  font: inherit;
-  font-size: 11px;
-  padding: 5px 8px;
-  background: var(--white);
-  border: 1px solid var(--bd);
-  border-radius: var(--r);
-  margin-bottom: 4px;
-  cursor: pointer;
-}
-.gf .rx-alt em {
-  font-style: normal;
-  font-size: 9px;
-  color: var(--ink4);
-  margin-left: 6px;
 }
 .gf .rx-inter {
   font-size: 9px;
@@ -4349,8 +4362,7 @@
   .gf .rx-main {
     flex-basis: calc(100% - 28px);
   }
-  .gf .rx-rowacts,
-  .gf .rx-stock {
+  .gf .rx-rowacts {
     margin-left: auto;
   }
   .gf .rx-inter {
@@ -5499,65 +5511,6 @@
   border: 1px solid var(--tl-b);
 }
 
-.gf .mo-review {
-  background: var(--tl-l);
-  border: 1px solid var(--tl-b);
-  border-radius: var(--r);
-  padding: 6px 10px;
-  margin-bottom: 8px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  column-gap: 12px;
-  row-gap: 4px;
-}
-.gf .mo-review-t {
-  flex: 1 1 240px;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--tl);
-}
-.gf .mo-review .st-btn {
-  padding: 3px 10px;
-}
-.gf .mo-review-done {
-  flex-basis: 100%;
-  order: 3;
-  font-size: 11px;
-  color: var(--ink2);
-}
-.gf .mo-review-acts {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.gf .mo-review-chosen {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--grn);
-}
-.gf .mo-review-chosen.is-consultant {
-  color: var(--tl);
-}
-.gf .mo-review-undo {
-  background: none;
-  border: 0;
-  padding: 0;
-  font: inherit;
-  font-weight: 500;
-  color: var(--ink2);
-  text-decoration: underline;
-  cursor: pointer;
-}
-.gf .mo-review-undo:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
 .gf .ci-panel {
   background: var(--white);
   border: 1px solid var(--bd2);
@@ -6062,7 +6015,7 @@
 .gf .rx-thead,
 .gf .rx-row {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) 92px 108px 112px 136px 108px;
+  grid-template-columns: 20px minmax(0, 1fr) 92px 108px 112px 108px;
   gap: 10px;
   align-items: start;
 }
@@ -6076,9 +6029,6 @@
   text-transform: uppercase;
   letter-spacing: 0.4px;
   color: var(--ink3);
-}
-.gf .rx-thead .rx-col-stock {
-  color: var(--tl);
 }
 .gf .rx-col-dose,
 .gf .rx-col-timing {
@@ -6188,7 +6138,7 @@
 }
 
 @media (max-width: 860px) {
-  /* Below this the seven columns stop being scannable and become a squeeze;
+  /* Below this the six columns stop being scannable and become a squeeze;
      the row goes back to stacking, which is what the build had. */
   .gf .rx-thead {
     display: none;
@@ -6243,7 +6193,7 @@
   padding: 4px 9px;
 }
 
-/* ── Prescription: seven columns, as the prototype has them ── */
+/* ── Prescription: six columns, as the prototype has them ── */
 /* The head is the SAME grid as the row, never its own flex line: two separate
    flex boxes size their columns from their own contents, so "Actions" over two
    buttons and "Medicine" over a long brand name drifted out of line. Fixed
@@ -6265,7 +6215,6 @@
 .gf .rx-col-dose,
 .gf .rx-col-timing,
 .gf .rx-col-for,
-.gf .rx-col-stock,
 .gf .rx-col-acts {
   min-width: 0;
   font-size: 11px;
@@ -6287,9 +6236,6 @@
 }
 .gf .rx-col-for {
   width: 112px;
-}
-.gf .rx-col-stock {
-  width: 136px;
 }
 .gf .rx-col-acts {
   width: 108px;
@@ -6366,7 +6312,7 @@
   font-size: 13px;
 }
 
-/* Below the width the seven columns need, the row goes back to stacked — a
+/* Below the width the six columns need, the row goes back to stacked — a
    consultant on a tablet reads one medicine at a time rather than a table
    scrolled sideways. */
 @media (max-width: 980px) {
@@ -6401,8 +6347,7 @@
 .gf .rx-item .rx-row {
   margin-bottom: 0;
 }
-.gf .rx-item .rx-edit,
-.gf .rx-item .rx-alts {
+.gf .rx-item .rx-edit {
   background: var(--tl-l);
   border: 1px solid var(--tl-b);
   border-top: 2px solid var(--tl);
@@ -6411,8 +6356,7 @@
 }
 /* The row above an open panel loses its bottom corners so the two read as one
    card rather than two stacked ones. */
-.gf .rx-item:has(.rx-edit) .rx-row,
-.gf .rx-item:has(.rx-alts) .rx-row {
+.gf .rx-item:has(.rx-edit) .rx-row {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
   border-bottom-color: transparent;
@@ -6453,7 +6397,7 @@
   flex-wrap: wrap;
 }
 
-/* ── Responsive: below the width seven columns need, the row stacks ────────── */
+/* ── Responsive: below the width six columns need, the row stacks ────────── */
 @media (max-width: 980px) {
   .gf .rx-row {
     display: grid;
@@ -6463,7 +6407,6 @@
       ".    dose"
       ".    timing"
       ".    for"
-      ".    stock"
       ".    acts";
     gap: 3px 8px;
   }
@@ -6481,9 +6424,6 @@
   }
   .gf .rx-row .rx-col-for {
     grid-area: for;
-  }
-  .gf .rx-row .rx-stock {
-    grid-area: stock;
   }
   .gf .rx-row .rx-rowacts {
     grid-area: acts;
@@ -6548,15 +6488,11 @@
   border-color: var(--red-b);
 }
 
-/* The table head sits on the page ground, as the prototype's `thead th` does,
-   and the stock column is teal because stock is the column the pharmacy owns. */
+/* The table head sits on the page ground, as the prototype's `thead th` does. */
 .gf .rx-thead {
   background: var(--bg);
   padding: 6px 10px;
   border-radius: var(--r) var(--r) 0 0;
-}
-.gf .rx-thead .rx-col-stock {
-  color: var(--tl);
 }
 /* `.rx-row-static:hover` in the prototype. */
 .gf .rx-row:hover {
@@ -6579,17 +6515,6 @@
 .gf .rx-col-timing {
   font-size: 11px;
   color: var(--ink3);
-}
-/* `.alt-btn` — purple and underlined, not another grey button. */
-.gf .rx-stock .btn-sm {
-  border: none;
-  background: none;
-  padding: 0;
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--pu);
-  text-decoration: underline;
-  cursor: pointer;
 }
 
 /* ══ MEDICINE CARD — gini-doctor-final.html `s-medcard` ═══════════════════════
@@ -10245,4 +10170,30 @@
     outline: 2px solid var(--blu);
     outline-offset: 2px;
   }
+}
+.gf .mo-viewonly {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.gf .mo-viewonly-note {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--ink2);
+  background: var(--bg);
+  border: 1px solid var(--bd);
+  border-left: 3px solid var(--ink3);
+  border-radius: var(--r);
+}
+.gf .si-viewonly {
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--ink3);
+  border: 1px solid var(--bd);
+  border-radius: 999px;
+  vertical-align: middle;
 }

@@ -1,0 +1,5 @@
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+ALTER TABLE giniflow_visits
+  ADD COLUMN IF NOT EXISTS rx_order_manual BOOLEAN NOT NULL DEFAULT FALSE;
+COMMIT;

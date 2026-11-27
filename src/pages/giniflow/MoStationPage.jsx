@@ -17,11 +17,12 @@ import {
   useReleaseWorkup,
   useTakeOver,
   useCloseWithoutDoctor,
-  useReviewReports,
   useAddProposal,
   useWithdrawProposal,
   useMoSuggestions,
+  useAddDiagnosis,
 } from "../../queries/hooks/useGiniflowMo";
+import { DX_LIST, DX_STATUS_OPTS } from "../../components/visit/helpers";
 import { VoiceButton } from "../../components/giniflow/VoiceInput";
 import RxSection from "./consult/RxSection";
 import VisitSummarySection from "./consult/VisitSummarySection";
@@ -40,6 +41,7 @@ import {
   TEST_URGENCY,
 } from "./consult/testSearch";
 import useAuthStore from "../../stores/authStore";
+import { CAPABILITIES, hasCapability } from "../../../shared/permissions.js";
 import { useTick, minutesSince, budgetColour } from "../../lib/giniflowTime";
 import { useGiniflowLive } from "../../queries/hooks/useGiniflowLive";
 import LiveBadge from "../../components/giniflow/LiveBadge";
@@ -372,11 +374,14 @@ function RowDetail({ card, now }) {
   );
 }
 
-function QueueRow({ card, active, onOpen, readOnly, now }) {
+function QueueRow({ card, active, onOpen, readOnly, viewOnly, now }) {
   const body = (
     <>
       <div className="si-slot">{card.slot}</div>
-      <div className="si-name">{card.name}</div>
+      <div className="si-name">
+        {card.name}
+        {viewOnly && <span className="si-viewonly">View only</span>}
+      </div>
       <RowDetail card={card} now={now} />
     </>
   );
@@ -445,6 +450,7 @@ function ConfirmDialog({ open, title, body, confirmLabel, tone = "grn", onConfir
 }
 
 const EMPTY_PROPOSAL = { medicineName: "", fromDose: "", toDose: "", reason: "" };
+const EMPTY_DIAGNOSIS = { name: "", status: "Newly Diagnosed" };
 
 // Does the plan ask for a test the MO never actually ordered?
 //
@@ -514,6 +520,7 @@ export default function MoStationPage() {
   const [toast, setToast] = useState("");
   const [openMarker, setOpenMarker] = useState(null);
   const [draft, setDraft] = useState(EMPTY_PROPOSAL);
+  const [dxDraft, setDxDraft] = useState(EMPTY_DIAGNOSIS);
   // What the last read of the plan found, shown until the MO acts on it or
   // edits the plan again. Held here rather than applied silently: the point of
   // this feature is that the MO sees what was understood.
@@ -537,6 +544,7 @@ export default function MoStationPage() {
   }, [search]);
 
   const me = useAuthStore((st) => st.currentDoctor);
+  const canViewOthers = hasCapability(me, CAPABILITIES.ADMIN);
   const now = useTick();
   const { data: queue, isLoading } = useMoQueue(undefined, term);
   const searching = !!queue?.query;
@@ -544,6 +552,7 @@ export default function MoStationPage() {
   // but stop following it the moment the MO types, or a 15-second refetch would
   // swap the patient out from under the textarea.
   const activeId = selected;
+  const viewOnly = (queue?.withOtherSd || []).find((c) => c.visitId === activeId) || null;
   const { data: patient } = useMoPatient(activeId);
   const { data: catalogue } = useTestPanels(activeId);
 
@@ -564,11 +573,6 @@ export default function MoStationPage() {
   const release = useReleaseWorkup();
   const takeOver = useTakeOver();
   const close = useCloseWithoutDoctor();
-  const review = useReviewReports();
-  const [pendingOutcome, setPendingOutcome] = useState(undefined);
-  useEffect(() => setPendingOutcome(undefined), [activeId]);
-  const chosenOutcome =
-    pendingOutcome === undefined ? (patient?.reportsOutcome ?? null) : pendingOutcome;
   const { data: suggestions } = useMoSuggestions(activeId);
   const suggestedNextVisit = (suggestions?.suggestions || []).find(
     (sg) => sg.field === "next_visit" && sg.status !== "dismissed",
@@ -579,14 +583,13 @@ export default function MoStationPage() {
     patient?.edit?.nextVisit?.date
   );
   const acts = moActions({
-    chosenOutcome,
     plan,
     canClose: patient?.canClose,
-    reportsReady: patient?.resultsStatus === "ready",
     hasNextVisit,
   });
   const addProposal = useAddProposal();
   const withdrawProposal = useWithdrawProposal();
+  const addDiagnosis = useAddDiagnosis();
 
   const toggleGroup = (key) =>
     setCollapsed((prev) => {
@@ -639,6 +642,7 @@ export default function MoStationPage() {
     setUrgency("today");
     setOpenMarker(null);
     setDraft(EMPTY_PROPOSAL);
+    setDxDraft(EMPTY_DIAGNOSIS);
     setExtracted(null);
   }, [patient?.visitId]);
 
@@ -785,12 +789,7 @@ export default function MoStationPage() {
     );
   };
 
-  const sendToDoctor = async () => {
-    try {
-      await saveOutcomeFirst();
-    } catch (e) {
-      return showToast(e?.response?.data?.error || "Could not record the report review");
-    }
+  const sendToDoctor = () => {
     ready.mutate(activeId, {
       onSuccess: () => {
         showToast(`✓ ${patient.name} is ready for the doctor`);
@@ -843,26 +842,7 @@ export default function MoStationPage() {
       onError: (e) => showToast(e?.response?.data?.error || "Could not put this patient back"),
     });
 
-  const reviewAs = (outcome) => {
-    setPendingOutcome(outcome);
-    showToast(
-      outcome === "normal"
-        ? "Normal — write the plan, then Close to save it"
-        : "Consultant needed — saved when you hand over",
-    );
-  };
-
-  const saveOutcomeFirst = async () => {
-    if (!pendingOutcome || pendingOutcome === patient?.reportsOutcome) return;
-    await review.mutateAsync({ visitId: activeId, outcome: pendingOutcome });
-  };
-
-  const closePatient = async () => {
-    try {
-      await saveOutcomeFirst();
-    } catch (e) {
-      return showToast(e?.response?.data?.error || "Could not record the report review");
-    }
+  const closePatient = () => {
     close.mutate(activeId, {
       onSuccess: () => {
         showToast(`✓ ${patient.name} closed — prescription written, on to the Rx desk`);
@@ -884,6 +864,22 @@ export default function MoStationPage() {
           showToast("✓ Suggested to the doctor");
         },
         onError: (e) => showToast(e?.response?.data?.error || "Could not save that suggestion"),
+      },
+    );
+  };
+
+  const submitDiagnosis = (e) => {
+    e.preventDefault();
+    const name = dxDraft.name.trim();
+    if (!name) return;
+    addDiagnosis.mutate(
+      { patientId: patient.patientId, name, status: dxDraft.status },
+      {
+        onSuccess: () => {
+          setDxDraft(EMPTY_DIAGNOSIS);
+          showToast(`✓ Diagnosis added for ${patient.name}`);
+        },
+        onError: (e) => showToast(e?.response?.data?.error || "Could not add that diagnosis"),
       },
     );
   };
@@ -1013,17 +1009,21 @@ export default function MoStationPage() {
                   id={id}
                 />
                 <div id={id} hidden={!open}>
-                  {rows.map((card) => (
-                    <QueueRow
-                      key={card.visitId}
-                      card={card}
-                      active={card.visitId === activeId}
-                      onOpen={g.key === "done" ? viewClosed : openPatient}
-                      onTakeOver={askTakeOver}
-                      readOnly={g.readOnly}
-                      now={now}
-                    />
-                  ))}
+                  {rows.map((card) => {
+                    const viewable = g.key === "withOtherSd" && canViewOthers;
+                    return (
+                      <QueueRow
+                        key={card.visitId}
+                        card={card}
+                        active={card.visitId === activeId}
+                        onOpen={viewable || g.key === "done" ? viewClosed : openPatient}
+                        onTakeOver={askTakeOver}
+                        readOnly={g.readOnly && !viewable}
+                        viewOnly={viewable}
+                        now={now}
+                      />
+                    );
+                  })}
                 </div>
               </div>
             );
@@ -1063,7 +1063,7 @@ export default function MoStationPage() {
                   />
                 </div>
                 <div className="sdh-acts">
-                  {patient.edit?.canEdit && (
+                  {!viewOnly && patient.edit?.canEdit && (
                     <EditPrescriptionButton visitId={activeId} station="mo" onToast={showToast} />
                   )}
                   <StabilityChip stability={patient.stability} detail />
@@ -1072,7 +1072,7 @@ export default function MoStationPage() {
                       {cat.icon} {cat.label}
                     </span>
                   )}
-                  {patient.status === "with_sd" && (
+                  {!viewOnly && patient.status === "with_sd" && (
                     <button
                       className="st-btn st-btn-ghost"
                       onClick={() =>
@@ -1093,132 +1093,141 @@ export default function MoStationPage() {
               </div>
 
               <div className="sd-body">
-                {patient.edit?.finalized && !patient.edit.editingMine && (
-                  <div className="fin-done">
-                    <strong>✓ Finalized</strong>
-                    {patient.edit.editing && (
-                      <span className="fin-gap">
-                        {patient.edit.editing.name || "Another doctor"} is editing this prescription
-                        now.
-                      </span>
-                    )}
-                    <AmendedNote amendedAt={patient.edit.amendedAt} />
-                    {!patient.edit.scribeRx && (
-                      <span className="fin-gap">
-                        This prescription was not written in Scribe — change it in HealthRay.
-                      </span>
-                    )}
-                  </div>
+                {viewOnly && (
+                  <p className="mo-viewonly-note" role="status">
+                    👁 View only — this is{" "}
+                    {viewOnly.sdName ? `${viewOnly.sdName}'s` : "another Chief Endocrinologist's"}{" "}
+                    patient. Nothing can be changed from here.
+                  </p>
                 )}
-                {/* No allergy field exists in the database yet, so this says what
+                <fieldset className="mo-viewonly" disabled={!!viewOnly}>
+                  {patient.edit?.finalized && !patient.edit.editingMine && (
+                    <div className="fin-done">
+                      <strong>✓ Finalized</strong>
+                      {patient.edit.editing && (
+                        <span className="fin-gap">
+                          {patient.edit.editing.name || "Another doctor"} is editing this
+                          prescription now.
+                        </span>
+                      )}
+                      <AmendedNote amendedAt={patient.edit.amendedAt} />
+                      {!patient.edit.scribeRx && (
+                        <span className="fin-gap">
+                          This prescription was not written in Scribe — change it in HealthRay.
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {/* No allergy field exists in the database yet, so this says what
                     is true rather than "None recorded", which would read as a
                     check somebody performed. Plan §7. */}
-                <div className="allergy-strip unknown">
-                  ⚠ ALLERGIES: <strong>not recorded anywhere</strong> — ask the patient
-                </div>
+                  <div className="allergy-strip unknown">
+                    ⚠ ALLERGIES: <strong>not recorded anywhere</strong> — ask the patient
+                  </div>
 
-                {patient.vitals ? (
-                  <div className="dp-sec">
-                    {/* Where the reading came from, because there are two
+                  {patient.vitals ? (
+                    <div className="dp-sec">
+                      {/* Where the reading came from, because there are two
                         places it can be: the Gini Flow vitals station, or
                         HealthRay's own screen, which is where most of the floor
                         still works. Saying "just taken" about a HealthRay
                         reading would credit a station that never saw them. */}
-                    <div className="dp-sec-title">
-                      {patient.vitals.readingSource === "healthray"
-                        ? "Vitals — from HealthRay"
-                        : "Vitals just taken"}
-                      {clock(patient.vitals.recorded_at) && (
-                        <span className="mo-vsrc"> · {clock(patient.vitals.recorded_at)}</span>
-                      )}
-                    </div>
-                    <div className="mo-vitals">
-                      {VITAL_ROWS.filter((r) => r.of(patient.vitals) != null).map((r) => {
-                        const change = deltaText(patient.vitals, patient.lastVitals, r);
-                        return (
-                          <span key={r.key}>
-                            {r.label}{" "}
-                            <strong>
-                              {r.of(patient.vitals)}
-                              {r.unit}
-                            </strong>
-                            {change && <em className="mo-delta">{change}</em>}
-                          </span>
-                        );
-                      })}
-                      {patient.vitals.bmi && (
-                        <span>
-                          BMI <strong>{patient.vitals.bmi}</strong>
-                        </span>
-                      )}
-                    </div>
-                    {!patient.lastVitals && (
-                      <div className="dp-hint">
-                        No earlier reading on record to compare against.
+                      <div className="dp-sec-title">
+                        {patient.vitals.readingSource === "healthray"
+                          ? "Vitals — from HealthRay"
+                          : "Vitals just taken"}
+                        {clock(patient.vitals.recorded_at) && (
+                          <span className="mo-vsrc"> · {clock(patient.vitals.recorded_at)}</span>
+                        )}
                       </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="dp-sec">
-                    <div className="dp-sec-title">Vitals</div>
-                    {/* Both places have been looked in — the station's table and
+                      <div className="mo-vitals">
+                        {VITAL_ROWS.filter((r) => r.of(patient.vitals) != null).map((r) => {
+                          const change = deltaText(patient.vitals, patient.lastVitals, r);
+                          return (
+                            <span key={r.key}>
+                              {r.label}{" "}
+                              <strong>
+                                {r.of(patient.vitals)}
+                                {r.unit}
+                              </strong>
+                              {change && <em className="mo-delta">{change}</em>}
+                            </span>
+                          );
+                        })}
+                        {patient.vitals.bmi && (
+                          <span>
+                            BMI <strong>{patient.vitals.bmi}</strong>
+                          </span>
+                        )}
+                      </div>
+                      {!patient.lastVitals && (
+                        <div className="dp-hint">
+                          No earlier reading on record to compare against.
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="dp-sec">
+                      <div className="dp-sec-title">Vitals</div>
+                      {/* Both places have been looked in — the station's table and
                         HealthRay's — so this can say "no reading", not merely
                         "not taken here". */}
-                    <div className="dp-hint">
-                      No reading on file for today, at this station or on HealthRay.
+                      <div className="dp-hint">
+                        No reading on file for today, at this station or on HealthRay.
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {markers.length > 0 && (
-                  <div className="dp-sec">
-                    <div className="dp-sec-title">Key numbers</div>
-                    <div className="mo-concern-line">
-                      ✓ {summary.g} in control · ⚠ {summary.a} to watch · ↑ {summary.r} out of range
+                  {markers.length > 0 && (
+                    <div className="dp-sec">
+                      <div className="dp-sec-title">Key numbers</div>
+                      <div className="mo-concern-line">
+                        ✓ {summary.g} in control · ⚠ {summary.a} to watch · ↑ {summary.r} out of
+                        range
+                      </div>
+                      <div className="mo-bios">
+                        {markers.map((m) => (
+                          <button
+                            key={m.key}
+                            type="button"
+                            className={`mo-bio mo-bio-${m.tone}${openMarker === m.key ? " on" : ""}`}
+                            aria-expanded={openMarker === m.key}
+                            onClick={() => setOpenMarker(openMarker === m.key ? null : m.key)}
+                          >
+                            <div className="mb-val">
+                              {m.value}
+                              <span className="mb-unit">{m.unit}</span>
+                            </div>
+                            <div className="mb-lbl">{m.label}</div>
+                            <div className="mb-prev">
+                              {m.prev == null ? (
+                                "first reading"
+                              ) : (
+                                <>
+                                  {m.delta > 0 ? "▲" : m.delta < 0 ? "▼" : "="}{" "}
+                                  {m.delta === 0 ? "no change" : `from ${m.prev}`}
+                                </>
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                      {openMarker && (
+                        <TrendChart
+                          marker={MARKERS.find((m) => m.key === openMarker)}
+                          history={[
+                            ...(patient.biomarkerHistory || []),
+                            { date: "today", biomarkers: patient.biomarkers },
+                          ]}
+                        />
+                      )}
+                      {patient.compliancePct != null && (
+                        <div className="dp-hint">{patient.compliancePct}% compliance reported</div>
+                      )}
                     </div>
-                    <div className="mo-bios">
-                      {markers.map((m) => (
-                        <button
-                          key={m.key}
-                          type="button"
-                          className={`mo-bio mo-bio-${m.tone}${openMarker === m.key ? " on" : ""}`}
-                          aria-expanded={openMarker === m.key}
-                          onClick={() => setOpenMarker(openMarker === m.key ? null : m.key)}
-                        >
-                          <div className="mb-val">
-                            {m.value}
-                            <span className="mb-unit">{m.unit}</span>
-                          </div>
-                          <div className="mb-lbl">{m.label}</div>
-                          <div className="mb-prev">
-                            {m.prev == null ? (
-                              "first reading"
-                            ) : (
-                              <>
-                                {m.delta > 0 ? "▲" : m.delta < 0 ? "▼" : "="}{" "}
-                                {m.delta === 0 ? "no change" : `from ${m.prev}`}
-                              </>
-                            )}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                    {openMarker && (
-                      <TrendChart
-                        marker={MARKERS.find((m) => m.key === openMarker)}
-                        history={[
-                          ...(patient.biomarkerHistory || []),
-                          { date: "today", biomarkers: patient.biomarkers },
-                        ]}
-                      />
-                    )}
-                    {patient.compliancePct != null && (
-                      <div className="dp-hint">{patient.compliancePct}% compliance reported</div>
-                    )}
-                  </div>
-                )}
+                  )}
 
-                {/* Sits with the vitals and the numbers, because it is the same
+                  {/* Sits with the vitals and the numbers, because it is the same
                     thing: what is known about this patient before anyone decides
                     anything. It used to be the last section on the screen, below
                     the prescription editor and twenty-five test chips — so the
@@ -1229,646 +1238,627 @@ export default function MoStationPage() {
                     the plan off the bottom, and the MO who wants a report knows
                     they want one — what has to stand open is the count, and
                     whether any of it arrived today. */}
-                {/* The same field ReportsList groups on, so the count, the
+                  {/* The same field ReportsList groups on, so the count, the
                     highlight and the "Today's visit" group underneath cannot
                     disagree about what arrived today. */}
-                {/* Values the lab typed in rather than scanned. They live in
+                  {/* Values the lab typed in rather than scanned. They live in
                     the patient's labs like any other result, but the MO reading
                     what came back should not have to scroll past the whole
                     prescription editor to reach them — so they sit with the
                     reports. docs/gini-flow/32-LAB-TYPED-RESULTS-PLAN.md */}
-                {(patient.orders || []).some((o) => o.values?.length > 0) && (
-                  <div className="dp-sec mo-results">
-                    <div className="dp-sec-title">🧪 Results the lab entered</div>
-                    <div className="mo-values">
-                      {(patient.orders || []).flatMap((o) =>
-                        (o.values || []).map((v) => (
-                          <span
-                            key={`${o.id}-${v.testName}`}
-                            className={`mo-val${v.flag ? ` mo-val-${v.flag.toLowerCase()}` : ""}`}
-                          >
-                            {v.testName} <strong>{v.value ?? v.valueText}</strong>
-                            {v.unit ? ` ${v.unit}` : ""}
-                            {v.flag ? ` ${v.flag}` : ""}
-                          </span>
-                        )),
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                <div className={`dp-sec${reportsToday > 0 ? " mo-reports-new" : ""}`}>
-                  <button
-                    type="button"
-                    className="sq-toggle"
-                    aria-expanded={showReports}
-                    aria-controls="mo-reports"
-                    onClick={() => setShowReports((v) => !v)}
-                  >
-                    <span className={`sq-chev${showReports ? " open" : ""}`} aria-hidden="true">
-                      ▸
-                    </span>
-                    📄 Reports
-                    <span className="sq-count">
-                      {reportsAll.length
-                        ? `${reportsAll.length}${reportsToday ? ` · ${reportsToday} from today` : ""}`
-                        : "none on file"}
-                    </span>
-                    {reportsToday > 0 && <span className="sq-new">NEW</span>}
-                  </button>
-                  <div id="mo-reports" hidden={!showReports}>
-                    <ReportsList
-                      reports={patient.reports || []}
-                      visitDate={patient.visitDate}
-                      empty="No documents on file for this patient."
-                    />
-                  </div>
-                </div>
-
-                <div className="dp-sec">
-                  <div className="dp-sec-title">Today's concerns</div>
-                  {markers.filter((m) => m.tone !== "g").length > 0 && (
-                    <ul className="mo-concerns">
-                      {markers
-                        .filter((m) => m.tone !== "g")
-                        .map((m) => (
-                          <li key={m.key} className={`mc-${m.tone}`}>
-                            <strong>
-                              {m.label} {m.value}
-                              {m.unit}
-                            </strong>{" "}
-                            — {m.tone === "r" ? "out of range" : "above target"}
-                            {m.prev != null && ` (was ${m.prev})`}
-                            <span className="mc-src">from reports</span>
-                          </li>
-                        ))}
-                    </ul>
-                  )}
-                  {patient.compliance?.missed && (
-                    <div className="mo-concern-note">
-                      <strong>Since the last visit:</strong> {patient.compliance.missed}
-                      <span className="mc-src">between visits</span>
-                    </div>
-                  )}
-                  {patient.compliance?.diet && (
-                    <div className="mo-concern-note">
-                      <strong>Diet advised:</strong> {patient.compliance.diet}
-                    </div>
-                  )}
-                  {/* The MyHealth Genie symptom tables are still unreconciled
-                      (plan §7), so this says nothing was read rather than
-                      implying the patient reported nothing. */}
-                  <div className="dp-hint">
-                    Patient-reported concerns from the MyHealth Genie app are not wired to this
-                    screen yet — ask.
-                  </div>
-                </div>
-
-                {patient.diagnoses?.length > 0 && (
-                  <div className="dp-sec">
-                    <div className="dp-sec-title">Diagnoses</div>
-                    <div className="mo-dx">
-                      {patient.diagnoses.map((d) => (
-                        <span
-                          key={d.id || d.label}
-                          className={`dx-chip${/uncontrolled/i.test(d.status || "") ? " bad" : ""}`}
-                        >
-                          {d.label}
-                          {d.status ? ` · ${d.status}` : ""}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {activeMeds.length > 0 && (
-                  <div className="dp-sec">
-                    <div className="dp-sec-title">Current medicines</div>
-                    <ul className="mo-meds">
-                      {activeMeds.map((m, i) => (
-                        <li key={`${m.name}-${i}`}>
-                          <strong>{m.name}</strong>
-                          {m.dose ? ` · ${m.dose}` : ""}
-                          {m.frequency ? ` · ${m.frequency}` : ""}
-                          {m.timing ? ` · ${m.timing}` : ""}
-                        </li>
-                      ))}
-                    </ul>
-                    {/* Plan §2.4 item 7: a dose proposal made without sight of
-                        what another hospital prescribed is unsafe, and no
-                        external_medicines table exists yet (brief §3, Phase 3). */}
-                    <div className="dp-hint">
-                      This is what Gini prescribed. Medicines from another hospital are not recorded
-                      anywhere — ask before suggesting a change.
-                    </div>
-                  </div>
-                )}
-
-                <div className="dp-sec">
-                  <div className="dp-sec-title">
-                    Plan {savePlan.isPending ? "· saving…" : plan ? "· saved" : ""}
-                  </div>
-                  <textarea
-                    className="mo-plan"
-                    rows={5}
-                    placeholder="What did you find, and what should the doctor know?"
-                    value={plan}
-                    onChange={(e) => onPlanChange(e.target.value)}
-                  />
-                  <div className="mo-dictate">
-                    <VoiceButton
-                      label="🎤 Dictate the plan"
-                      title="Speak the plan — you can edit it before it is added"
-                      onText={appendSpoken}
-                    />
-                  </div>
-
-                  {/* Reads back what the MO wrote and points at the two panels
-                      below — it never adds a test the plan did not name. The
-                      result is shown, not applied: the MO sees what was
-                      understood and can drop any of it. */}
-                  <div className="mo-extract">
-                    <button
-                      type="button"
-                      className="st-btn st-btn-g"
-                      onClick={readPlan}
-                      disabled={!plan.trim() || extractPlan.isPending}
-                    >
-                      {extractPlan.isPending
-                        ? "Reading…"
-                        : "✨ Pull tests & suggestions from my plan"}
-                    </button>
-                  </div>
-
-                  {extracted && (
-                    <div className="mo-xtr">
-                      <div className="mo-xtr-head">From your plan — nothing is saved yet</div>
-                      {extracted.tests?.length > 0 && (
-                        <div className="mo-xtr-row">
-                          <span className="mo-xtr-lbl">Tests</span>
-                          <span className="mo-xtr-vals">{extracted.tests.join(" · ")}</span>
-                        </div>
-                      )}
-                      {extracted.urgency && (
-                        <div className="mo-xtr-row">
-                          <span className="mo-xtr-lbl">When</span>
-                          <span className="mo-xtr-vals">
-                            {(() => {
-                              const u = URGENCY.find((x) => x.key === extracted.urgency);
-                              return u ? `${u.label} — ${u.sub}` : extracted.urgency;
-                            })()}
-                          </span>
-                        </div>
-                      )}
-                      {extracted.proposals?.map((pr, i) => (
-                        <div className="mo-xtr-row" key={`${pr.medicineName}-${i}`}>
-                          <span className="mo-xtr-lbl">{i === 0 ? "Suggest" : ""}</span>
-                          <span className="mo-xtr-vals">
-                            {pr.medicineName}
-                            {pr.fromDose || pr.toDose
-                              ? ` — ${pr.fromDose || "?"} → ${pr.toDose || "?"}`
-                              : ""}
-                            {pr.reason ? ` · ${pr.reason}` : ""}
-                            {i > 0 && <em className="mo-xtr-note"> (add this one by hand)</em>}
-                          </span>
-                        </div>
-                      ))}
-                      {/* Named, not silently dropped: a test the catalogue does
-                          not stock is something the MO has to do something
-                          about, and hiding it would look like it was ordered. */}
-                      {extracted.unmatched?.length > 0 && (
-                        <div className="mo-xtr-row mo-xtr-warn">
-                          <span className="mo-xtr-lbl">Not in the catalogue</span>
-                          <span className="mo-xtr-vals">{extracted.unmatched.join(" · ")}</span>
-                        </div>
-                      )}
-                      <div className="mo-xtr-acts">
-                        <button type="button" className="st-btn st-btn-tl" onClick={applyExtracted}>
-                          Fill these in
-                        </button>
-                        <button
-                          type="button"
-                          className="st-btn st-btn-g"
-                          onClick={() => setExtracted(null)}
-                        >
-                          Discard
-                        </button>
+                  {(patient.orders || []).some((o) => o.values?.length > 0) && (
+                    <div className="dp-sec mo-results">
+                      <div className="dp-sec-title">🧪 Results the lab entered</div>
+                      <div className="mo-values">
+                        {(patient.orders || []).flatMap((o) =>
+                          (o.values || []).map((v) => (
+                            <span
+                              key={`${o.id}-${v.testName}`}
+                              className={`mo-val${v.flag ? ` mo-val-${v.flag.toLowerCase()}` : ""}`}
+                            >
+                              {v.testName} <strong>{v.value ?? v.valueText}</strong>
+                              {v.unit ? ` ${v.unit}` : ""}
+                              {v.flag ? ` ${v.flag}` : ""}
+                            </span>
+                          )),
+                        )}
                       </div>
                     </div>
                   )}
 
-                  <div className="dp-hint">
-                    Autosaves as you type. The doctor cannot take this patient without a plan.
-                  </div>
-                </div>
-
-                {/* The MO edits the actual prescription; their rows reach the
-                    doctor as proposals to approve, adjust or reject (addendum
-                    v1.1 §3). The same section the consultant uses — one inline
-                    editor, not a second one that could drift from it. */}
-                <div className="dp-sec mo-rx">
-                  <VisitSummarySection
-                    visitId={activeId}
-                    station="mo"
-                    readOnly={patient.status !== "with_sd" && !patient.edit?.editingMine}
-                    onToast={showToast}
-                  />
-                </div>
-
-                <div className="dp-sec mo-rx">
-                  <VisitNewPatientWorkup
-                    patientId={patient.patientId}
-                    appointmentId={patient.appointmentId}
-                    mode="auto"
-                    variant="station"
-                  />
-                </div>
-
-                <div className="dp-sec mo-rx">
-                  <RxParameterSection
-                    visitId={activeId}
-                    station="mo"
-                    readOnly={patient.status !== "with_sd" && !patient.edit?.editingMine}
-                    onToast={showToast}
-                  />
-                </div>
-
-                <div className="dp-sec mo-rx">
-                  <RxSection
-                    visitId={activeId}
-                    station="mo"
-                    amending={!!patient.edit?.editingMine}
-                    readOnly={patient.status !== "with_sd" && !patient.edit?.editingMine}
-                    onToast={showToast}
-                  />
-                </div>
-
-                <div className="dp-sec">
-                  <div className="dp-sec-title">💊 Suggest to the doctor</div>
-                  {patient.proposals.length > 0 && (
-                    <ul className="mo-proposals">
-                      {patient.proposals.map((p) => (
-                        <li key={p.id}>
-                          <span>
-                            <strong>{p.medicine_name}</strong>
-                            {p.from_dose ? ` ${p.from_dose} →` : " →"} {p.to_dose}
-                            {p.reason ? ` · ${p.reason}` : ""}
-                          </span>
-                          <button
-                            type="button"
-                            className="prop-x"
-                            aria-label={`Withdraw ${p.medicine_name}`}
-                            onClick={() => withdrawProposal.mutate(p.id)}
-                          >
-                            ✕
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <form className="mo-prop-form" onSubmit={submitProposal}>
-                    <input
-                      list="mo-med-names"
-                      placeholder="Medicine"
-                      value={draft.medicineName}
-                      onChange={(e) => {
-                        const medicineName = e.target.value;
-                        const known = activeMeds.find(
-                          (m) => m.name.toLowerCase() === medicineName.toLowerCase(),
-                        );
-                        setDraft((d) => ({
-                          ...d,
-                          medicineName,
-                          fromDose: known?.dose ?? d.fromDose,
-                        }));
-                      }}
-                    />
-                    <datalist id="mo-med-names">
-                      {activeMeds.map((m, i) => (
-                        <option key={`${m.name}-${i}`} value={m.name} />
-                      ))}
-                    </datalist>
-                    <input
-                      placeholder="From"
-                      value={draft.fromDose}
-                      onChange={(e) => setDraft((d) => ({ ...d, fromDose: e.target.value }))}
-                    />
-                    <input
-                      placeholder="To"
-                      value={draft.toDose}
-                      onChange={(e) => setDraft((d) => ({ ...d, toDose: e.target.value }))}
-                    />
-                    <input
-                      className="prop-reason"
-                      placeholder="Why"
-                      value={draft.reason}
-                      onChange={(e) => setDraft((d) => ({ ...d, reason: e.target.value }))}
-                    />
+                  <div className={`dp-sec${reportsToday > 0 ? " mo-reports-new" : ""}`}>
                     <button
-                      className="st-btn st-btn-tl"
-                      disabled={
-                        addProposal.isPending || !draft.medicineName.trim() || !draft.toDose.trim()
-                      }
+                      type="button"
+                      className="sq-toggle"
+                      aria-expanded={showReports}
+                      aria-controls="mo-reports"
+                      onClick={() => setShowReports((v) => !v)}
                     >
-                      Suggest
+                      <span className={`sq-chev${showReports ? " open" : ""}`} aria-hidden="true">
+                        ▸
+                      </span>
+                      📄 Reports
+                      <span className="sq-count">
+                        {reportsAll.length
+                          ? `${reportsAll.length}${reportsToday ? ` · ${reportsToday} from today` : ""}`
+                          : "none on file"}
+                      </span>
+                      {reportsToday > 0 && <span className="sq-new">NEW</span>}
                     </button>
-                  </form>
-                  <div className="dp-hint">
-                    A suggestion, not a prescription — the doctor decides. Withdraw it any time
-                    before you hand over.
-                  </div>
-                </div>
-
-                {patient.edit?.editingMine ? (
-                  <EditNextVisit
-                    key={activeId}
-                    visitId={activeId}
-                    fromDate={patient.visitDate}
-                    saved={patient.edit.nextVisit}
-                    onToast={showToast}
-                  />
-                ) : (
-                  <div className="dp-sec mo-suggest">
-                    <div className="dp-sec-title">📝 Suggest advice &amp; care plan</div>
-                    <ChiefSuggestions
-                      visitId={activeId}
-                      readOnly={patient.status !== "with_sd"}
-                      nextVisitRequired={!!acts.showClose}
-                      onToast={showToast}
-                    />
-                  </div>
-                )}
-
-                <div className="dp-sec">
-                  <div className="cs-head">
-                    <h2>🔬 Tests to order</h2>
-                    <span className="cs-sub">
-                      panels or individual tests · set when they are needed
-                    </span>
-                    <div className="cs-head-r">
-                      <VoiceButton
-                        small
-                        label="🎤 Voice"
-                        title={'Say: "Order diabetes panel for next visit" or "Add TSH today"'}
-                        onText={(text) => {
-                          setTestFilter(text);
-                          testFilterRef.current?.focus();
-                        }}
+                    <div id="mo-reports" hidden={!showReports}>
+                      <ReportsList
+                        reports={patient.reports || []}
+                        visitDate={patient.visitDate}
+                        empty="No documents on file for this patient."
                       />
                     </div>
                   </div>
-                  <div className="cn-head">When are these needed?</div>
-                  <div className="cp-chips">
-                    {URGENCY.map((u) => (
-                      <button
-                        key={u.key}
-                        type="button"
-                        className={urgency === u.key ? "on" : ""}
-                        onClick={() => setUrgency(u.key)}
-                      >
-                        {u.label}
-                        {u.key === "next_visit" && patient.nextVisitDate
-                          ? ` · ${monthLabel(patient.nextVisitDate)}`
-                          : ""}{" "}
-                        <em>— {u.sub}</em>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="cn-head">Quick panels</div>
-                  <div className="tst-panels">
-                    {(catalogue?.panels || []).map((p) => (
-                      <button
-                        key={p.key}
-                        type="button"
-                        className={`tst-panel${p.tests.every((t) => picked.includes(t)) ? " on" : ""}`}
-                        onClick={() => togglePanel(p)}
-                      >
-                        <strong>
-                          {p.icon} {p.label}
-                        </strong>
-                        <em>{p.tests.join(" · ")}</em>
-                        <span>{p.tests.length} tests</span>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="cn-head tst-head">
-                    {searchingTests
-                      ? "Matching tests"
-                      : showAllTests
-                        ? "All tests"
-                        : "Most used tests"}
-                    {!searchingTests && (
-                      <button
-                        type="button"
-                        className="btn-sm"
-                        onClick={() => setShowAllTests((v) => !v)}
-                      >
-                        {showAllTests ? "Show most used only" : `Show all ${testCatalog.length}`}
-                      </button>
+
+                  <div className="dp-sec">
+                    <div className="dp-sec-title">Today's concerns</div>
+                    {markers.filter((m) => m.tone !== "g").length > 0 && (
+                      <ul className="mo-concerns">
+                        {markers
+                          .filter((m) => m.tone !== "g")
+                          .map((m) => (
+                            <li key={m.key} className={`mc-${m.tone}`}>
+                              <strong>
+                                {m.label} {m.value}
+                                {m.unit}
+                              </strong>{" "}
+                              — {m.tone === "r" ? "out of range" : "above target"}
+                              {m.prev != null && ` (was ${m.prev})`}
+                              <span className="mc-src">from reports</span>
+                            </li>
+                          ))}
+                      </ul>
                     )}
-                  </div>
-                  <div className="tst-heard">
-                    <input
-                      ref={testFilterRef}
-                      type="search"
-                      className="cp-inp tst-filter"
-                      value={testFilter}
-                      placeholder="Search tests by name or purpose — e.g. TSH, kidney, lipid"
-                      aria-label="Search tests"
-                      onChange={(e) => setTestFilter(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Escape") setTestFilter("");
-                      }}
-                    />
-                    {testFilter && (
-                      <span className="tst-count" aria-live="polite">
-                        {searchingTests
-                          ? `${visibleTests.length} of ${testCatalog.length} tests`
-                          : `Type at least ${MIN_SEARCH_LENGTH} characters to search`}
-                      </span>
-                    )}
-                    {testFilter && (
-                      <button type="button" className="btn-sm" onClick={() => setTestFilter("")}>
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                  {(() => {
-                    const typed = testFilter.trim();
-                    const known = [...testCatalog, ...custom].some(
-                      (t) => t.name.toLowerCase() === typed.toLowerCase(),
-                    );
-                    if (typed.length < 2 || known) return null;
-                    return (
-                      <div className="tst-new">
-                        <span>“{typed}” is not in the list — order it for this patient only?</span>
-                        <button
-                          type="button"
-                          className="btn-sm on"
-                          onClick={() => {
-                            setCustom((prev) => [...prev, { name: typed, price: 0 }]);
-                            setPicked((prev) => [...new Set([...prev, typed])]);
-                            setTestFilter("");
-                          }}
-                        >
-                          + Add for this patient
-                        </button>
+                    {patient.compliance?.missed && (
+                      <div className="mo-concern-note">
+                        <strong>Since the last visit:</strong> {patient.compliance.missed}
+                        <span className="mc-src">between visits</span>
                       </div>
-                    );
-                  })()}
-                  {custom.length > 0 && (
-                    <div className="tst-customlist">
-                      {custom.map((t) => (
-                        <span key={t.name} className="tst-custom">
-                          {t.name}
+                    )}
+                    {patient.compliance?.diet && (
+                      <div className="mo-concern-note">
+                        <strong>Diet advised:</strong> {patient.compliance.diet}
+                      </div>
+                    )}
+                    {/* The MyHealth Genie symptom tables are still unreconciled
+                      (plan §7), so this says nothing was read rather than
+                      implying the patient reported nothing. */}
+                    <div className="dp-hint">
+                      Patient-reported concerns from the MyHealth Genie app are not wired to this
+                      screen yet — ask.
+                    </div>
+                  </div>
+
+                  <div className="dp-sec">
+                    <div className="dp-sec-title">Diagnoses</div>
+                    {patient.diagnoses?.length > 0 ? (
+                      <div className="mo-dx">
+                        {patient.diagnoses.map((d) => (
+                          <span
+                            key={d.id || d.label}
+                            className={`dx-chip${/uncontrolled/i.test(d.status || "") ? " bad" : ""}`}
+                          >
+                            {d.label}
+                            {d.status ? ` · ${d.status}` : ""}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="cn-empty">No diagnoses recorded.</div>
+                    )}
+                    {!viewOnly && (
+                      <form className="mo-prop-form mo-dx-form" onSubmit={submitDiagnosis}>
+                        <input
+                          className="prop-reason"
+                          list="mo-dx-names"
+                          aria-label="New diagnosis"
+                          placeholder="Add a diagnosis, e.g. Essential Hypertension"
+                          maxLength={500}
+                          value={dxDraft.name}
+                          onChange={(e) => setDxDraft((d) => ({ ...d, name: e.target.value }))}
+                        />
+                        <datalist id="mo-dx-names">
+                          {DX_LIST.map((label) => (
+                            <option key={label} value={label} />
+                          ))}
+                        </datalist>
+                        <select
+                          aria-label="Diagnosis status"
+                          value={dxDraft.status}
+                          onChange={(e) => setDxDraft((d) => ({ ...d, status: e.target.value }))}
+                        >
+                          {DX_STATUS_OPTS.map((status) => (
+                            <option key={status} value={status}>
+                              {status}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="submit"
+                          className="st-btn st-btn-tl"
+                          disabled={addDiagnosis.isPending || !dxDraft.name.trim()}
+                        >
+                          {addDiagnosis.isPending ? "Adding…" : "Add"}
+                        </button>
+                      </form>
+                    )}
+                  </div>
+
+                  {activeMeds.length > 0 && (
+                    <div className="dp-sec">
+                      <div className="dp-sec-title">Current medicines</div>
+                      <ul className="mo-meds">
+                        {activeMeds.map((m, i) => (
+                          <li key={`${m.name}-${i}`}>
+                            <strong>{m.name}</strong>
+                            {m.dose ? ` · ${m.dose}` : ""}
+                            {m.frequency ? ` · ${m.frequency}` : ""}
+                            {m.timing ? ` · ${m.timing}` : ""}
+                          </li>
+                        ))}
+                      </ul>
+                      {/* Plan §2.4 item 7: a dose proposal made without sight of
+                        what another hospital prescribed is unsafe, and no
+                        external_medicines table exists yet (brief §3, Phase 3). */}
+                      <div className="dp-hint">
+                        This is what Gini prescribed. Medicines from another hospital are not
+                        recorded anywhere — ask before suggesting a change.
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="dp-sec">
+                    <div className="dp-sec-title">
+                      Plan {savePlan.isPending ? "· saving…" : plan ? "· saved" : ""}
+                    </div>
+                    <textarea
+                      className="mo-plan"
+                      rows={5}
+                      placeholder="What did you find, and what should the doctor know?"
+                      value={plan}
+                      onChange={(e) => onPlanChange(e.target.value)}
+                    />
+                    <div className="mo-dictate">
+                      <VoiceButton
+                        label="🎤 Dictate the plan"
+                        title="Speak the plan — you can edit it before it is added"
+                        onText={appendSpoken}
+                      />
+                    </div>
+
+                    {/* Reads back what the MO wrote and points at the two panels
+                      below — it never adds a test the plan did not name. The
+                      result is shown, not applied: the MO sees what was
+                      understood and can drop any of it. */}
+                    <div className="mo-extract">
+                      <button
+                        type="button"
+                        className="st-btn st-btn-g"
+                        onClick={readPlan}
+                        disabled={!plan.trim() || extractPlan.isPending}
+                      >
+                        {extractPlan.isPending
+                          ? "Reading…"
+                          : "✨ Pull tests & suggestions from my plan"}
+                      </button>
+                    </div>
+
+                    {extracted && (
+                      <div className="mo-xtr">
+                        <div className="mo-xtr-head">From your plan — nothing is saved yet</div>
+                        {extracted.tests?.length > 0 && (
+                          <div className="mo-xtr-row">
+                            <span className="mo-xtr-lbl">Tests</span>
+                            <span className="mo-xtr-vals">{extracted.tests.join(" · ")}</span>
+                          </div>
+                        )}
+                        {extracted.urgency && (
+                          <div className="mo-xtr-row">
+                            <span className="mo-xtr-lbl">When</span>
+                            <span className="mo-xtr-vals">
+                              {(() => {
+                                const u = URGENCY.find((x) => x.key === extracted.urgency);
+                                return u ? `${u.label} — ${u.sub}` : extracted.urgency;
+                              })()}
+                            </span>
+                          </div>
+                        )}
+                        {extracted.proposals?.map((pr, i) => (
+                          <div className="mo-xtr-row" key={`${pr.medicineName}-${i}`}>
+                            <span className="mo-xtr-lbl">{i === 0 ? "Suggest" : ""}</span>
+                            <span className="mo-xtr-vals">
+                              {pr.medicineName}
+                              {pr.fromDose || pr.toDose
+                                ? ` — ${pr.fromDose || "?"} → ${pr.toDose || "?"}`
+                                : ""}
+                              {pr.reason ? ` · ${pr.reason}` : ""}
+                              {i > 0 && <em className="mo-xtr-note"> (add this one by hand)</em>}
+                            </span>
+                          </div>
+                        ))}
+                        {/* Named, not silently dropped: a test the catalogue does
+                          not stock is something the MO has to do something
+                          about, and hiding it would look like it was ordered. */}
+                        {extracted.unmatched?.length > 0 && (
+                          <div className="mo-xtr-row mo-xtr-warn">
+                            <span className="mo-xtr-lbl">Not in the catalogue</span>
+                            <span className="mo-xtr-vals">{extracted.unmatched.join(" · ")}</span>
+                          </div>
+                        )}
+                        <div className="mo-xtr-acts">
                           <button
                             type="button"
-                            aria-label={`Remove ${t.name}`}
-                            onClick={() => {
-                              setCustom((prev) => prev.filter((c) => c.name !== t.name));
-                              setPicked((prev) => prev.filter((n) => n !== t.name));
-                            }}
+                            className="st-btn st-btn-tl"
+                            onClick={applyExtracted}
                           >
-                            ✕
+                            Fill these in
                           </button>
-                        </span>
+                          <button
+                            type="button"
+                            className="st-btn st-btn-g"
+                            onClick={() => setExtracted(null)}
+                          >
+                            Discard
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="dp-hint">
+                      Autosaves as you type. The doctor cannot take this patient without a plan.
+                    </div>
+                  </div>
+
+                  {/* The MO edits the actual prescription; their rows reach the
+                    doctor as proposals to approve, adjust or reject (addendum
+                    v1.1 §3). The same section the consultant uses — one inline
+                    editor, not a second one that could drift from it. */}
+                  <div className="dp-sec mo-rx">
+                    <VisitSummarySection
+                      visitId={activeId}
+                      station="mo"
+                      readOnly={patient.status !== "with_sd" && !patient.edit?.editingMine}
+                      onToast={showToast}
+                    />
+                  </div>
+
+                  <div className="dp-sec mo-rx">
+                    <VisitNewPatientWorkup
+                      patientId={patient.patientId}
+                      appointmentId={patient.appointmentId}
+                      mode="auto"
+                      variant="station"
+                    />
+                  </div>
+
+                  <div className="dp-sec mo-rx">
+                    <RxParameterSection
+                      visitId={activeId}
+                      station="mo"
+                      readOnly={patient.status !== "with_sd" && !patient.edit?.editingMine}
+                      onToast={showToast}
+                    />
+                  </div>
+
+                  <div className="dp-sec mo-rx">
+                    <RxSection
+                      visitId={activeId}
+                      station="mo"
+                      amending={!!patient.edit?.editingMine}
+                      readOnly={patient.status !== "with_sd" && !patient.edit?.editingMine}
+                      onToast={showToast}
+                    />
+                  </div>
+
+                  <div className="dp-sec">
+                    <div className="dp-sec-title">💊 Suggest to the doctor</div>
+                    {patient.proposals.length > 0 && (
+                      <ul className="mo-proposals">
+                        {patient.proposals.map((p) => (
+                          <li key={p.id}>
+                            <span>
+                              <strong>{p.medicine_name}</strong>
+                              {p.from_dose ? ` ${p.from_dose} →` : " →"} {p.to_dose}
+                              {p.reason ? ` · ${p.reason}` : ""}
+                            </span>
+                            <button
+                              type="button"
+                              className="prop-x"
+                              aria-label={`Withdraw ${p.medicine_name}`}
+                              onClick={() => withdrawProposal.mutate(p.id)}
+                            >
+                              ✕
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <form className="mo-prop-form" onSubmit={submitProposal}>
+                      <input
+                        list="mo-med-names"
+                        placeholder="Medicine"
+                        value={draft.medicineName}
+                        onChange={(e) => {
+                          const medicineName = e.target.value;
+                          const known = activeMeds.find(
+                            (m) => m.name.toLowerCase() === medicineName.toLowerCase(),
+                          );
+                          setDraft((d) => ({
+                            ...d,
+                            medicineName,
+                            fromDose: known?.dose ?? d.fromDose,
+                          }));
+                        }}
+                      />
+                      <datalist id="mo-med-names">
+                        {activeMeds.map((m, i) => (
+                          <option key={`${m.name}-${i}`} value={m.name} />
+                        ))}
+                      </datalist>
+                      <input
+                        placeholder="From"
+                        value={draft.fromDose}
+                        onChange={(e) => setDraft((d) => ({ ...d, fromDose: e.target.value }))}
+                      />
+                      <input
+                        placeholder="To"
+                        value={draft.toDose}
+                        onChange={(e) => setDraft((d) => ({ ...d, toDose: e.target.value }))}
+                      />
+                      <input
+                        className="prop-reason"
+                        placeholder="Why"
+                        value={draft.reason}
+                        onChange={(e) => setDraft((d) => ({ ...d, reason: e.target.value }))}
+                      />
+                      <button
+                        className="st-btn st-btn-tl"
+                        disabled={
+                          addProposal.isPending ||
+                          !draft.medicineName.trim() ||
+                          !draft.toDose.trim()
+                        }
+                      >
+                        Suggest
+                      </button>
+                    </form>
+                    <div className="dp-hint">
+                      A suggestion, not a prescription — the doctor decides. Withdraw it any time
+                      before you hand over.
+                    </div>
+                  </div>
+
+                  {patient.edit?.editingMine ? (
+                    <EditNextVisit
+                      key={activeId}
+                      visitId={activeId}
+                      fromDate={patient.visitDate}
+                      saved={patient.edit.nextVisit}
+                      onToast={showToast}
+                    />
+                  ) : (
+                    <div className="dp-sec mo-suggest">
+                      <div className="dp-sec-title">📝 Suggest advice &amp; care plan</div>
+                      <ChiefSuggestions
+                        visitId={activeId}
+                        readOnly={patient.status !== "with_sd"}
+                        nextVisitRequired={!!acts.showClose}
+                        onToast={showToast}
+                      />
+                    </div>
+                  )}
+
+                  <div className="dp-sec">
+                    <div className="cs-head">
+                      <h2>🔬 Tests to order</h2>
+                      <span className="cs-sub">
+                        panels or individual tests · set when they are needed
+                      </span>
+                      <div className="cs-head-r">
+                        <VoiceButton
+                          small
+                          label="🎤 Voice"
+                          title={'Say: "Order diabetes panel for next visit" or "Add TSH today"'}
+                          onText={(text) => {
+                            setTestFilter(text);
+                            testFilterRef.current?.focus();
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div className="cn-head">When are these needed?</div>
+                    <div className="cp-chips">
+                      {URGENCY.map((u) => (
+                        <button
+                          key={u.key}
+                          type="button"
+                          className={urgency === u.key ? "on" : ""}
+                          onClick={() => setUrgency(u.key)}
+                        >
+                          {u.label}
+                          {u.key === "next_visit" && patient.nextVisitDate
+                            ? ` · ${monthLabel(patient.nextVisitDate)}`
+                            : ""}{" "}
+                          <em>— {u.sub}</em>
+                        </button>
                       ))}
                     </div>
-                  )}
-                  <div className="tst-list">
-                    {visibleTests.map((t) => {
-                      const dup = alreadyOrdered.has(t.name);
-                      return (
+                    <div className="cn-head">Quick panels</div>
+                    <div className="tst-panels">
+                      {(catalogue?.panels || []).map((p) => (
                         <button
-                          key={t.name}
+                          key={p.key}
                           type="button"
-                          disabled={dup}
-                          title={dup ? "Already ordered and not yet collected" : undefined}
-                          className={`tst-chip${picked.includes(t.name) ? " on" : ""}${dup ? " done" : ""}`}
-                          onClick={() => toggleTest(t.name)}
+                          className={`tst-panel${p.tests.every((t) => picked.includes(t)) ? " on" : ""}`}
+                          onClick={() => togglePanel(p)}
                         >
-                          <span className="tst-name">
-                            {t.name}
-                            {dup && " ✓"}
-                          </span>
-                          {t.gloss && <span className="tst-gloss">{t.gloss}</span>}
-                          {dup && <span className="tst-price">ordered</span>}
+                          <strong>
+                            {p.icon} {p.label}
+                          </strong>
+                          <em>{p.tests.join(" · ")}</em>
+                          <span>{p.tests.length} tests</span>
                         </button>
-                      );
-                    })}
-                    {searchingTests && visibleTests.length === 0 && (
-                      <div className="cn-empty">No test matches “{testFilter.trim()}”.</div>
-                    )}
-                  </div>
-                  {picked.length > 0 && (
-                    <div className="tst-bar">
-                      <span>
-                        <strong>{picked.length} tests</strong> ·{" "}
-                        {urgency === "today"
-                          ? "goes to reception now"
-                          : `saved for ${urgency.replace("_", " ")}`}
-                      </span>
-                      <button
-                        type="button"
-                        className="btn-sm on"
-                        disabled={busy}
-                        onClick={confirmTests}
-                      >
-                        {orderTests.isPending ? "Ordering…" : "Confirm →"}
-                      </button>
+                      ))}
                     </div>
-                  )}
-                  {patient.orders.length > 0 && (
-                    <div className="dp-hint">
-                      Already ordered:{" "}
-                      {patient.orders
-                        .map(
-                          (o) => `${o.tests.length} tests (${o.sample_status.replace(/_/g, " ")})`,
-                        )
-                        .join(" · ")}
-                    </div>
-                  )}
-                </div>
-
-                <div className="dp-sec">
-                  <div className="dp-sec-title">🩹 Procedures</div>
-                  <OrderedServicesPanel
-                    station="mo"
-                    visitId={activeId}
-                    hidePrices
-                    onToast={showToast}
-                  />
-                </div>
-              </div>
-
-              {/* 31-MO-LED-CLOSURE-PLAN §5.6. The decision the whole flow turns
-                  on, and it only exists once there is something to decide: the
-                  MO says whether the reports they just read are normal, and
-                  that recorded answer is what lets the visit end here. */}
-              {patient.resultsStatus === "ready" && (
-                <div className="mo-review">
-                  <div className="mo-review-t">
-                    📄 Reports are in — read them, then say what they show
-                  </div>
-                  {patient.reportsOutcome ? (
-                    <div className="mo-review-done">
-                      {patient.reportsOutcome === "normal"
-                        ? "✓ Reviewed — normal. You can close this patient here."
-                        : "→ Reviewed — the consultant is needed."}
-                      {patient.reportsReviewedAt
-                        ? ` (${new Date(patient.reportsReviewedAt).toLocaleTimeString("en-IN", {
-                            timeZone: "Asia/Kolkata",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            hour12: false,
-                          })})`
-                        : ""}
-                    </div>
-                  ) : null}
-                  {(() => {
-                    const chosen = chosenOutcome;
-                    if (chosen) {
-                      return (
-                        <div
-                          className={`mo-review-chosen${chosen === "normal" ? "" : " is-consultant"}`}
+                    <div className="cn-head tst-head">
+                      {searchingTests
+                        ? "Matching tests"
+                        : showAllTests
+                          ? "All tests"
+                          : "Most used tests"}
+                      {!searchingTests && (
+                        <button
+                          type="button"
+                          className="btn-sm"
+                          onClick={() => setShowAllTests((v) => !v)}
                         >
-                          {chosen === "normal"
-                            ? "✓ Normal — you will prescribe. Write the plan, then Close this patient."
-                            : "→ Consultant needed. Write the plan, then Ready for the doctor."}
+                          {showAllTests ? "Show most used only" : `Show all ${testCatalog.length}`}
+                        </button>
+                      )}
+                    </div>
+                    <div className="tst-heard">
+                      <input
+                        ref={testFilterRef}
+                        type="search"
+                        className="cp-inp tst-filter"
+                        value={testFilter}
+                        placeholder="Search tests by name or purpose — e.g. TSH, kidney, lipid"
+                        aria-label="Search tests"
+                        onChange={(e) => setTestFilter(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") setTestFilter("");
+                        }}
+                      />
+                      {testFilter && (
+                        <span className="tst-count" aria-live="polite">
+                          {searchingTests
+                            ? `${visibleTests.length} of ${testCatalog.length} tests`
+                            : `Type at least ${MIN_SEARCH_LENGTH} characters to search`}
+                        </span>
+                      )}
+                      {testFilter && (
+                        <button type="button" className="btn-sm" onClick={() => setTestFilter("")}>
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    {(() => {
+                      const typed = testFilter.trim();
+                      const known = [...testCatalog, ...custom].some(
+                        (t) => t.name.toLowerCase() === typed.toLowerCase(),
+                      );
+                      if (typed.length < 2 || known) return null;
+                      return (
+                        <div className="tst-new">
+                          <span>
+                            “{typed}” is not in the list — order it for this patient only?
+                          </span>
                           <button
                             type="button"
-                            className="mo-review-undo"
-                            disabled={busy || review.isPending}
-                            onClick={() => setPendingOutcome(null)}
+                            className="btn-sm on"
+                            onClick={() => {
+                              setCustom((prev) => [...prev, { name: typed, price: 0 }]);
+                              setPicked((prev) => [...new Set([...prev, typed])]);
+                              setTestFilter("");
+                            }}
                           >
-                            change
+                            + Add for this patient
                           </button>
                         </div>
                       );
-                    }
-                    return (
-                      <div className="mo-review-acts">
+                    })()}
+                    {custom.length > 0 && (
+                      <div className="tst-customlist">
+                        {custom.map((t) => (
+                          <span key={t.name} className="tst-custom">
+                            {t.name}
+                            <button
+                              type="button"
+                              aria-label={`Remove ${t.name}`}
+                              onClick={() => {
+                                setCustom((prev) => prev.filter((c) => c.name !== t.name));
+                                setPicked((prev) => prev.filter((n) => n !== t.name));
+                              }}
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="tst-list">
+                      {visibleTests.map((t) => {
+                        const dup = alreadyOrdered.has(t.name);
+                        return (
+                          <button
+                            key={t.name}
+                            type="button"
+                            disabled={dup}
+                            title={dup ? "Already ordered and not yet collected" : undefined}
+                            className={`tst-chip${picked.includes(t.name) ? " on" : ""}${dup ? " done" : ""}`}
+                            onClick={() => toggleTest(t.name)}
+                          >
+                            <span className="tst-name">
+                              {t.name}
+                              {dup && " ✓"}
+                            </span>
+                            {t.gloss && <span className="tst-gloss">{t.gloss}</span>}
+                            {dup && <span className="tst-price">ordered</span>}
+                          </button>
+                        );
+                      })}
+                      {searchingTests && visibleTests.length === 0 && (
+                        <div className="cn-empty">No test matches “{testFilter.trim()}”.</div>
+                      )}
+                    </div>
+                    {picked.length > 0 && (
+                      <div className="tst-bar">
+                        <span>
+                          <strong>{picked.length} tests</strong> ·{" "}
+                          {urgency === "today"
+                            ? "goes to reception now"
+                            : `saved for ${urgency.replace("_", " ")}`}
+                        </span>
                         <button
-                          className="st-btn st-btn-grn"
-                          disabled={busy || review.isPending}
-                          onClick={() => reviewAs("normal")}
+                          type="button"
+                          className="btn-sm on"
+                          disabled={busy}
+                          onClick={confirmTests}
                         >
-                          Normal — I will prescribe
-                        </button>
-                        <button
-                          className="st-btn st-btn-tl"
-                          disabled={busy || review.isPending}
-                          onClick={() => reviewAs("needs_consultant")}
-                        >
-                          Needs the consultant
+                          {orderTests.isPending ? "Ordering…" : "Confirm →"}
                         </button>
                       </div>
-                    );
-                  })()}
-                </div>
-              )}
+                    )}
+                    {patient.orders.length > 0 && (
+                      <div className="dp-hint">
+                        Already ordered:{" "}
+                        {patient.orders
+                          .map(
+                            (o) =>
+                              `${o.tests.length} tests (${o.sample_status.replace(/_/g, " ")})`,
+                          )
+                          .join(" · ")}
+                      </div>
+                    )}
+                  </div>
 
-              {patient.edit?.editingMine && (
+                  <div className="dp-sec">
+                    <div className="dp-sec-title">🩹 Procedures</div>
+                    <OrderedServicesPanel
+                      station="mo"
+                      visitId={activeId}
+                      hidePrices
+                      onToast={showToast}
+                    />
+                  </div>
+                </fieldset>
+              </div>
+
+              {!viewOnly && patient.edit?.editingMine && (
                 <ConsultEditBar
                   visitId={activeId}
                   station="mo"
@@ -1882,7 +1872,7 @@ export default function MoStationPage() {
                 />
               )}
 
-              <div className="mo-actions">
+              <div className="mo-actions" hidden={!!viewOnly}>
                 {acts.showHandOver && (
                   <button
                     className="st-btn st-btn-tl"
@@ -1933,7 +1923,7 @@ export default function MoStationPage() {
         <TestsDueDialog
           visitId={activeId}
           station="mo"
-          enabled={patient.status === "with_sd"}
+          enabled={!viewOnly && patient.status === "with_sd"}
           patient={{ name: patient.name, fileNo: patient.fileNo }}
           onToast={showToast}
         />

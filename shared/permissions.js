@@ -229,6 +229,7 @@ export const CAPABILITIES = {
   PHARMACY_COLLECT: "PHARMACY_COLLECT",
   PHARMACY_REPORTS: "PHARMACY_REPORTS",
   LAB_TEST_CATALOG: "LAB_TEST_CATALOG",
+  RX_ORDER_SETTINGS: "RX_ORDER_SETTINGS",
 };
 
 const C = CAPABILITIES;
@@ -302,6 +303,7 @@ export const ROLE_CAPABILITIES = {
     // capability outright would also have opened /giniflow/station/referrals,
     // because src/config/routes.js gates that page on the same key.
     C.GINIFLOW_PRINT_RX,
+    C.RX_ORDER_SETTINGS,
   ],
   [ROLES.MO]: [
     C.PATIENT_READ,
@@ -322,6 +324,7 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_STATION_MO,
     C.GINIFLOW_MO_CLOSE,
     C.GINIFLOW_PRINT_RX,
+    C.RX_ORDER_SETTINGS,
   ],
   [ROLES.RX_MO]: [
     C.PATIENT_READ,
@@ -335,6 +338,7 @@ export const ROLE_CAPABILITIES = {
     C.GINIFLOW_STATION_MO,
     C.GINIFLOW_STATION_DOCTOR,
     C.GINIFLOW_PRINT_RX,
+    C.RX_ORDER_SETTINGS,
   ],
   // No REFILLS: working the refill queue is a prescribing decision, so nurses
   // don't approve them. They can still see a patient's refill history in the

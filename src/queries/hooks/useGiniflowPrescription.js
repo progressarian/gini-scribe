@@ -57,22 +57,6 @@ export function useMedicineSearch(query) {
   });
 }
 
-// `known: false` means the inventory has never heard of this medicine. The
-// screen must say that, rather than showing an empty list that reads as "no
-// alternatives exist".
-export function useAlternatives(name) {
-  return useQuery({
-    queryKey: ["giniflow", "doctor", "alternatives", name],
-    queryFn: async () =>
-      (
-        await api.get("/api/giniflow/stations/doctor/medicines/alternatives", {
-          params: { name },
-        })
-      ).data,
-    enabled: !!name,
-  });
-}
-
 export function useFinalizePreview(visitId, enabled) {
   return useQuery({
     queryKey: ["giniflow", "doctor", "finalize-preview", visitId],
@@ -177,6 +161,23 @@ export const usePauseItem = (visitId, station = "doctor") =>
           weeks,
         })
       ).data,
+  );
+
+export const useMoveItem = (visitId, station = "doctor") =>
+  useDraftMutation(
+    visitId,
+    async ({ itemId, direction }) =>
+      (
+        await api.post(`/api/giniflow/stations/${station}/prescription/items/${itemId}/move`, {
+          direction,
+        })
+      ).data,
+  );
+
+export const useResetRxOrder = (visitId, station = "doctor") =>
+  useDraftMutation(
+    visitId,
+    async () => (await api.post(`${base(visitId, station)}/prescription/order/reset`)).data,
   );
 
 export const useStopItem = (visitId, station = "doctor") =>

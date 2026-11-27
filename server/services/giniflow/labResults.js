@@ -20,6 +20,7 @@ import {
 import { assertNotHeld } from "./cancelHold.js";
 
 const SOURCE = "manual";
+const NOTE_SOURCES = ["healthray", "prescription_parsed"];
 
 const bad = (message, status = 400) => Object.assign(new Error(message), { status });
 
@@ -383,7 +384,7 @@ async function writeEntries(db, ctx, entries, column) {
                 ref_range = $8, flag = $9, panel_name = COALESCE($10, panel_name),
                 ${column} = $11, source = $12, is_critical = $13
           WHERE patient_id = $1 AND canonical_name = $2 AND test_date::date = $3::date
-            AND (source = $12 OR ${column} = $11)`,
+            AND (source = $12 OR ${column} = $11 OR source = ANY($14::text[]))`,
         [
           ctx.patient_id,
           canonical,
@@ -398,6 +399,7 @@ async function writeEntries(db, ctx, entries, column) {
           link,
           SOURCE,
           e.isCritical === true,
+          NOTE_SOURCES,
         ],
       );
       if (updated.rowCount) {

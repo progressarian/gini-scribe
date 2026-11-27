@@ -7,9 +7,10 @@ import {
   usePauseItem,
   useResumeItem,
   useStopItem,
+  useMoveItem,
+  useResetRxOrder,
   useMedicineSearch,
   useRequestMedicine,
-  useAlternatives,
   useDecideItem,
   useAddExternal,
   useRemoveExternal,
@@ -125,55 +126,6 @@ const CHANGE_CHIP = {
   paused: { cls: "ch-paused", label: "⏸ Paused" },
   stopped: { cls: "ch-stopped", label: "✕ Stopped" },
 };
-
-// Stock is shown only where it is known. A medicine with no inventory row reads
-// "Stock —", never "in stock": a false in-stock sends a patient to a counter
-// that cannot serve them (plan §7).
-function StockCell({ stock, onAlternatives }) {
-  if (!stock) return <span className="rx-stock rx-unknown">Stock —</span>;
-  if (stock.out) {
-    return (
-      <span className="rx-stock rx-out">
-        ✗ Out of stock
-        <button type="button" className="btn-sm" onClick={onAlternatives}>
-          Alternatives →
-        </button>
-      </span>
-    );
-  }
-  return (
-    <span className={`rx-stock ${stock.low ? "rx-low" : "rx-ok"}`}>
-      {stock.low ? "⚠" : "✓"} {stock.qty} left
-    </span>
-  );
-}
-
-function AlternativesPanel({ name, onClose, onPick }) {
-  const { data, isLoading } = useAlternatives(name);
-  return (
-    <div className="rx-alts">
-      <div className="cn-head">Alternatives for {name}</div>
-      {isLoading && <div className="cn-empty">Checking stock…</div>}
-      {!isLoading && !data?.known && (
-        <div className="cn-empty">
-          The pharmacy list has no record of this medicine, so its substitutes are unknown. Check
-          with the counter before changing it.
-        </div>
-      )}
-      {!isLoading && data?.known && data.alternatives.length === 0 && (
-        <div className="cn-empty">Nothing of the same class is in stock.</div>
-      )}
-      {(data?.alternatives || []).map((a) => (
-        <button type="button" key={a.name} className="rx-alt" onClick={() => onPick(a)}>
-          ✓ {a.name} <em>{a.qty} in stock</em>
-        </button>
-      ))}
-      <button type="button" className="btn-sm" onClick={onClose}>
-        Close
-      </button>
-    </div>
-  );
-}
 
 const PAUSE_OPTIONS = [1, 2, 4, 6, 8, 12];
 
@@ -857,9 +809,10 @@ export default function RxSection({
   const pause = usePauseItem(visitId, rowStation);
   const resume = useResumeItem(visitId, rowStation);
   const stop = useStopItem(visitId, rowStation);
+  const move = useMoveItem(visitId, rowStation);
+  const resetOrder = useResetRxOrder(visitId, rowStation);
   const [editing, setEditing] = useState(null);
   const [adding, setAdding] = useState(false);
-  const [alternativesFor, setAlternativesFor] = useState(null);
   const [spoken, setSpoken] = useState("");
 
   const fail = (e) => onToast(e?.response?.data?.error || "That change was not saved");
@@ -894,6 +847,23 @@ export default function RxSection({
         <div className="cs-head-r">
           {data?.lastUpdated && (
             <span className="badge b-ink">Last updated: {data.lastUpdated}</span>
+          )}
+          {data?.orderManual && <span className="badge b-ink">Custom order</span>}
+          {!readOnly && items.length > 1 && (
+            <button
+              type="button"
+              className="btn-sm"
+              disabled={resetOrder.isPending}
+              title="Put the medicines back in the order set in Settings → Medicine order"
+              onClick={() =>
+                resetOrder.mutate(undefined, {
+                  onSuccess: () => onToast("Medicines put back in the standard order"),
+                  onError: fail,
+                })
+              }
+            >
+              {resetOrder.isPending ? "Sorting…" : "↺ Standard order"}
+            </button>
           )}
           {(data?.stopped || []).length > 0 && (
             <button
@@ -1046,7 +1016,6 @@ export default function RxSection({
           <span className="rx-col-dose">Dose</span>
           <span className="rx-col-timing">Timing</span>
           <span className="rx-col-for">For</span>
-          <span className="rx-col-stock">Pharmacy stock</span>
           <span className="rx-col-acts">Actions</span>
         </div>
       )}
@@ -1062,7 +1031,35 @@ export default function RxSection({
                 item.approval_status === "pending" ? " rx-proposed" : ""
               }`}
             >
-              <div className="rx-num">{i + 1}.</div>
+              <div className="rx-num">
+                {i + 1}.
+                {!readOnly && items.length > 1 && (
+                  <div className="rx-move">
+                    <button
+                      type="button"
+                      aria-label={`Move ${item.medicine_name} up`}
+                      title="Move up"
+                      disabled={i === 0 || move.isPending}
+                      onClick={() =>
+                        move.mutate({ itemId: item.id, direction: "up" }, { onError: fail })
+                      }
+                    >
+                      ▲
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Move ${item.medicine_name} down`}
+                      title="Move down"
+                      disabled={i === items.length - 1 || move.isPending}
+                      onClick={() =>
+                        move.mutate({ itemId: item.id, direction: "down" }, { onError: fail })
+                      }
+                    >
+                      ▼
+                    </button>
+                  </div>
+                )}
+              </div>
               <div className="rx-main">
                 <div className="rx-name">
                   {item.form && (
@@ -1116,7 +1113,6 @@ export default function RxSection({
               <div className="rx-col-for">
                 {item.reason ? <span className="rx-for">{item.reason}</span> : "—"}
               </div>
-              <StockCell stock={item.stock} onAlternatives={() => setAlternativesFor(item.id)} />
               {!readOnly && (
                 <div className="rx-rowacts">
                   {item.approval_status === "pending" && !proposing && (
@@ -1223,30 +1219,6 @@ export default function RxSection({
                 onStop={(reason) => {
                   stop.mutate({ itemId: item.id, reason }, { onError: fail });
                   setEditing(null);
-                }}
-              />
-            )}
-            {alternativesFor === item.id && (
-              <AlternativesPanel
-                name={item.pharmacy_match || item.medicine_name}
-                onClose={() => setAlternativesFor(null)}
-                onPick={(alt) => {
-                  add.mutate(
-                    {
-                      medicineName: alt.name,
-                      dose: item.dose,
-                      frequency: item.frequency,
-                      timingCategories: timingsOf(item),
-                      reason: item.reason,
-                      changeType: "new",
-                    },
-                    { onError: fail },
-                  );
-                  stop.mutate(
-                    { itemId: item.id, reason: `Out of stock — replaced by ${alt.name}` },
-                    { onError: fail },
-                  );
-                  setAlternativesFor(null);
                 }}
               />
             )}

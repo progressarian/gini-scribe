@@ -111,6 +111,7 @@ const CareFollowupsPage = lazyWithRetry(() => import("./pages/care/CareFollowups
 const DoctorManagementPage = lazyWithRetry(() => import("./pages/DoctorManagementPage"));
 const PatientBlocklistPage = lazyWithRetry(() => import("./pages/PatientBlocklistPage"));
 const PrescriptionFooterPage = lazyWithRetry(() => import("./pages/PrescriptionFooterPage"));
+const MedicineOrderSettingsPage = lazyWithRetry(() => import("./pages/MedicineOrderSettingsPage"));
 const SchemesSettingsPage = lazyWithRetry(() => import("./pages/SchemesSettingsPage"));
 const ServicesSettingsPage = lazyWithRetry(() => import("./pages/billing/ServicesSettingsPage"));
 const CategoryRatesPage = lazyWithRetry(() => import("./pages/billing/CategoryRatesPage"));
@@ -307,6 +308,7 @@ const router = createBrowserRouter([
                   { path: "flow", element: lazyEl(FlowAdminPage) },
                   { path: "slots", element: lazyEl(DoctorManagementPage) },
                   { path: "prescription", element: lazyEl(PrescriptionFooterPage) },
+                  { path: "medicine-order", element: lazyEl(MedicineOrderSettingsPage) },
                   { path: "tests", element: lazyEl(TestCatalogPage) },
                   { path: "tests/:id", element: lazyEl(TestDetailPage) },
                   { path: "schemes", element: lazyEl(SchemesSettingsPage) },

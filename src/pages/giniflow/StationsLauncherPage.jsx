@@ -141,7 +141,8 @@ export default function StationsLauncherPage() {
     (s) =>
       (!s.href || hasCapability(doctor, GINIFLOW_LAUNCHER_CAPABILITY[s.key])) &&
       !(s.key === "doctor" && doctor?.has_rx_mos) &&
-      !(rxMo && s.key === "mo_sd" && !chiefName),
+      !(rxMo && s.key === "mo_sd" && !chiefName) &&
+      !(rxMo && s.key === "doctor" && chiefName),
   );
   const today = new Date().toLocaleDateString("en-IN", {
     weekday: "short",
@@ -177,9 +178,7 @@ export default function StationsLauncherPage() {
                   {assisting
                     ? s.key === "mo_sd"
                       ? `${s.name} · ${chiefName}`
-                      : chiefName
-                        ? "Prescriptions · other consultants"
-                        : "Prescriptions"
+                      : "Prescriptions"
                     : s.name}
                 </div>
                 <div className="rc-desc">

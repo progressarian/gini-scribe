@@ -69,6 +69,28 @@ const STATUS_MAP = {
 export const statusClass = (s) => `sp-${STATUS_MAP[s] || "mon"}`;
 
 // Diagnosis status options per clinical brief
+export const DX_LIST = [
+  "Type 2 Diabetes Mellitus (T2DM)",
+  "Type 1 Diabetes",
+  "Prediabetes (Impaired Glucose Tolerance)",
+  "Essential Hypertension",
+  "Dyslipidemia",
+  "MASLD (Metabolic-Associated Steatotic Liver Disease)",
+  "Subclinical Hypothyroidism",
+  "Clinical Hypothyroidism",
+  "Hashimoto's Thyroiditis",
+  "Hyperuricemia / Gout",
+  "Overactive Bladder (OAB)",
+  "Obesity Class 1",
+  "Metabolic Syndrome",
+  "Vitamin D Deficiency",
+  "Vitamin B12 Deficiency",
+  "Obstructive Sleep Apnoea",
+  "Diabetic Peripheral Neuropathy",
+  "Diabetic Retinopathy",
+  "Diabetic Nephropathy (CKD)",
+];
+
 export const DX_STATUS_OPTS = [
   "Uncontrolled",
   "Improving",

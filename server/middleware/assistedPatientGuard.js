@@ -30,6 +30,7 @@ const visitOfRow = (table) => async (seg) =>
 
 const DOCTOR_STATION = "/api/giniflow/stations/doctor";
 const CHIEF_STATION = "/api/giniflow/stations/mo";
+const MEDICINE_SEARCH = `${DOCTOR_STATION}/medicines`;
 
 const RULES = [
   { prefix: "/api/auth", open: true },
@@ -51,6 +52,8 @@ const RULES = [
   { prefix: "/api/giniflow/stations/summary", open: true, readOnly: true, exact: true },
   { prefix: `${DOCTOR_STATION}/queue`, open: true, readOnly: true, exact: true },
   { prefix: `${DOCTOR_STATION}/test-panels`, open: true, readOnly: true, exact: true },
+  { prefix: "/api/settings/rx-order", open: true, exact: true },
+  { prefix: MEDICINE_SEARCH, open: true, readOnly: true, exact: true },
   { prefix: `${DOCTOR_STATION}/medicines/alternatives`, open: true, readOnly: true, exact: true },
   { prefix: `${DOCTOR_STATION}/prescription/items/`, visit: visitOfRow("giniflow_rx_items") },
   { prefix: `${DOCTOR_STATION}/proposals/`, visit: visitOfRow("giniflow_rx_proposals") },
@@ -85,7 +88,11 @@ const deny = (res) =>
   });
 
 export async function assistedPatientGuard(req, res, next) {
-  if (normalizeRole(req.doctor?.role) === ROLES.CONSULTANT && req.path.startsWith(DOCTOR_STATION)) {
+  if (
+    normalizeRole(req.doctor?.role) === ROLES.CONSULTANT &&
+    req.path.startsWith(DOCTOR_STATION) &&
+    req.path !== MEDICINE_SEARCH
+  ) {
     try {
       if (await hasRxMos(req.doctor.doctor_id))
         return res.status(403).json({

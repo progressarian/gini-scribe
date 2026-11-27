@@ -1,27 +1,5 @@
 import { memo, useState } from "react";
-import { DX_STATUS_OPTS, DX_CATEGORIES, COMPLICATION_TYPES } from "../helpers";
-
-const DX_LIST = [
-  "Type 2 Diabetes Mellitus (T2DM)",
-  "Type 1 Diabetes",
-  "Prediabetes (Impaired Glucose Tolerance)",
-  "Essential Hypertension",
-  "Dyslipidemia",
-  "MASLD (Metabolic-Associated Steatotic Liver Disease)",
-  "Subclinical Hypothyroidism",
-  "Clinical Hypothyroidism",
-  "Hashimoto's Thyroiditis",
-  "Hyperuricemia / Gout",
-  "Overactive Bladder (OAB)",
-  "Obesity Class 1",
-  "Metabolic Syndrome",
-  "Vitamin D Deficiency",
-  "Vitamin B12 Deficiency",
-  "Obstructive Sleep Apnoea",
-  "Diabetic Peripheral Neuropathy",
-  "Diabetic Retinopathy",
-  "Diabetic Nephropathy (CKD)",
-];
+import { DX_STATUS_OPTS, DX_CATEGORIES, COMPLICATION_TYPES, DX_LIST } from "../helpers";
 
 const AddDiagnosisModal = memo(function AddDiagnosisModal({ onClose, onSubmit }) {
   const [form, setForm] = useState({

@@ -254,6 +254,7 @@ const ROUTE_CAPABILITIES = [
   ["/api/flow/demo", CAP.ADMIN],
   // One-off backfill/repair endpoints. Was a PUBLIC_PREFIX (unauthenticated).
   ["/api/admin", CAP.ADMIN],
+  ["/api/settings/rx-order", CAP.RX_ORDER_SETTINGS],
 ];
 
 export const capabilityForPath = (path) => {

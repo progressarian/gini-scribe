@@ -1560,6 +1560,44 @@ export const giniflowRxStopSchema = z.object({
   reason: z.string().trim().min(1, "Stopping a medicine needs a reason").max(300),
 });
 
+export const giniflowRxMoveSchema = z.object({
+  direction: z.enum(["up", "down"], { message: "Choose up or down" }),
+});
+
+const rxOrderKeywords = z.array(z.string().trim().max(60)).max(200);
+
+export const rxOrderRulesSchema = z.object({
+  categories: z
+    .array(
+      z.object({
+        id: z.string().trim().max(60).nullish(),
+        label: z.string().trim().min(1, "Give every category a name").max(80),
+        keywords: rxOrderKeywords,
+      }),
+    )
+    .min(1, "Add at least one category")
+    .max(40),
+  classes: z
+    .array(
+      z.object({
+        id: z.string().trim().max(60).nullish(),
+        category: z.string().trim().min(1).max(60),
+        label: z.string().trim().min(1, "Give every drug class a name").max(80),
+        keywords: rxOrderKeywords,
+      }),
+    )
+    .max(120),
+  pins: z
+    .array(
+      z.object({
+        medicine: z.string().trim().min(1, "Choose a medicine to pin").max(120),
+        category: z.string().trim().min(1, "Choose a category for the pinned medicine").max(60),
+        position: z.number().int().min(1).max(999),
+      }),
+    )
+    .max(500),
+});
+
 export const giniflowRxFollowupSchema = z.object({
   action: z.enum(RX_FOLLOWUP_ACTIONS),
   remark: z.string().trim().min(1, "Add a remark").max(500),

@@ -25,6 +25,10 @@ export const SETTINGS_TABS = [
     label: "Prescription",
   },
   {
+    to: "/settings/medicine-order",
+    label: "Medicine order",
+  },
+  {
     to: "/settings/tests",
     label: "Test catalogue",
   },

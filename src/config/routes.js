@@ -124,10 +124,17 @@ export const PAGE_CAPABILITIES = {
   "/admin/prescription-footer": CAP.ADMIN,
   // Settings — one section, tab per area. Each tab is listed so a deep link is
   // gated the same as the section itself.
-  "/settings": [CAP.ADMIN, CAP.BILLING_MASTER, CAP.BILLING_SETTINGS, CAP.LAB_TEST_CATALOG],
+  "/settings": [
+    CAP.ADMIN,
+    CAP.BILLING_MASTER,
+    CAP.BILLING_SETTINGS,
+    CAP.LAB_TEST_CATALOG,
+    CAP.RX_ORDER_SETTINGS,
+  ],
   "/settings/flow": CAP.ADMIN,
   "/settings/slots": CAP.ADMIN,
   "/settings/prescription": CAP.ADMIN,
+  "/settings/medicine-order": CAP.RX_ORDER_SETTINGS,
   "/settings/tests": [CAP.ADMIN, CAP.LAB_TEST_CATALOG],
   "/settings/schemes": CAP.BILLING_MASTER,
   "/settings/services": CAP.BILLING_MASTER,
@@ -217,7 +224,7 @@ export const ROLE_NAV_ALLOWLIST = {
   // manager board. The allowlist keeps the nav to the launcher, which shows
   // them the one station they can open.
   [ROLES.RX]: ["/giniflow/stations"],
-  [ROLES.RX_MO]: ["/", "/dashboard", "/visit", "/giniflow/stations"],
+  [ROLES.RX_MO]: ["/", "/dashboard", "/visit", "/giniflow/stations", "/settings"],
   // Echo and X-Ray Station: same reasoning as RX above, plus they hold
   // PATIENT_READ/LAB_PORTAL for their own station's use (looking a patient
   // up, viewing a report) — a plain capability nav would still offer them

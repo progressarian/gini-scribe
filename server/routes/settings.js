@@ -1,6 +1,8 @@
 import express from "express";
 import { validate } from "../middleware/validate.js";
-import { prescriptionFooterSchema } from "../schemas/index.js";
+import { requireCapability } from "../middleware/auth.js";
+import { CAPABILITIES } from "../../shared/permissions.js";
+import { prescriptionFooterSchema, rxOrderRulesSchema } from "../schemas/index.js";
 import { getPrescriptionFooter, setPrescriptionFooter } from "../services/prescriptionFooter.js";
 import { buildPrescriptionPreviewHtml } from "../services/prescriptionPreview.js";
 import {
@@ -8,6 +10,12 @@ import {
   setPrescriptionLogo,
   resetPrescriptionLogo,
 } from "../services/prescriptionLogo.js";
+import {
+  DEFAULT_RX_ORDER,
+  getRxOrderRules,
+  resetRxOrderRules,
+  setRxOrderRules,
+} from "../services/medication/rxOrderRules.js";
 import { handleError } from "../utils/errorHandler.js";
 
 const router = express.Router();
@@ -64,6 +72,34 @@ router.delete("/admin/prescription-logo", async (_req, res) => {
     res.json(await resetPrescriptionLogo());
   } catch (e) {
     handleError(res, e, "Reset prescription logo");
+  }
+});
+
+const rxOrderPayload = (rules) => ({ rules, defaults: DEFAULT_RX_ORDER });
+
+const rxOrderGate = requireCapability(CAPABILITIES.RX_ORDER_SETTINGS);
+
+router.get("/settings/rx-order", rxOrderGate, async (_req, res) => {
+  try {
+    res.json(rxOrderPayload(await getRxOrderRules({ fresh: true })));
+  } catch (e) {
+    handleError(res, e, "Read medicine order");
+  }
+});
+
+router.put("/settings/rx-order", rxOrderGate, validate(rxOrderRulesSchema), async (req, res) => {
+  try {
+    res.json(rxOrderPayload(await setRxOrderRules(req.body, req.doctor?.doctor_id ?? null)));
+  } catch (e) {
+    handleError(res, e, "Update medicine order");
+  }
+});
+
+router.delete("/settings/rx-order", rxOrderGate, async (req, res) => {
+  try {
+    res.json(rxOrderPayload(await resetRxOrderRules(req.doctor?.doctor_id ?? null)));
+  } catch (e) {
+    handleError(res, e, "Reset medicine order");
   }
 });
 

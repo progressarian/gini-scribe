@@ -1,0 +1,225 @@
+.mord {
+  max-width: 980px;
+}
+.mord__list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mord__row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid #e5e9f0;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+.mord__pos {
+  padding-top: 26px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #64748b;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.mord__fields {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+.mord__fields:has(.mord__select) {
+  grid-template-columns: minmax(160px, 200px) minmax(140px, 180px) minmax(0, 1fr);
+}
+.mord__field {
+  display: block;
+  min-width: 0;
+}
+.mord__keywords {
+  height: auto;
+  min-height: 36px;
+  padding: 8px 10px;
+  line-height: 1.45;
+  resize: vertical;
+}
+.mord__keywords:disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+}
+.mord__rowActs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 24px;
+}
+.mord__move {
+  display: inline-flex;
+  gap: 4px;
+}
+.mord__moveBtn,
+.mord__remove {
+  height: 32px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  background: #fff;
+  border: 1px solid #d5dce5;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+.mord__moveBtn {
+  width: 32px;
+  font-size: 10px;
+}
+.mord__remove {
+  padding: 0 10px;
+  color: #b42318;
+}
+.mord__moveBtn:hover:not(:disabled),
+.mord__remove:hover {
+  background: #f8fafc;
+}
+.mord__moveBtn:focus-visible,
+.mord__remove:focus-visible,
+.mord__result:focus-visible {
+  outline: 2px solid #009e8c;
+  outline-offset: 1px;
+}
+.mord__moveBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.mord__error {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #b42318;
+}
+.mord__group + .mord__group {
+  margin-top: 16px;
+}
+.mord__groupTitle {
+  margin: 14px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0e2240;
+}
+.mord__results {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 520px;
+}
+.mord__result {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  color: #0e2240;
+  background: #fff;
+  border: 1px solid #e5e9f0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.mord__result span {
+  font-size: 12px;
+  color: #64748b;
+}
+.mord__result:hover {
+  background: #e6f6f4;
+}
+.mord__result--typed {
+  color: #009e8c;
+  font-weight: 600;
+}
+.mord__empty {
+  margin-top: 12px;
+}
+.mord__table {
+  width: 100%;
+  margin-top: 14px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.mord__table th {
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  color: #64748b;
+  border-bottom: 1px solid #e5e9f0;
+}
+.mord__table td {
+  padding: 6px 8px;
+  vertical-align: top;
+  border-bottom: 1px solid #f1f5f9;
+}
+.mord__medicine {
+  font-weight: 600;
+  color: #0e2240;
+  overflow-wrap: anywhere;
+}
+.mord__number {
+  width: 90px;
+}
+.mord__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.mord__state {
+  padding: 24px;
+  border: 1px solid #e5e9f0;
+  border-radius: 10px;
+  background: #fff;
+}
+@media (max-width: 760px) {
+  .mord__fields,
+  .mord__fields:has(.mord__select) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mord__row {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+  .mord__rowActs {
+    grid-column: 2;
+    padding-top: 0;
+  }
+  .mord__pos {
+    padding-top: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mord__moveBtn,
+  .mord__remove {
+    transition: none;
+  }
+}
+.mord__tabs {
+  margin-bottom: 16px;
+}
+.mord__tabErr {
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #b42318;
+  background: #fef3f2;
+  border: 1px solid #fecdca;
+  border-radius: 999px;
+}

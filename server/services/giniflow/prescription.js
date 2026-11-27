@@ -1,6 +1,7 @@
 import pool from "../../config/db.js";
 import { stripFormPrefix, canonicalMedKey } from "../medication/normalize.js";
 import { SLOT_ORDER, whenToTakeFor } from "../../../shared/giniflowMedTiming.js";
+import { applyStandardOrder } from "../medication/rxOrder.js";
 
 export const TIMING_CATEGORIES = [
   "before_breakfast",
@@ -75,7 +76,7 @@ const withStock = async (items, db) => {
 
 export async function getDraft(visitId, db = pool) {
   const { rows: visit } = await db.query(
-    `SELECT patient_id, current_status FROM giniflow_visits WHERE id = $1`,
+    `SELECT patient_id, current_status, rx_order_manual FROM giniflow_visits WHERE id = $1`,
     [visitId],
   );
   if (!visit.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
@@ -140,6 +141,7 @@ export async function getDraft(visitId, db = pool) {
     lastUpdated: lastUpdatedRows[0]?.last_updated || null,
     stopped: stoppedRows,
     started: items.length > 0,
+    orderManual: !!visit[0].rx_order_manual,
   };
 }
 
@@ -185,6 +187,7 @@ export async function seedDraftOn(client, visitId) {
        RETURNING id`,
     [visitId],
   );
+  if (rows.length) await applyStandardOrder(client, visitId);
   return { seeded: rows.length };
 }
 
@@ -315,6 +318,7 @@ export async function addItem(visitId, item, db = pool) {
       n.timingCategories,
     ],
   );
+  await applyStandardOrder(db, visitId);
   return rows[0];
 }
 

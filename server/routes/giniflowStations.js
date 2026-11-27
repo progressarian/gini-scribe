@@ -53,6 +53,7 @@ import {
   giniflowAllergySchema,
   giniflowRxPauseSchema,
   giniflowRxStopSchema,
+  giniflowRxMoveSchema,
   giniflowRxFollowupSchema,
   giniflowRxFollowupManySchema,
   giniflowMedSearchQuerySchema,
@@ -260,6 +261,7 @@ import {
   addExternal,
   removeExternal,
 } from "../services/giniflow/prescription.js";
+import { moveRxItem, resetRxOrder } from "../services/medication/rxOrder.js";
 import { checkVisit, acknowledge } from "../services/giniflow/interactions.js";
 import { buildCard } from "../services/giniflow/medicineCard.js";
 import {
@@ -686,7 +688,7 @@ router.get("/giniflow/follow-up-load", async (req, res) => {
 // "medicines" and fail inside a uuid comparison.
 router.get(
   "/giniflow/stations/doctor/medicines",
-  doctorGate,
+  requireCapability([CAP.GINIFLOW_STATION_DOCTOR, CAP.RX_ORDER_SETTINGS]),
   validateQuery(giniflowMedSearchQuerySchema),
   async (req, res) => {
     try {
@@ -1090,6 +1092,33 @@ router.post(
       res.json(await stopItem(req.params.itemId, req.body.reason));
     } catch (e) {
       doctorError(res, e, "Gini Flow stop medicine");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/doctor/prescription/items/:itemId/move",
+  doctorGate,
+  requireOwnRxItem,
+  validate(giniflowRxMoveSchema),
+  async (req, res) => {
+    try {
+      res.json(await moveRxItem(req.params.itemId, req.body.direction));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow move medicine");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/doctor/:visitId/prescription/order/reset",
+  doctorGate,
+  requireOwnVisit,
+  async (req, res) => {
+    try {
+      res.json(await resetRxOrder(req.params.visitId));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow reset medicine order");
     }
   },
 );
@@ -2993,6 +3022,49 @@ router.post(
       res.json(await stopItem(req.params.itemId, req.body.reason));
     } catch (e) {
       doctorError(res, e, "Gini Flow MO stop medicine");
+    }
+  },
+);
+
+router.post(
+  "/giniflow/stations/mo/prescription/items/:itemId/move",
+  moGate,
+  requireMoEditingRow,
+  validate(giniflowRxMoveSchema),
+  async (req, res) => {
+    try {
+      res.json(await moveRxItem(req.params.itemId, req.body.direction));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow MO move medicine");
+    }
+  },
+);
+
+const requireMoEditingVisit = async (req, res, next) => {
+  try {
+    const me = req.doctor?.doctor_id ?? null;
+    if (
+      overridesOwnership(req) ||
+      (me != null && (await editingVisitOf(req.params.visitId)) === me)
+    )
+      return next();
+    return res.status(403).json({
+      error: "Press Edit prescription first — the order can be changed here only while you edit",
+    });
+  } catch (e) {
+    handleError(res, e, "Gini Flow MO edit order");
+  }
+};
+
+router.post(
+  "/giniflow/stations/mo/:visitId/prescription/order/reset",
+  moGate,
+  requireMoEditingVisit,
+  async (req, res) => {
+    try {
+      res.json(await resetRxOrder(req.params.visitId));
+    } catch (e) {
+      doctorError(res, e, "Gini Flow MO reset medicine order");
     }
   },
 );

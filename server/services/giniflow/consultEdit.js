@@ -8,6 +8,7 @@ import { pendingProposalCount, writeMedicines } from "./finalize.js";
 import { markMedicationVisitStatus } from "../medication/visitStatus.js";
 import { savePrescriptionForVisit, buildVisitPayloadFromDb } from "../prescriptionAutoSave.js";
 import { referralsForVisit, generateLetter } from "./referralsStation.js";
+import { applyStandardOrder } from "../medication/rxOrder.js";
 
 const FINALIZED = [
   "doctor_done",
@@ -109,9 +110,11 @@ export async function openEdit(visitId, { actorId = null, isAdmin = false } = {}
       [visitId, visit.patient_id, visit.consultation_id, REMOVED_REASON],
     );
     await client.query(
-      `UPDATE giniflow_visits SET editing_by = $2, editing_since = NOW() WHERE id = $1`,
+      `UPDATE giniflow_visits SET editing_by = $2, editing_since = NOW(), rx_order_manual = FALSE
+        WHERE id = $1`,
       [visitId, actorId],
     );
+    await applyStandardOrder(client, visitId, { force: true });
     return { editing: true, medicines: rows.length };
   });
 }

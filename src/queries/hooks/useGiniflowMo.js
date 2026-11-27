@@ -82,10 +82,10 @@ export const useReadyForDoctor = () =>
 export const useCloseWithoutDoctor = () =>
   useMoAction(async (visitId) => (await api.post(`${base}/${visitId}/close`)).data);
 
-export const useReviewReports = () =>
+export const useAddDiagnosis = () =>
   useMoAction(
-    async ({ visitId, outcome, note = null }) =>
-      (await api.post(`${base}/${visitId}/review-reports`, { outcome, note })).data,
+    async ({ patientId, ...diagnosis }) =>
+      (await api.post(`/api/visit/${patientId}/diagnosis`, diagnosis)).data,
   );
 
 export const useAddProposal = () =>

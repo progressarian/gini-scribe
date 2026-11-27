@@ -35,12 +35,9 @@ import { CHECKED_IN_SQL } from "./stepSql.js";
 
 export const CLOSEABLE_CATEGORY = "in_control";
 
-const closeableNow = ({ hasPlan, orders, outcome }) =>
-  !!hasPlan && (orders === 0 || outcome === "normal");
+const closeableNow = ({ hasPlan }) => !!hasPlan;
 
 const GATING_ORDER_SQL = `o.urgency = 'today'`;
-
-const gatingOrders = (orders = []) => orders.filter((o) => o.urgency === "today").length;
 
 // Lab-track statuses that mean the sample has not been taken yet.
 const UNCOLLECTED = UNDRAWN_SAMPLE_STATUSES;
@@ -265,11 +262,7 @@ export async function getMoQueue(
       openOrders: r.open_orders + r.open_cases,
       labStage: r.lab_stage || null,
       hasPlan: !!r.has_plan,
-      canClose: closeableNow({
-        hasPlan: r.has_plan,
-        orders: r.open_orders + r.open_cases,
-        outcome: r.reports_outcome,
-      }),
+      canClose: closeableNow({ hasPlan: r.has_plan }),
       reportsOutcome: r.reports_outcome || null,
     };
     const group = groupOf(r, sdId);
@@ -339,6 +332,7 @@ export async function getMoPatient(visitId, db = pool) {
     { rows: proposals },
     { rows: orders },
     { rows: reports },
+    { rows: chartDiagnoses },
   ] = await Promise.all([
     todaysVitals(visitId, { patientId: v.patient_id, visitDate: v.visit_date }, db),
     previousVitals(v.patient_id, v.visit_date, db),
@@ -391,6 +385,12 @@ export async function getMoPatient(visitId, db = pool) {
         ORDER BY COALESCE(doc_date, created_at::date) DESC, created_at DESC LIMIT 30`,
       [v.patient_id],
     ),
+    db.query(
+      `SELECT id, diagnosis_id, label, status, category
+         FROM diagnoses WHERE patient_id = $1 AND is_active
+        ORDER BY CASE category WHEN 'primary' THEN 0 ELSE 1 END, sort_order, id`,
+      [v.patient_id],
+    ),
   ]);
 
   return {
@@ -409,13 +409,7 @@ export async function getMoPatient(visitId, db = pool) {
     resultsStatus: v.results_status,
     assignedSdId: v.assigned_sd_id,
     checkedInAt: v.checked_in_at ? new Date(v.checked_in_at).toISOString() : null,
-    canClose: closeableNow({
-      hasPlan: !!notes[0]?.plan?.trim(),
-      // Not orders.length: the list below shows tomorrow's and next visit's
-      // orders too, and those gate nothing today.
-      orders: gatingOrders(orders),
-      outcome: notes[0]?.reports_outcome,
-    }),
+    canClose: closeableNow({ hasPlan: !!notes[0]?.plan?.trim() }),
     reportsOutcome: notes[0]?.reports_outcome || null,
     reportsReviewNote: notes[0]?.reports_review_note || null,
     reportsReviewedAt: notes[0]?.reports_reviewed_at
@@ -435,7 +429,7 @@ export async function getMoPatient(visitId, db = pool) {
     nextVisitDate: v.biomarkers?.followup || null,
     compliance: v.compliance || null,
     compliancePct: v.pre_visit_compliance?.pct ?? null,
-    diagnoses: v.opd_diagnoses || null,
+    diagnoses: chartDiagnoses.length ? chartDiagnoses : v.opd_diagnoses || [],
     medications: v.opd_medications || null,
     reports,
     plan: notes[0]?.plan ?? "",
@@ -955,32 +949,16 @@ export async function closeWithoutDoctor(visitId, actorId = null, db = pool) {
     await client.query("BEGIN");
     await assertOwner(client, visitId, actorId);
     const { rows } = await client.query(
-      `SELECT v.category, v.results_status,
-              (SELECT plan FROM giniflow_sd_notes n WHERE n.visit_id = v.id) AS plan,
-              (SELECT reports_outcome FROM giniflow_sd_notes n WHERE n.visit_id = v.id)
-                AS reports_outcome,
-              (SELECT count(*)::int FROM giniflow_lab_orders o
-                WHERE o.visit_id = v.id AND ${GATING_ORDER_SQL}) AS orders
+      `SELECT (SELECT plan FROM giniflow_sd_notes n WHERE n.visit_id = v.id) AS plan
          FROM giniflow_visits v
         WHERE v.id = $1 FOR UPDATE`,
       [visitId],
     );
     if (!rows.length) throw Object.assign(new Error("Visit not found"), { status: 404 });
-    const { plan, reports_outcome: outcome, orders } = rows[0];
+    const { plan } = rows[0];
 
     if (!plan || !plan.trim()) {
       throw Object.assign(new Error("Write a plan before closing this patient"), { status: 409 });
-    }
-
-    if (orders > 0 && outcome !== "normal") {
-      throw Object.assign(
-        new Error(
-          outcome === "needs_consultant"
-            ? "You marked these reports as needing the consultant — send them on instead"
-            : "Review the reports before closing this patient",
-        ),
-        { status: 409 },
-      );
     }
     await applyChiefNextVisit(client, visitId, actorId);
     await client.query("COMMIT");
