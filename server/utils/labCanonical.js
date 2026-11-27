@@ -317,3 +317,14 @@ export const getCanonical = (name) => {
 
   return null;
 };
+
+const CONCENTRATION_UNIT = /^\s*(mg|µg|ug|mcg)\s*\/\s*(l|dl|ml)\b/i;
+const RATIO_NAME = /ratio|creat|acr/i;
+
+export const URINE_MICROALBUMIN = "Urine Microalbumin";
+
+export const getLabCanonical = (name, unit) => {
+  const canonical = getCanonical(name);
+  if (canonical !== "UACR" || RATIO_NAME.test(name || "")) return canonical;
+  return CONCENTRATION_UNIT.test(unit || "") ? URINE_MICROALBUMIN : canonical;
+};

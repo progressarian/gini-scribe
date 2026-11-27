@@ -120,7 +120,7 @@ function getBiomarkerTag(dx, labResults, vitals) {
 
   // Nephropathy → UACR
   if (text.includes("nephropathy")) {
-    const hist = findHistory(labResults, ["UACR", "Urine ACR", "Microalbumin"]);
+    const hist = findHistory(labResults, ["UACR", "Urine ACR"]);
     if (hist.length > 0) {
       const v = hist[0].value;
       const color = v > 60 ? "#dc2626" : v > 30 ? "#d97706" : "#16a34a";

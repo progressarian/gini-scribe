@@ -1,4 +1,4 @@
-import { buildRxParameterTable } from "./rxParameterTable.js";
+import { buildRxParameterTable, PRINT_ONLY_RX_PARAMETERS } from "./rxParameterTable.js";
 import { createRequire } from "module";
 import crypto from "crypto";
 import { buildPrescriptionHtml } from "../templates/prescriptionTemplate.js";
@@ -126,6 +126,7 @@ async function resolveRxParameters(data) {
       patientId,
       visitDate: data.rxDate || istToday(),
       todayOnlyWhenCompleted: true,
+      extraRows: PRINT_ONLY_RX_PARAMETERS,
     });
   } catch (e) {
     console.error("Rx parameter table skipped:", e.message);

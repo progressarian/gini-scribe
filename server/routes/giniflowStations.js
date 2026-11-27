@@ -338,6 +338,7 @@ import {
   hasCapability,
   hasAnyCapability,
 } from "../../shared/permissions.js";
+import { visitChief } from "../services/assistedDoctor.js";
 
 const router = Router();
 
@@ -1340,6 +1341,21 @@ router.post(
   },
 );
 
+const OTHER_CONSULTANT_WAITING = new Set(["ready_for_doctor", "with_doctor"]);
+
+const otherConsultantPatients = async (req, date, q) => {
+  const { groups } = await getDoctorQueue(date, {
+    doctorId: roomDoctorId(req),
+    rxMoId: req.rxMoId,
+    excludeConsultantId: req.assistedDoctor.id,
+    q,
+  });
+  const seen = new Set();
+  return Object.values(groups)
+    .flat()
+    .filter((card) => !seen.has(card.visitId) && seen.add(card.visitId));
+};
+
 // ── Launcher ────────────────────────────────────────────────────────────────
 // Every station's count in one call, filtered to the stations this role may
 // open. A tile that appears and then 403s is worse than no tile.
@@ -1358,13 +1374,17 @@ router.get(
       if (req.rxMoId && req.assistedDoctor?.chief) {
         const queue = await getMoQueue(date, roomDoctorId(req), null, undefined, undefined, {
           rxMoId: req.rxMoId,
+          chiefId: req.assistedDoctor.id,
         });
-        const waiting = queue.counters.withMe + queue.counters.waitingForMe;
+        const others = await otherConsultantPatients(req, date, null);
+        const othersWaiting = others.filter((c) => OTHER_CONSULTANT_WAITING.has(c.status)).length;
+        const waiting = queue.counters.withMe + queue.counters.waitingForMe + othersWaiting;
+        const assigned = queue.total + others.length;
         summary.mo_sd = {
           count: waiting,
-          assigned: queue.total,
-          label: queue.total
-            ? `${queue.total} assigned to you · ${waiting} waiting`
+          assigned,
+          label: assigned
+            ? `${assigned} assigned to you · ${waiting} waiting`
             : "0 assigned to you",
           tone: waiting ? "red" : "teal",
         };
@@ -3129,9 +3149,16 @@ router.get(
         req.query.q ?? null,
         undefined,
         undefined,
-        { rxMoId: req.rxMoId ?? null },
+        {
+          rxMoId: req.rxMoId ?? null,
+          chiefId: req.assistedDoctor?.chief ? req.assistedDoctor.id : null,
+        },
       );
-      res.json({ date, ...data, serverTime: new Date().toISOString() });
+      const otherConsultants =
+        req.rxMoId && req.assistedDoctor?.chief
+          ? await otherConsultantPatients(req, date, req.query.q ?? null)
+          : [];
+      res.json({ date, ...data, otherConsultants, serverTime: new Date().toISOString() });
     } catch (e) {
       handleError(res, e, "Gini Flow MO queue");
     }
@@ -3362,10 +3389,20 @@ router.post(
   },
 );
 
+const closeOrFinalizeGate = async (req, res, next) => {
+  try {
+    if (hasCapability(req.doctor, CAP.GINIFLOW_MO_CLOSE)) return next();
+    if (await visitChief(req.params.visitId)) return next();
+    return res.status(403).json({ error: "You do not have permission to close this patient" });
+  } catch (e) {
+    handleError(res, e, "Gini Flow MO close");
+  }
+};
+
 router.post(
   "/giniflow/stations/mo/:visitId/close",
   moGate,
-  requireCapability(CAP.GINIFLOW_MO_CLOSE),
+  closeOrFinalizeGate,
   async (req, res) => {
     try {
       res.json(await closeWithoutDoctor(req.params.visitId, req.doctor?.doctor_id ?? null));

@@ -14,7 +14,7 @@ const syncMedicationsToGenie = noop;
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../config/storage.js";
 import { n, safeJson } from "../utils/helpers.js";
 import { handleError } from "../utils/errorHandler.js";
-import { getCanonical } from "../utils/labCanonical.js";
+import { getLabCanonical } from "../utils/labCanonical.js";
 import { parseLabDateChecked, isFutureISO, todayISO } from "../utils/labDate.js";
 import { NOTE_LAB_SOURCES } from "../services/lab/labSources.js";
 import { validate } from "../middleware/validate.js";
@@ -890,7 +890,7 @@ router.patch("/documents/:id", async (req, res) => {
         for (const test of panel.tests || []) {
           if (test.result == null && !test.result_text) continue;
           const numResult = typeof test.result === "number" ? test.result : parseFloat(test.result);
-          const canonical = getCanonical(test.test_name) || test.test_name;
+          const canonical = getLabCanonical(test.test_name, test.unit) || test.test_name;
           const { date: testDate, futureDropped } = parseLabDateChecked(
             test.date || test.test_date,
             fallbackDate,
@@ -1334,7 +1334,7 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
             if (test.result == null && !test.result_text) continue;
             const numResult =
               typeof test.result === "number" ? test.result : parseFloat(test.result);
-            const canonical = getCanonical(test.test_name) || test.test_name;
+            const canonical = getLabCanonical(test.test_name, test.unit) || test.test_name;
             const { date: testDate, futureDropped } = parseLabDateChecked(
               test.date || test.test_date,
               fallbackDate,

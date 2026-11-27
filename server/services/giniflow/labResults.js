@@ -1,5 +1,5 @@
 import pool from "../../config/db.js";
-import { getCanonical } from "../../utils/labCanonical.js";
+import { getLabCanonical } from "../../utils/labCanonical.js";
 import { flagForRange } from "../../utils/labFlag.js";
 import { advanceSample, assertSampleDrawn, markCaseResultsReady } from "./labStation.js";
 import { syncLabStepsFromLab } from "./journey.js";
@@ -374,7 +374,8 @@ async function writeEntries(db, ctx, entries, column) {
   try {
     await client.query("BEGIN");
     for (const e of entries) {
-      const canonical = getCanonical(e.testName) || e.testName.toLowerCase().replace(/\s+/g, "_");
+      const canonical =
+        getLabCanonical(e.testName, e.unit) || e.testName.toLowerCase().replace(/\s+/g, "_");
       const flag =
         e.flag !== undefined ? e.flag : e.value === null ? null : flagForRange(e.value, e.refRange);
 

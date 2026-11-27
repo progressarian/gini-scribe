@@ -28,7 +28,7 @@ export const LAB_ALIASES = {
   "HOMA-Beta": ["HOMA-Beta", "HOMA Beta", "HOMA-B", "HOMA B"],
   Insulin: ["Insulin", "Fasting Insulin", "Serum Insulin", "FPI", "Fasting Plasma Insulin"],
   "C-Peptide": ["C-Peptide", "C Peptide", "C-PEPTIDE"],
-  UACR: ["UACR", "Urine ACR", "Microalbumin", "Microalbumin/Creatinine Ratio", "ACR"],
+  UACR: ["UACR", "Urine ACR", "Microalbumin/Creatinine Ratio", "ACR"],
   PPBS: ["PPBS", "Post Prandial Blood Sugar", "PP", "PPBG", "Post Prandial"],
   RBS: ["RBS", "Random Blood Sugar", "RBG", "Random Blood Glucose"],
   "Vitamin D": ["Vitamin D", "25-OH Vitamin D", "VIT D"],

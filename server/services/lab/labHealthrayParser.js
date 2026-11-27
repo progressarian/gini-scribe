@@ -1,4 +1,4 @@
-import { getCanonical } from "../../utils/labCanonical.js";
+import { getLabCanonical } from "../../utils/labCanonical.js";
 import { flagFor } from "../../utils/labFlag.js";
 
 function mapParam(param, categoryName) {
@@ -23,7 +23,8 @@ function mapParam(param, categoryName) {
   return {
     name: param.name,
     canonicalName:
-      getCanonical(param.name) || (param.name || "").toLowerCase().replace(/\s+/g, "_"),
+      getLabCanonical(param.name, param.unit) ||
+      (param.name || "").toLowerCase().replace(/\s+/g, "_"),
     rawValue: rawVal,
     value: isNaN(numVal) ? null : numVal, // null for text results (e.g. "Positive")
     unit: param.unit || null,

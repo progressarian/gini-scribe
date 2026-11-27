@@ -1,5 +1,5 @@
 import pool from "../../config/db.js";
-import { chiefDeskOwner } from "../assistedDoctor.js";
+import { chiefDeskOwner, visitChief } from "../assistedDoctor.js";
 import { linesForOrder } from "../billing/visitLines.js";
 import { outsourcedTestNames } from "../billing/testMatch.js";
 import { OPEN_LAB_CASES_SQL } from "./labStation.js";
@@ -92,7 +92,7 @@ const reportsLine = (resultsStatus, hasBiomarkers) => {
 };
 
 const QUEUE_SQL = `
-  SELECT v.id, v.current_status, v.results_status, v.category, v.stability, v.stability_reasons, v.assigned_sd_id,
+  SELECT v.id, v.current_status, v.results_status, v.category, v.stability, v.stability_reasons, v.assigned_sd_id, v.assigned_doctor_id,
          (to_jsonb(v)->>'rx_mo_id')::int AS rx_mo_id,
          v.appointment_time::text AS appointment_time, v.blocked_reason, v.paused_at,
          p.id AS patient_id, p.name, p.file_no, p.age, p.sex,
@@ -201,7 +201,7 @@ export async function getMoQueue(
   q = null,
   now = new Date(),
   db = pool,
-  { rxMoId = null } = {},
+  { rxMoId = null, chiefId = null } = {},
 ) {
   // A typed % or _ is a character the MO meant, not a wildcard.
   const raw = typeof q === "string" && q.trim() ? q.trim() : null;
@@ -230,7 +230,8 @@ export async function getMoQueue(
   };
 
   const counters = {};
-  const shown = rxMoId ? rows.filter((r) => r.rx_mo_id === rxMoId) : rows;
+  const chiefPatient = (r) => !chiefId || !r.assigned_doctor_id || r.assigned_doctor_id === chiefId;
+  const shown = rxMoId ? rows.filter((r) => r.rx_mo_id === rxMoId && chiefPatient(r)) : rows;
   for (const r of shown) {
     const compliancePct = r.pre_visit_compliance?.pct ?? null;
     const { since: waitSince } = chiefWaitClock(r);
@@ -410,6 +411,7 @@ export async function getMoPatient(visitId, db = pool) {
     assignedSdId: v.assigned_sd_id,
     checkedInAt: v.checked_in_at ? new Date(v.checked_in_at).toISOString() : null,
     canClose: closeableNow({ hasPlan: !!notes[0]?.plan?.trim() }),
+    finalizeUnder: (await visitChief(v.id, db))?.name || null,
     reportsOutcome: notes[0]?.reports_outcome || null,
     reportsReviewNote: notes[0]?.reports_review_note || null,
     reportsReviewedAt: notes[0]?.reports_reviewed_at
@@ -911,6 +913,15 @@ export async function releaseWorkup(visitId, actorId = null, db = pool) {
 }
 
 export async function readyForDoctor(visitId, actorId = null, db = pool) {
+  const chief = await visitChief(visitId, db);
+  if (chief) {
+    throw Object.assign(
+      new Error(
+        `Finalize the prescription here — ${chief.short_name || chief.name} has no separate doctor step`,
+      ),
+      { status: 409 },
+    );
+  }
   const client = await db.connect();
   try {
     await client.query("BEGIN");
@@ -972,6 +983,7 @@ export async function closeWithoutDoctor(visitId, actorId = null, db = pool) {
   const result = await finalizeConsult(visitId, actorId, db, {
     closedBySd: true,
     requireNextVisit: true,
+    consultantId: (await visitChief(visitId, db))?.id ?? (await chiefDeskOwner(actorId, db)),
   });
   return { ...result, status: "doctor_done", skippedDoctor: true };
 }

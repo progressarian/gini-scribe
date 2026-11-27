@@ -7,6 +7,22 @@ const FIRST_WINDOW_DAYS = 90;
 const ATTENDED = ["completed", "seen", "checkedin", "in_visit", "in-progress"];
 const COMPLETED = ["completed", "seen"];
 
+export const PRINT_ONLY_RX_PARAMETERS = [
+  { key: "fundus", label: "Fundus", unit: "", source: { labs: ["Fundus"] } },
+  {
+    key: "vpt",
+    label: "VPT",
+    unit: "",
+    source: { sides: ["VPT Left", "VPT Right"], format: "paren" },
+  },
+  {
+    key: "abi",
+    label: "ABI",
+    unit: "",
+    source: { sides: ["ABI Left", "ABI Right"], format: "paren" },
+  },
+];
+
 export const DEFAULT_RX_PARAMETERS = [
   { key: "height", label: "Height", unit: "cm", source: { vital: "height" } },
   { key: "weight", label: "Weight", unit: "kg", source: { vital: "weight" } },
@@ -214,13 +230,14 @@ function valueIn(param, data, start, end) {
     return picked;
   };
   if (src.sides?.length) {
+    const sideOf = (name) => (/left/i.test(name) ? "L" : /right/i.test(name) ? "R" : "");
     const parts = src.sides
       .map((name) => [name, latestFor(name)])
       .filter(([, v]) => v != null)
       .map(([name, v]) =>
-        `${/left/i.test(name) ? "L" : /right/i.test(name) ? "R" : ""} ${v}`.trim(),
+        src.format === "paren" ? `${sideOf(name)}(${v})` : `${sideOf(name)} ${v}`.trim(),
       );
-    if (parts.length) return parts.join(" / ");
+    if (parts.length) return parts.join(src.format === "paren" ? ", " : " / ");
   }
   for (const name of src.labs || []) {
     const v = latestFor(name);
@@ -260,7 +277,7 @@ export function mergeRxParameterRows(defaults, overrideRows = []) {
 
 export async function buildRxParameterTable(
   db = pool,
-  { patientId, visitDate, todayOnlyWhenCompleted = false },
+  { patientId, visitDate, todayOnlyWhenCompleted = false, extraRows = [] },
 ) {
   if (!patientId || !visitDate) return null;
   const day = dayOf(visitDate);
@@ -270,7 +287,10 @@ export async function buildRxParameterTable(
     pastVisitDates(db, patientId, day, HISTORY_VISITS + 1),
     todayOnlyWhenCompleted ? visitCompleted(db, patientId, day) : true,
   ]);
-  const params = mergeRxParameterRows(defaults, override?.rows);
+  const params = mergeRxParameterRows(
+    [...defaults, ...extraRows.filter((x) => !defaults.some((p) => p.key === x.key))],
+    override?.rows,
+  );
   const active = params.filter((p) => !p.removed);
   const from = addDays(past[0] || day, -FIRST_WINDOW_DAYS);
   const data = await readings(db, patientId, from, day, active);

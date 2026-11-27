@@ -13,7 +13,7 @@ const LAB_ALIASES = {
   Creatinine: ["Creatinine", "S.Creatinine", "Serum Creatinine", "CREATININE"],
   eGFR: ["eGFR", "GFR", "Estimated GFR"],
   TSH: ["TSH", "Thyroid Stimulating Hormone", "THYROID STIMULATING HORMONE"],
-  UACR: ["UACR", "Urine ACR", "Microalbumin"],
+  UACR: ["UACR", "Urine ACR"],
 };
 
 function findLab(labs, name) {

@@ -583,10 +583,12 @@ export default function MoStationPage() {
     suggestedNextVisit?.value?.date ||
     patient?.edit?.nextVisit?.date
   );
+  const chiefName = patient?.finalizeUnder || null;
   const acts = moActions({
     plan,
     canClose: patient?.canClose,
     hasNextVisit,
+    finalizeHere: !!chiefName,
   });
   const addProposal = useAddProposal();
   const withdrawProposal = useWithdrawProposal();
@@ -846,11 +848,19 @@ export default function MoStationPage() {
   const closePatient = () => {
     close.mutate(activeId, {
       onSuccess: () => {
-        showToast(`✓ ${patient.name} closed — prescription written, on to the Rx desk`);
+        showToast(
+          chiefName
+            ? `✓ ${patient.name} — prescription finalized, on to the Rx desk`
+            : `✓ ${patient.name} closed — prescription written, on to the Rx desk`,
+        );
         setConfirm(null);
         setSelected(null);
       },
-      onError: (e) => showToast(e?.response?.data?.error || "Could not close this patient"),
+      onError: (e) =>
+        showToast(
+          e?.response?.data?.error ||
+            (chiefName ? "Could not finalize this prescription" : "Could not close this patient"),
+        ),
     });
   };
 
@@ -1029,13 +1039,47 @@ export default function MoStationPage() {
               </div>
             );
           })}
-          {!isLoading && !GROUPS.some((g) => (queue?.[g.key] || []).length) && (
-            <div className="sq-foot">
-              {searching
-                ? `Nobody on today's floor matches "${queue.query}".`
-                : "Nobody is waiting for you right now."}
+          {(queue?.otherConsultants || []).length > 0 && (
+            <div className="sq-sect">
+              <GroupHead
+                icon="🧑‍⚕️"
+                title="Other consultants' patients"
+                sub="opens the consultant screen"
+                count={queue.otherConsultants.length}
+                open={searching || !collapsed.has("otherConsultants")}
+                onToggle={() => toggleGroup("otherConsultants")}
+                id="sq-group-otherConsultants"
+              />
+              <div
+                id="sq-group-otherConsultants"
+                hidden={!(searching || !collapsed.has("otherConsultants"))}
+              >
+                {queue.otherConsultants.map((card) => (
+                  <a
+                    key={card.visitId}
+                    href={`/giniflow/station/doctor/${card.visitId}`}
+                    className="sq-item"
+                  >
+                    <div className="si-slot">{card.appointmentTime || ""}</div>
+                    <div className="si-name">{card.name}</div>
+                    <div className="si-meta">
+                      {card.fileNo} · for {card.doctorName || "another consultant"} ·{" "}
+                      {card.statusLabel}
+                    </div>
+                  </a>
+                ))}
+              </div>
             </div>
           )}
+          {!isLoading &&
+            !GROUPS.some((g) => (queue?.[g.key] || []).length) &&
+            !(queue?.otherConsultants || []).length && (
+              <div className="sq-foot">
+                {searching
+                  ? `Nobody on today's floor matches "${queue.query}".`
+                  : "Nobody is waiting for you right now."}
+              </div>
+            )}
         </div>
 
         <div className="station-detail mo-detail">
@@ -1890,17 +1934,28 @@ export default function MoStationPage() {
                     disabled={busy || acts.closeDisabled}
                     title={acts.closeDisabled ? "Write a plan first" : undefined}
                     onClick={() =>
-                      setConfirm({
-                        key: "close",
-                        title: `Close ${patient.name} without the doctor?`,
-                        body: "Their prescription is written now and they go to the Prescription Explain desk, then the pharmacy. No consultant will see them today.",
-                        confirmLabel: "Close — no doctor needed",
-                        tone: "grn",
-                        onConfirm: closePatient,
-                      })
+                      setConfirm(
+                        chiefName
+                          ? {
+                              key: "close",
+                              title: `Finalize ${patient.name}'s prescription?`,
+                              body: `It is written now under ${chiefName} and ${patient.name} (${patient.fileNo}) goes to the Prescription Explain desk, then the pharmacy. Changes after this need Edit prescription.`,
+                              confirmLabel: "Finalize",
+                              tone: "grn",
+                              onConfirm: closePatient,
+                            }
+                          : {
+                              key: "close",
+                              title: `Close ${patient.name} without the doctor?`,
+                              body: "Their prescription is written now and they go to the Prescription Explain desk, then the pharmacy. No consultant will see them today.",
+                              confirmLabel: "Close — no doctor needed",
+                              tone: "grn",
+                              onConfirm: closePatient,
+                            },
+                      )
                     }
                   >
-                    ✓ Close — no doctor needed
+                    {chiefName ? "✓ Finalize prescription" : "✓ Close — no doctor needed"}
                   </button>
                 )}
                 <PrintRxButton

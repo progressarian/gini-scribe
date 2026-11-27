@@ -1,5 +1,5 @@
 import { TRENDS_CSS, biomarkerTrendsHtml } from "./prescriptionTrends.js";
-import { PARAM_TABLE_CSS, parameterTableHtml } from "./prescriptionParameterTable.js";
+import { PARAM_TABLE_CSS, vitalsListHtml } from "./prescriptionParameterTable.js";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -315,6 +315,24 @@ const findLatest = (labResults, key) => {
   );
 };
 
+const dmyDate = (ymd) => {
+  const [y, m, d] = String(ymd || "")
+    .slice(0, 10)
+    .split("-");
+  return y && m && d ? `${d}-${m}-${y}` : String(ymd || "");
+};
+
+const gapText = (fromYmd, toYmd) => {
+  if (!fromYmd || !toYmd) return "";
+  const days = Math.round(
+    (new Date(`${toYmd}T00:00:00Z`) - new Date(`${fromYmd.slice(0, 10)}T00:00:00Z`)) / 86400000,
+  );
+  if (!(days > 0)) return "";
+  if (days < 14 && days % 7 !== 0) return `${days} days`;
+  const weeks = Math.round(days / 7);
+  return `${weeks} ${weeks === 1 ? "week" : "weeks"}`;
+};
+
 const fmtDateLong = (d) => {
   if (!d) return "";
   const date = new Date(d);
@@ -481,19 +499,11 @@ body{font-family:var(--fb);color:var(--ink);background:var(--white);font-size:va
 .rx-ref-title{font-size:var(--fs-label);font-weight:700;color:var(--sk);margin-bottom:4px}
 .rx-ref-body{font-size:var(--fs-body);color:var(--ink);line-height:1.5}
 .rx-nv-block{break-inside:avoid}
-.rx-ref-grid+.rx-nv{margin-top:8px}
-.rx-nv{display:flex;border:1px solid var(--bd);border-radius:6px;overflow:hidden;break-inside:avoid}
-.rx-nv-appt{flex:0 0 32%;background:var(--white);color:var(--nv);padding:10px 12px;border-right:1px solid var(--bd);display:flex;flex-direction:column;justify-content:center}
-.rx-nv-appt .rx-nv-label{color:var(--tl)}
-.rx-nv-date{font-size:15px;font-weight:700;line-height:1.2;margin-top:2px}
-.rx-nv-when{font-size:var(--fs-meta);color:var(--ink3);margin-top:3px}
-.rx-nv-reports{flex:1;min-width:0;padding:9px 12px;background:var(--aml)}
-.rx-nv-label{font-size:var(--fs-label);font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--am)}
-.rx-nv-list{list-style:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px 12px;margin-top:5px}
-.rx-nv-list li{display:flex;align-items:center;gap:6px;font-size:var(--fs-body);color:var(--ink);overflow-wrap:anywhere}
-.rx-nv-box{flex:0 0 auto;width:10px;height:10px;border:1.5px solid var(--am);border-radius:2px;background:#fff}
-.rx-nv-note{font-size:var(--fs-body);color:var(--ink);margin-top:6px;white-space:pre-line;line-height:1.45}
-.rx-nv-remind{font-size:var(--fs-meta);font-weight:600;color:#7c2d12;margin-top:6px;padding-top:5px;border-top:1px dashed rgba(217,122,10,.35)}
+.rx-ref-grid+.rx-fu{margin-top:8px}
+.rx-fu{break-inside:avoid;line-height:1.5}
+.rx-fu-caps{font-weight:800;color:var(--ink);text-transform:uppercase;letter-spacing:.02em}
+.rx-fu-date{font-weight:700;color:var(--ink);margin-top:2px}
+.rx-fu-note{font-size:var(--fs-body);color:var(--ink);margin-top:4px;white-space:pre-line}
 .rx-test{background:var(--aml);border-radius:6px;padding:9px 11px;border-left:3px solid var(--am);break-inside:avoid}
 .rx-test-title{font-size:var(--fs-label);font-weight:700;color:var(--am);margin-bottom:4px}
 .rx-test-item{font-size:var(--fs-body);color:var(--ink);padding:2px 0;display:flex;gap:6px}
@@ -737,7 +747,7 @@ function buildPrescriptionHtml(data = {}) {
       if (tags.length) return tags;
     }
     if (text.includes("nephropathy")) {
-      const h = findBioHistory(["UACR", "Urine ACR", "Microalbumin"]);
+      const h = findBioHistory(["UACR", "Urine ACR"]);
       if (h.length > 0) {
         return [renderBio("UACR", " mg/g", h[0].value, oldestOf(h), "< 30 mg/g", true)];
       }
@@ -986,51 +996,23 @@ function buildPrescriptionHtml(data = {}) {
     .replace(/\b(with|and|reports?|tests?|of|all|the|bring|come)\b/g, "")
     .replace(/[^a-z0-9]+/g, "");
   const followUpNote = followUpLeftover ? followUpWith : "";
-  const nextVisitWeekday = nextVisitDate
-    ? new Date(`${nextVisitDate}T00:00:00Z`).toLocaleDateString("en-GB", {
-        weekday: "long",
-        timeZone: "UTC",
-      })
-    : "";
-  const nextVisitGap = String(followUp.timing || followUp.duration || "").trim();
-  const nextVisitWhen = [
-    nextVisitWeekday,
-    /^\d/.test(nextVisitGap) ? `in ${nextVisitGap}` : nextVisitGap,
-  ]
-    .filter(Boolean)
-    .map((v) => escape(String(v)))
-    .join(" · ");
+  const nextVisitGap =
+    String(followUp.timing || followUp.duration || "").trim() || gapText(visitDay, nextVisitDate);
   const showNextVisit = nextVisitDate || testNames.length > 0 || followUpNote;
+  const followUpWithTests = testNames.length ? ` with ${testNames.join(", ")}` : "";
   const nextVisitHtml = showNextVisit
-    ? `<div class="rx-nv">
-        <div class="rx-nv-appt">
-          <div class="rx-nv-label">Follow-up appointment</div>
-          <div class="rx-nv-date">${nextVisitDate ? escape(fmtDateLong(nextVisitDate)) : "To be scheduled"}</div>
-          ${nextVisitWhen ? `<div class="rx-nv-when">${nextVisitWhen}</div>` : ""}
-        </div>
-        <div class="rx-nv-reports">
-          ${
-            testNames.length > 0
-              ? `<div class="rx-nv-label">Reports to bring</div>
-                 <ul class="rx-nv-list">${testNames
-                   .map(
-                     (n) =>
-                       `<li><span class="rx-nv-box" aria-hidden="true"></span>${escape(n)}</li>`,
-                   )
-                   .join("")}</ul>`
-              : ""
-          }
-          ${
-            followUpNote
-              ? `<div class="rx-nv-note"><b>Instructions:</b> ${escape(followUpNote)}</div>`
-              : ""
-          }
-          ${
-            testNames.length > 0
-              ? `<div class="rx-nv-remind">Please bring all the reports above to your next visit.</div>`
-              : ""
-          }
-        </div>
+    ? `<div class="rx-fu">
+        <div class="rx-fu-caps">${escape(
+          `FOLLOW UP${nextVisitGap ? ` AFTER ${nextVisitGap}` : ""}${followUpWithTests}`,
+        )}</div>
+        <div class="rx-fu-date">${
+          nextVisitDate
+            ? escape(
+                `Follow-Up${nextVisitGap ? ` after ${nextVisitGap}` : ""} on ${dmyDate(nextVisitDate)}`,
+              )
+            : "Follow-up: to be scheduled"
+        }</div>
+        ${followUpNote ? `<div class="rx-fu-note"><b>Instructions:</b> ${escape(followUpNote)}</div>` : ""}
       </div>`
     : "";
 
@@ -1098,7 +1080,7 @@ function buildPrescriptionHtml(data = {}) {
 
     ${activeDx.length > 0 ? `<div class="rx-section-title">Diagnosis</div><div class="rx-dx-list">${dxHtml}</div>` : ""}
 
-    ${parameterTableHtml(data.rxParameters, escape)}
+    ${vitalsListHtml(data.rxParameters, escape)}
 
     ${
       goals.length > 0

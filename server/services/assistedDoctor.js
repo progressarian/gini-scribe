@@ -80,3 +80,17 @@ export const ASSIGNED_TODAY_SQL = (patientCol, moParam) => `${patientCol} IN (
   SELECT v.patient_id FROM giniflow_visits v
    WHERE v.rx_mo_id = ${moParam}
      AND v.visit_date = (NOW() AT TIME ZONE 'Asia/Kolkata')::date)`;
+
+export async function visitChief(visitId, db = pool) {
+  if (!visitId) return null;
+  const { rows } = await db.query(
+    `SELECT d.id, d.name, d.short_name
+       FROM giniflow_visits v
+       JOIN doctors d ON d.id = v.assigned_doctor_id
+      WHERE v.id = $1
+        AND (COALESCE(d.is_chief, FALSE)
+             OR COALESCE((to_jsonb(d)->>'chief_step')::boolean, FALSE))`,
+    [visitId],
+  );
+  return rows[0] || null;
+}

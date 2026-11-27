@@ -37,7 +37,7 @@ const LAB_ALIASES = {
   HDL: ["HDL"],
   Triglycerides: ["Triglycerides", "TG"],
   TSH: ["TSH"],
-  UACR: ["UACR", "Microalbumin"],
+  UACR: ["UACR"],
   "Vitamin D": ["Vitamin D", "Vit D", "25-OH Vitamin D"],
   "Vitamin B12": ["Vitamin B12", "Vit B12"],
 };
@@ -444,7 +444,7 @@ export default function DashboardPage() {
                   { display: "HDL", match: ["HDL"] },
                   { display: "TG", match: ["Triglycerides", "TG"] },
                   { display: "TSH", match: ["TSH"] },
-                  { display: "UACR", match: ["UACR", "Microalbumin"] },
+                  { display: "UACR", match: ["UACR"] },
                   { display: "Vit D", match: ["Vitamin D", "Vit D", "25-OH Vitamin D"] },
                   { display: "Vit B12", match: ["Vitamin B12", "Vit B12"] },
                 ].map(({ display, match }) => {

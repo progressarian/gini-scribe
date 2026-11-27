@@ -88,3 +88,29 @@ npm run build
 npm run check:giniflow                       # 3 pre-existing FAILs (FlowManager, MachineStation, TriageBoard) are not from this change
 npm run test:e2e:setup                       # rebuild local test DB with the new migration
 ```
+
+## 7. Dr Bhansali's Rx MOs — finalize, other consultants, printed vitals
+
+Log in as Dr Supreet / Dr JasChandrika / Dr Harshit (Rx MO for Dr Anil Bhansali) unless noted.
+
+| # | Step | Expected |
+|---|------|----------|
+| 7.1 | Open a Bhansali patient assigned to you → Chief Endocrinologist station | Footer shows only **✓ Finalize prescription** — no “Ready for the doctor”. |
+| 7.2 | No plan written | Finalize disabled, note “Write a plan before finalizing”. |
+| 7.3 | Write plan, no next visit | Finalize disabled, note “Set the next visit before finalizing”. |
+| 7.4 | Set next visit → Finalize | Confirm shows patient + file no. + “under Dr. Anil Bhansali”. Confirm → toast “prescription finalized”; patient moves to Rx Explain desk. |
+| 7.5 | Rx Explain desk → print | Doctor on the print is **Dr. Anil Bhansali** only (no MO name). |
+| 7.6 | Triage board: assign a patient of another consultant (e.g. Dr Rahul) to this MO | MO station queue shows section **Other consultants' patients** with “for Dr Rahul”. Station tile count includes them. |
+| 7.7 | Click that patient | Opens the consultant screen; write and finalize there. Print shows **Dr Rahul**. |
+| 7.8 | Plain MO (e.g. Dr Kunal) on the Chief station | Still sees “Ready for the doctor →” and “Close — no doctor needed” as before. |
+
+### Printed prescription layout (any finalized patient with vitals/labs)
+
+| # | Step | Expected |
+|---|------|----------|
+| 7.9 | Print a prescription finalized after deploy (or press Reissue on an older one) | Section **Vitals**: one value per row (Height, Weight, BMI, Waist, Body fat, BP, FPG, HbA1c, Creatinine, eGFR, uACR, LDL, TG, Non-HDL…). |
+| 7.10 | Patient with VPT / ABI results | Rows **VPT L(13), R(16)** and **ABI L(1.32), R(1.32)**. |
+| 7.11 | A value not from today | Shows its date in grey, e.g. `161 (18-08-2026)`. Rows with no value are hidden. |
+| 7.12 | Next visit set with tests to bring | Lines: **FOLLOW UP AFTER 6 weeks with FPG, PP** and **Follow-Up after 6 weeks on DD-MM-YYYY**. |
+| 7.13 | No next visit | “Follow-up: to be scheduled”. |
+| 7.14 | MO / doctor screens | No change on screen — only the printed PDF changed. |
