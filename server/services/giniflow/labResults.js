@@ -18,9 +18,9 @@ import {
   notANumber,
 } from "../../../shared/labFormula.js";
 import { assertNotHeld } from "./cancelHold.js";
+import { NOTE_LAB_SOURCES } from "../lab/labSources.js";
 
 const SOURCE = "manual";
-const NOTE_SOURCES = ["healthray", "prescription_parsed"];
 
 const bad = (message, status = 400) => Object.assign(new Error(message), { status });
 
@@ -399,7 +399,7 @@ async function writeEntries(db, ctx, entries, column) {
           link,
           SOURCE,
           e.isCritical === true,
-          NOTE_SOURCES,
+          NOTE_LAB_SOURCES,
         ],
       );
       if (updated.rowCount) {

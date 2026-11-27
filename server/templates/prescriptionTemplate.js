@@ -540,6 +540,14 @@ function workupHtml(workup) {
     }`;
 }
 
+const PROVISIONAL_CSS = `
+.rx-provisional{border:2px dashed #000;color:#000;text-align:center;padding:6px 10px;margin:6px 0 2px;font-size:12px;letter-spacing:.4px}
+.rx-provisional b{font-size:13px;letter-spacing:1px}
+`;
+
+const provisionalBannerHtml = () =>
+  `<div class="rx-provisional"><b>PROVISIONAL — NOT FINAL</b> · for reference until the consultation is finalized</div>`;
+
 function buildPrescriptionHtml(data = {}) {
   const {
     patient = {},
@@ -1032,13 +1040,14 @@ function buildPrescriptionHtml(data = {}) {
 <meta charset="UTF-8">
 <title>Prescription</title>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<style>${CSS}${TRENDS_CSS}${PARAM_TABLE_CSS}</style>
+<style>${CSS}${TRENDS_CSS}${PARAM_TABLE_CSS}${data.provisional ? PROVISIONAL_CSS : ""}</style>
 </head>
 <body>
 <div class="rx-page">
 <table class="rx-sheet">
 <thead><tr><td>
   ${letterheadHtml(escape(doctor.name || "Doctor"), docCredHtml, data.rx_logo || DEFAULT_LOGO_DATA_URI, data.rx_footer?.hospital)}
+  ${data.provisional ? provisionalBannerHtml() : ""}
 </td></tr></thead>
 <tbody><tr><td>
 

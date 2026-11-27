@@ -16,6 +16,7 @@ import { n, safeJson } from "../utils/helpers.js";
 import { handleError } from "../utils/errorHandler.js";
 import { getCanonical } from "../utils/labCanonical.js";
 import { parseLabDateChecked, isFutureISO, todayISO } from "../utils/labDate.js";
+import { NOTE_LAB_SOURCES } from "../services/lab/labSources.js";
 import { validate } from "../middleware/validate.js";
 import { documentCreateSchema, fileUploadSchema, normalizeWhenToTake } from "../schemas/index.js";
 import { fetchMedicalRecords } from "../services/healthray/client.js";
@@ -906,15 +907,7 @@ router.patch("/documents/:id", async (req, res) => {
             continue;
           }
 
-          // Skip if (patient, canonical, date) already exists from any source —
-          // one value per test per day, regardless of which document/path put it there.
-          const { rows: existing } = await client.query(
-            `SELECT id FROM lab_results
-              WHERE patient_id = $1 AND canonical_name = $2 AND test_date::date = $3::date
-              LIMIT 1`,
-            [doc.patient_id, canonical, testDate],
-          );
-          if (existing.length) continue;
+          if (await labSlotTaken(client, doc.patient_id, canonical, testDate)) continue;
 
           await client.query(
             `INSERT INTO lab_results
@@ -949,23 +942,6 @@ router.patch("/documents/:id", async (req, res) => {
       } catch (syncErr) {
         console.error(
           `[DocSync] Vitals sync failed for patient ${doc.patient_id}:`,
-          syncErr.message,
-        );
-      }
-
-      // Sync biomarkers to latest appointment so OPD page reflects new values
-      try {
-        const { rows: apptRows } = await client.query(
-          `SELECT id FROM appointments WHERE patient_id = $1 ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
-          [doc.patient_id],
-        );
-        if (apptRows[0]) {
-          const { syncBiomarkersFromLatestLabs } = await import("../services/healthray/db.js");
-          await syncBiomarkersFromLatestLabs(doc.patient_id, apptRows[0].id);
-        }
-      } catch (syncErr) {
-        console.error(
-          `[DocSync] Biomarker sync failed for patient ${doc.patient_id}:`,
           syncErr.message,
         );
       }
@@ -1084,6 +1060,21 @@ router.patch("/documents/:id", async (req, res) => {
 
     await client.query("COMMIT");
 
+    if (doc.patient_id && extracted_data?.panels) {
+      try {
+        const { rows: apptRows } = await pool.query(
+          `SELECT id FROM appointments WHERE patient_id = $1 ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
+          [doc.patient_id],
+        );
+        if (apptRows[0]) await syncBiomarkersFromLatestLabs(doc.patient_id, apptRows[0].id);
+      } catch (syncErr) {
+        console.error(
+          `[DocSync] Biomarker sync failed for patient ${doc.patient_id}:`,
+          syncErr.message,
+        );
+      }
+    }
+
     if (doc.patient_id) {
       syncDocumentsToGenie(doc.patient_id, pool).catch((e) =>
         console.warn("[PATCH /documents] Genie doc push skipped:", e.message),
@@ -1156,6 +1147,22 @@ router.patch("/documents/:id", async (req, res) => {
 //      surface can show "❌ Failed — Retry".
 // Returns a result object; the HTTP handler decides what to send to the
 // client. Never throws to the caller.
+async function labSlotTaken(client, patientId, canonical, testDate) {
+  await client.query(
+    `DELETE FROM lab_results
+      WHERE patient_id = $1 AND canonical_name = $2 AND test_date::date = $3::date
+        AND source = ANY($4::text[])`,
+    [patientId, canonical, testDate, NOTE_LAB_SOURCES],
+  );
+  const { rows } = await client.query(
+    `SELECT 1 FROM lab_results
+      WHERE patient_id = $1 AND canonical_name = $2 AND test_date::date = $3::date
+      LIMIT 1`,
+    [patientId, canonical, testDate],
+  );
+  return rows.length > 0;
+}
+
 async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
   docId = Number(docId);
   if (!docId) return { success: false, error_message: "Invalid document ID" };
@@ -1341,13 +1348,7 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
             // Hard guard: never insert a missing or future-dated lab result.
             if (!testDate || isFutureISO(testDate, today)) continue;
 
-            const { rows: existing } = await client.query(
-              `SELECT id FROM lab_results
-                WHERE patient_id = $1 AND canonical_name = $2 AND test_date::date = $3::date
-                LIMIT 1`,
-              [doc.patient_id, canonical, testDate],
-            );
-            if (existing.length) continue;
+            if (await labSlotTaken(client, doc.patient_id, canonical, testDate)) continue;
 
             await client.query(
               `INSERT INTO lab_results
@@ -1383,20 +1384,6 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
         } catch (syncErr) {
           console.error(
             `[extract] Vitals sync failed for patient ${doc.patient_id}:`,
-            syncErr.message,
-          );
-        }
-        try {
-          const { rows: apptRows } = await client.query(
-            `SELECT id FROM appointments WHERE patient_id = $1 ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
-            [doc.patient_id],
-          );
-          if (apptRows[0]) {
-            await syncBiomarkersFromLatestLabs(doc.patient_id, apptRows[0].id);
-          }
-        } catch (syncErr) {
-          console.error(
-            `[extract] Biomarker sync failed for patient ${doc.patient_id}:`,
             syncErr.message,
           );
         }
@@ -1504,6 +1491,21 @@ async function runServerExtraction(docId, { skipIfNotPending = false } = {}) {
       }
 
       await client.query("COMMIT");
+
+      if (doc.patient_id && extracted?.panels) {
+        try {
+          const { rows: apptRows } = await pool.query(
+            `SELECT id FROM appointments WHERE patient_id = $1 ORDER BY appointment_date DESC NULLS LAST LIMIT 1`,
+            [doc.patient_id],
+          );
+          if (apptRows[0]) await syncBiomarkersFromLatestLabs(doc.patient_id, apptRows[0].id);
+        } catch (syncErr) {
+          console.error(
+            `[extract] Biomarker sync failed for patient ${doc.patient_id}:`,
+            syncErr.message,
+          );
+        }
+      }
 
       if (doc.patient_id) {
         syncDocumentsToGenie(doc.patient_id, pool).catch((e) =>

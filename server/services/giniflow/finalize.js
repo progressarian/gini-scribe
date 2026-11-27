@@ -9,8 +9,8 @@ import { saveCarePlan } from "./doctorStation.js";
 import { orderTests } from "./moStation.js";
 import { checkVisit } from "./interactions.js";
 import { whenToTakeFor } from "../../../shared/giniflowMedTiming.js";
+import { DISPENSABLE } from "./draftRxMeds.js";
 
-const DISPENSABLE = ["continued", "changed", "new"];
 export async function pendingProposalCount(visitId, db = pool) {
   const { rows } = await db.query(
     `SELECT (SELECT count(*) FROM giniflow_rx_proposals

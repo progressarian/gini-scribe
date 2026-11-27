@@ -983,7 +983,6 @@ export async function syncLabResults(patientId, apptId, apptDate, labs, rawText 
   if (!patientId || labs.length === 0) return;
 
   const allowedDates = rawText ? collectNoteDates(rawText) : null;
-  if (allowedDates && apptDate) allowedDates.add(apptDate);
 
   await pool.query(`DELETE FROM lab_results WHERE appointment_id = $1 AND source = 'healthray'`, [
     apptId,
@@ -1023,7 +1022,8 @@ export async function syncLabResults(patientId, apptId, apptDate, labs, rawText 
     if (!lab.date) continue;
     const labDate = parseLabDate(lab.date, apptDate);
     if (!labDate) continue;
-    if (allowedDates && !allowedDates.has(labDate)) {
+    const saysToday = /\btoday\b/i.test(String(lab.date)) && labDate === apptDate;
+    if (allowedDates && !allowedDates.has(labDate) && !saysToday) {
       error(
         "syncLabResults",
         `Patient ${patientId} appt ${apptId}: dropping ${canonicalName}=${val} — date ${labDate} ` +
@@ -2058,25 +2058,24 @@ export async function syncVitalsFromExtraction(patientId, extractedData, recorde
   }
 }
 
+export const CANONICAL_TO_BIO = {
+  HbA1c: "hba1c",
+  FBS: "fg",
+  LDL: "ldl",
+  Triglycerides: "tg",
+  UACR: "uacr",
+  "Microalbumin/Creatinine Ratio": "uacr",
+  Microalbumin: "uacr",
+  "Creatinine, Serum": "creatinine",
+  Creatinine: "creatinine",
+  eGFR: "egfr",
+  TSH: "tsh",
+  Hemoglobin: "hb",
+  Haemoglobin: "hb",
+};
+
 export async function syncBiomarkersFromLatestLabs(patientId, apptId) {
   if (!patientId || !apptId) return;
-
-  // Map canonical_name → biomarker key (mirrors LAB_KEY_MAP in mappers.js)
-  const CANONICAL_TO_BIO = {
-    HbA1c: "hba1c",
-    FBS: "fg",
-    LDL: "ldl",
-    Triglycerides: "tg",
-    UACR: "uacr",
-    "Microalbumin/Creatinine Ratio": "uacr",
-    Microalbumin: "uacr",
-    "Creatinine, Serum": "creatinine",
-    Creatinine: "creatinine",
-    eGFR: "egfr",
-    TSH: "tsh",
-    Hemoglobin: "hb",
-    Haemoglobin: "hb",
-  };
 
   try {
     const { rows } = await pool.query(

@@ -290,7 +290,6 @@ import {
   sendCardToPatient,
 } from "../services/giniflow/pharmacyStation.js";
 import { generateMedicineCardPdf } from "../services/giniflow/medicineCardPdf.js";
-import { refuseWhileNotesWaiting, rxNotesWaitRow } from "../services/healthray/notesRead.js";
 import { getStationSummary } from "../services/giniflow/stationSummary.js";
 import {
   defaultPlan,
@@ -3659,7 +3658,7 @@ router.get("/giniflow/stations/rx/:visitId/print", printRxGate, async (req, res)
     const file = await fetchRxFile(req.params.visitId);
     res.set("Content-Type", file.contentType);
     res.set("Content-Disposition", `inline; filename="${encodeURIComponent(file.fileName)}"`);
-    res.set("Cache-Control", "private, max-age=60");
+    res.set("Cache-Control", file.draft ? "no-store" : "private, max-age=60");
     res.send(file.bytes);
   } catch (e) {
     if (e.reason) return res.status(e.status || 409).json({ error: e.message, reason: e.reason });
@@ -3669,7 +3668,6 @@ router.get("/giniflow/stations/rx/:visitId/print", printRxGate, async (req, res)
 
 router.get("/giniflow/stations/rx/:visitId/medicine-card.pdf", printRxGate, async (req, res) => {
   try {
-    refuseWhileNotesWaiting(await rxNotesWaitRow(req.params.visitId));
     const { pdf, fileName } = await generateMedicineCardPdf(req.params.visitId);
     res.set("Content-Type", "application/pdf");
     res.set("Content-Disposition", `inline; filename="${fileName}"`);

@@ -23,6 +23,11 @@ const can = (role, required) => {
 
 // [path, role, expected]
 const ROUTE_CASES = [
+  ["/api/ai/complete", "reception", true],
+  ["/api/ai/complete", "reception_admin", true],
+  ["/api/ai/agent", "reception", false],
+  ["/api/ai/clinical-intelligence", "reception", false],
+  ["/api/ai/complete", "obt", false],
   // Flow: the base any-of gate lets every flow role advance a visit...
   ["/api/flow/visits/12/advance", "nurse", true],
   ["/api/flow/visits/12/advance", "pharmacy", true],

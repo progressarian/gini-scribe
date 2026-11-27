@@ -1,10 +1,5 @@
 import pool from "../../config/db.js";
-import {
-  RX_NOTES_WAIT_COLUMNS,
-  RX_NOTES_WAIT_JOIN,
-  RX_NOTES_WAITING_SQL,
-  notesWaitOf,
-} from "../healthray/notesRead.js";
+import { RX_NOTES_WAIT_COLUMNS, RX_NOTES_WAIT_JOIN, notesWaitOf } from "../healthray/notesRead.js";
 import { advanceStatus, budgetColour, returnToQueue } from "./statusEngine.js";
 import { getSlaConfig, budgetLookup, getTestsPlacements } from "./board.js";
 import { buildCard } from "./medicineCard.js";
@@ -37,8 +32,7 @@ const QUEUE_SQL = `
          hold.tests_ready_at,
          cons.id AS consultation_id,
          rx.source AS rx_source,
-         (rx.id IS NOT NULL AND (rx.source <> 'visit' OR rxchg.last_change IS NULL OR rxchg.last_change <= rx.created_at)
-          AND NOT ${RX_NOTES_WAITING_SQL("rx.source")})
+         (rx.id IS NOT NULL AND (rx.source <> 'visit' OR rxchg.last_change IS NULL OR rxchg.last_change <= rx.created_at))
            AS has_printable_rx,
          ${RX_NOTES_WAIT_COLUMNS("rx.source")},
          (rx.id IS NOT NULL AND rx.source = 'visit' AND rxchg.last_change > rx.created_at) AS rx_stale,
@@ -117,7 +111,8 @@ const toRow = (row, budgetFor, now) => {
     doctorName: r.doctor_name,
     consultationId: r.consultation_id,
     medicineCount: r.medicine_count ?? 0,
-    canPrint: !!r.has_printable_rx || !!notesWaitOf(r, now)?.healthrayRxId,
+    canPrint: !!r.has_printable_rx || !!notesWaitOf(r, now)?.healthrayRxId || !r.consultation_id,
+    rxDraft: !r.consultation_id && !notesWaitOf(r, now)?.healthrayRxId,
     rxStale: !!r.rx_stale,
     rxFromHealthray: r.rx_source === "healthray" || !!notesWaitOf(r, now)?.healthrayRxId,
     notesWait: notesWaitOf(r, now),
@@ -237,7 +232,8 @@ export async function getRxPatient(visitId, db = pool) {
     doctorName: v.doctor_name,
     consultationId: v.consultation_id,
     canPrint:
-      (!!v.document_id && !v.rx_stale && !v.notes_waiting) || !!notesWaitOf(v)?.healthrayRxId,
+      (!!v.document_id && !v.rx_stale) || !!notesWaitOf(v)?.healthrayRxId || !v.consultation_id,
+    rxDraft: !v.consultation_id && !notesWaitOf(v)?.healthrayRxId,
     rxStale: !!v.rx_stale,
     rxFromHealthray: v.rx_source === "healthray" || !!notesWaitOf(v)?.healthrayRxId,
     notesWait: notesWaitOf(v),

@@ -73,7 +73,7 @@ export const PAGE_CAPABILITIES = {
   "/fu-gen": CAP.CLINICAL_WRITE,
   // Companion — separate layout, but the same clinical capture surface. The
   // prefix also covers its /record/:id, /capture/:id, /multi-capture/:id children.
-  "/companion": CAP.CLINICAL_WRITE,
+  "/companion": [CAP.CLINICAL_WRITE, CAP.FLOW_RECEPTION],
   // Vitals
   "/vitals": CAP.VITALS,
   // AI tools

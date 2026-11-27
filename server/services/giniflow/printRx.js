@@ -1,14 +1,16 @@
 import pool from "../../config/db.js";
 import { savePrescriptionForVisit, buildVisitPayloadFromDb } from "../prescriptionAutoSave.js";
+import { generatePrescriptionPdf } from "../prescriptionHtmlPdf.js";
 import {
   RX_NOTES_WAIT_COLUMNS,
   RX_NOTES_WAIT_JOIN,
   healthrayFallback,
-  refuseWhileNotesWaiting,
 } from "../healthray/notesRead.js";
+import { applyDraftMedicines } from "./draftRxMeds.js";
 
 const RX_FOR_VISIT_SQL = `
   SELECT v.id AS visit_id, v.visit_date::text AS visit_date, v.current_status,
+         v.appointment_id,
          p.id AS patient_id, p.name, p.file_no,
          cons.id AS consultation_id,
          d.id AS document_id, d.file_url, d.file_name, d.source AS doc_source,
@@ -45,13 +47,7 @@ export async function getPrintableRx(visitId, db = pool) {
   const fallback = healthrayFallback(r);
   if (fallback) return fallback;
 
-  if (!r.consultation_id) {
-    throw Object.assign(new Error("This visit has no consultation yet"), {
-      status: 409,
-      reason: "not_finalized",
-    });
-  }
-  refuseWhileNotesWaiting(r);
+  if (!r.consultation_id) return { ...r, draft: true };
   if (!r.document_id) {
     throw Object.assign(new Error("The prescription is still being prepared"), {
       status: 409,
@@ -75,8 +71,37 @@ export async function getPrintableRx(visitId, db = pool) {
   return r;
 }
 
+const rxFileName = (r, suffix = "") =>
+  `Rx_${String(r.name || "patient").replace(/[^a-zA-Z0-9._-]/g, "_")}_${r.file_no || r.patient_id}${suffix}.pdf`;
+
+async function buildDraftRxFile(r, db) {
+  const [payload, { rows: items }] = await Promise.all([
+    buildVisitPayloadFromDb(r.patient_id, { appointmentId: r.appointment_id }),
+    db.query(
+      `SELECT * FROM giniflow_rx_items WHERE visit_id = $1 ORDER BY sort_order, created_at`,
+      [r.visit_id],
+    ),
+  ]);
+  if (!payload) {
+    throw Object.assign(new Error("Could not build the draft prescription"), { status: 500 });
+  }
+  const pdf = await generatePrescriptionPdf({
+    ...payload,
+    activeMeds: applyDraftMedicines(payload.activeMeds, items),
+    consultations: [{ visit_date: r.visit_date, con_data: {} }, ...(payload.consultations || [])],
+    provisional: true,
+  });
+  return {
+    bytes: Buffer.from(pdf),
+    contentType: "application/pdf",
+    fileName: rxFileName(r, "_DRAFT"),
+    draft: true,
+  };
+}
+
 export async function fetchRxFile(visitId, db = pool) {
   const r = await getPrintableRx(visitId, db);
+  if (r.draft) return buildDraftRxFile(r, db);
 
   const { resolveDocumentUrl } = await import("../../routes/documents.js");
   const resolved = await resolveDocumentUrl(r.document_id);
@@ -84,9 +109,7 @@ export async function fetchRxFile(visitId, db = pool) {
     throw Object.assign(new Error(resolved.error), { status: resolved.status || 502 });
   }
 
-  const who = String(r.name || "patient").replace(/[^a-zA-Z0-9._-]/g, "_");
-  const suffix = r.doc_source === "healthray" ? "_HealthRay" : "";
-  const fileName = `Rx_${who}_${r.file_no || r.patient_id}${suffix}.pdf`;
+  const fileName = rxFileName(r, r.doc_source === "healthray" ? "_HealthRay" : "");
 
   if (resolved.buffer) {
     return {
@@ -142,7 +165,6 @@ export async function regenerateRx(visitId, db = pool) {
       ORDER BY id DESC LIMIT 1`,
     [consultationId],
   );
-  refuseWhileNotesWaiting((await db.query(RX_FOR_VISIT_SQL, [visitId])).rows[0]);
   if (existing.rows[0]?.source === "healthray") {
     throw Object.assign(
       new Error("This prescription came from HealthRay — it cannot be re-issued here"),

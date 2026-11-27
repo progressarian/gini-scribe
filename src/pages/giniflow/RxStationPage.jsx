@@ -299,7 +299,11 @@ function Pane({
                   className="st-btn"
                   onClick={() => onView(visitId, data.name, data.rxFromHealthray)}
                 >
-                  {data.rxFromHealthray ? "View HealthRay Rx" : "View prescription"}
+                  {data.rxFromHealthray
+                    ? "View HealthRay Rx"
+                    : data.rxDraft
+                      ? "View draft"
+                      : "View prescription"}
                 </button>
                 <button
                   className="st-btn st-btn-grn"
@@ -310,10 +314,12 @@ function Pane({
                     ? "🖨 Preparing…"
                     : data.rxFromHealthray
                       ? "🖨 Print HealthRay Rx"
-                      : "🖨 Print prescription"}
+                      : data.rxDraft
+                        ? "🖨 Print draft"
+                        : "🖨 Print prescription"}
                 </button>
               </>
-            ) : data?.notesWait ? null : (
+            ) : (
               /* No printable copy is two situations and only one of them had a
                  way out. A stale copy offered "re-issue"; a missing one read
                  "🖨 Preparing…", disabled, with nothing the desk could do but
@@ -340,13 +346,11 @@ function Pane({
               <>
                 <button
                   className="st-btn"
-                  disabled={!data.card?.counts?.total || !!data.notesWait}
+                  disabled={!data.card?.counts?.total}
                   title={
-                    data.notesWait
-                      ? "Wait for today's HealthRay notes — the card would show the last visit's medicines"
-                      : data.card?.counts?.total
-                        ? "The patient's medicines by time of day, to take home with the prescription"
-                        : "No medicines on the card"
+                    data.card?.counts?.total
+                      ? "The patient's medicines by time of day, to take home with the prescription"
+                      : "No medicines on the card"
                   }
                   onClick={() => onView(visitId, data.name, false, "card")}
                 >
@@ -354,14 +358,8 @@ function Pane({
                 </button>
                 <button
                   className="st-btn"
-                  disabled={!data.card?.counts?.total || !!printing || !!data.notesWait}
-                  title={
-                    data.notesWait
-                      ? "Wait for today's HealthRay notes — the card would show the last visit's medicines"
-                      : data.card?.counts?.total
-                        ? undefined
-                        : "No medicines on the card"
-                  }
+                  disabled={!data.card?.counts?.total || !!printing}
+                  title={data.card?.counts?.total ? undefined : "No medicines on the card"}
                   onClick={() => onPrint(visitId, data.name, "card")}
                 >
                   {printing === `${visitId}:card` ? "🖨 Preparing…" : "🖨 Print medicine card"}

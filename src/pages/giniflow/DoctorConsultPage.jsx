@@ -33,6 +33,7 @@ import StabilityChip from "../../components/giniflow/StabilityChip";
 import { clearDraftFields, readDraft, writeDraftNav } from "../../lib/consultDraft";
 import { fetchPrintableRx, printRxHref } from "../../queries/hooks/useGiniflowRx";
 import PdfViewerModal from "../../components/visit/PdfViewerModal";
+import PrintRxButton from "../../components/giniflow/PrintRxButton";
 import useFullscreen from "../../hooks/useFullscreen";
 import FullscreenButton from "../../components/giniflow/FullscreenButton";
 
@@ -511,6 +512,15 @@ export default function DoctorConsultPage() {
           >
             {printState?.phase === "preparing" ? "Preparing…" : "🖨 Save & Print"}
           </button>
+          {!consult.finalized && (
+            <PrintRxButton
+              visitId={visitId}
+              patientName={consult.name}
+              label="🖨 Print draft"
+              className="cnav-act"
+              onToast={showToast}
+            />
+          )}
         </nav>
 
         <div className="cbody">

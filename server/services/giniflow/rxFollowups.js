@@ -110,7 +110,7 @@ export async function getRxNotTaken(visitDate, q = null, db = pool) {
     status: r.current_status,
     explained: !!r.explained,
     reason: r.not_taken_at ? "not_taken" : "not_explained",
-    canPrint: (!!r.has_rx && !r.notes_waiting) || !!notesWaitOf(r)?.healthrayRxId,
+    canPrint: !!r.has_rx || !!notesWaitOf(r)?.healthrayRxId,
     notesWait: notesWaitOf(r),
     lastFollowup: r.last_action
       ? {

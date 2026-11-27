@@ -49,6 +49,7 @@ import ReportsList from "../../components/giniflow/ReportsList";
 import "../../styles/giniflow-station.css";
 import StabilityChip from "../../components/giniflow/StabilityChip";
 import StationNotice from "../../components/giniflow/StationNotice";
+import PrintRxButton from "../../components/giniflow/PrintRxButton";
 
 const initials = (name = "") =>
   name
@@ -1902,6 +1903,12 @@ export default function MoStationPage() {
                     ✓ Close — no doctor needed
                   </button>
                 )}
+                <PrintRxButton
+                  visitId={activeId}
+                  patientName={patient.name}
+                  className="st-btn st-btn-ghost"
+                  onToast={showToast}
+                />
                 {acts.note && <span className="mo-close-note">{acts.note}</span>}
               </div>
             </>

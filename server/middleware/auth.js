@@ -135,6 +135,7 @@ const ROUTE_CAPABILITIES = [
   ["/api/patient-block-status", CAP.PATIENT_READ],
   ["/api/rx-feedback", CAP.CLINICAL_WRITE],
   ["/api/ai", CAP.AI_TOOLS],
+  ["/api/ai/complete", [CAP.AI_TOOLS, CAP.FLOW_RECEPTION]],
   ["/api/genie-chats", CAP.AI_TOOLS],
   ["/api/genie-patients", CAP.AI_TOOLS],
   ["/api/app-patients", CAP.AI_TOOLS],

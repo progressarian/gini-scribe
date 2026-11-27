@@ -3,6 +3,7 @@ import { t as clipText } from "../../utils/helpers.js";
 import { SUPABASE_URL, SUPABASE_SERVICE_KEY, STORAGE_BUCKET } from "../../config/storage.js";
 import { storeReportObject } from "./labStation.js";
 import { assertNotHeld } from "./cancelHold.js";
+import { extractInBackground } from "./promote.js";
 
 const MIME_BY_EXT = {
   pdf: "application/pdf",
@@ -66,6 +67,7 @@ export async function addExtraReport(
     ],
   );
 
+  await extractInBackground(written[0].id, db);
   return { orderId, documentId: written[0].id, fileName: safeName, bytes };
 }
 

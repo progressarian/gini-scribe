@@ -70,7 +70,7 @@ export async function promoteVitals(giniflowVitalsId, db = pool) {
   return { promoted: true, vitalsId: written[0].id };
 }
 
-export async function promoteLabReport(orderId, db = pool) {
+export async function promoteLabReport(orderId, db = pool, { extract = true } = {}) {
   const { rows } = await db.query(
     `SELECT o.id, o.report_file_url, o.uploaded_at, v.patient_id,
             v.visit_date::text AS visit_date,
@@ -119,7 +119,20 @@ export async function promoteLabReport(orderId, db = pool) {
   );
 
   await db.query(`UPDATE giniflow_lab_orders SET promoted_at = NOW() WHERE id = $1`, [orderId]);
+  if (extract) await extractInBackground(written[0].id, db);
   return { promoted: true, documentId: written[0].id };
+}
+
+export async function extractInBackground(documentId, db = pool) {
+  await db.query(`UPDATE documents SET extracted_data = $1::jsonb WHERE id = $2`, [
+    JSON.stringify({ extraction_status: "pending" }),
+    documentId,
+  ]);
+  import("../../routes/documents.js")
+    .then(({ runServerExtraction }) => runServerExtraction(documentId, { skipIfNotPending: true }))
+    .catch((e) =>
+      console.error(`[giniflow promote] report extraction for doc ${documentId} failed:`, e),
+    );
 }
 
 export function promoteQuietly(fn, id) {
@@ -155,7 +168,7 @@ export async function backfillPromotions({ since = null } = {}, db = pool) {
   }
   for (const o of reports) {
     try {
-      if ((await promoteLabReport(o.id, db)).promoted) done.reports++;
+      if ((await promoteLabReport(o.id, db, { extract: false })).promoted) done.reports++;
     } catch (e) {
       done.failed++;
       console.warn("[giniflow promote] report", o.id, e.message);

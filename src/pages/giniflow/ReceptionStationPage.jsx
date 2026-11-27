@@ -94,6 +94,7 @@ import { labOnlyJourney, labOnlyKeepsStep, withProcedure } from "../../../shared
 import { homeStillNeeded } from "../../../shared/homeCollectors.js";
 import LabSiteControl from "../../components/giniflow/LabSiteControl";
 import { useLabSite } from "../../queries/hooks/useLabSite";
+import PrintRxButton from "../../components/giniflow/PrintRxButton";
 
 // Arrived and done. They stay on the floor list — the desk is asked about them
 // — but they are not in the building.
@@ -1624,6 +1625,12 @@ export function ArrivalsTab({
                 </button>
               )}
               <BillButton visitId={a.visitId} bills={bills} />
+              <PrintRxButton
+                visitId={a.visitId}
+                patientName={a.name}
+                className="st-btn st-btn-ghost"
+                onToast={onNote}
+              />
               {!FINISHED_STATUSES.includes(a.status) && (
                 <HomeSampleButton arrival={a} onHome={setHomeFor} />
               )}
